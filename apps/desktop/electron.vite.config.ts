@@ -27,8 +27,15 @@ export default defineConfig({
     root: ".",
     build: {
       outDir: "out/renderer",
-      rollupOptions: { input: resolve(__dirname, "index.html") },
+      rollupOptions: {
+        input: resolve(__dirname, "index.html"),
+        onwarn(warning, defaultHandler) {
+          if (warning.code === "SOURCEMAP_ERROR") return;
+          defaultHandler(warning);
+        },
+      },
       target: "esnext",
+      sourcemap: false,
     },
     optimizeDeps: {
       exclude: ["@nervosnetwork/ckb-light-client-js"],
