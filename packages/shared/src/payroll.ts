@@ -1,4 +1,5 @@
-import type { ChainId, Identified, PayeeAddress, Timestamped, TransactionHash } from "./types";
+import type { Identified, PayeeAddress, Timestamped, TransactionHash } from "./types";
+import type { ChainId } from "./chainIds";
 import type { FiatAmount, FxQuote, Money } from "./money";
 
 export interface PayeeProfile extends Identified, Timestamped {

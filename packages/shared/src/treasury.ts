@@ -1,4 +1,5 @@
-import type { ChainId, EvmAddress, Hex20, Identified, PayeeAddress, Timestamped, TransactionHash } from "./types";
+import type { EvmAddress, Hex20, Identified, PayeeAddress, Timestamped, TransactionHash } from "./types";
+import type { ChainId } from "./chainIds";
 
 export interface CkbMultisig {
   chain: "ckb:mainnet" | "ckb:testnet";

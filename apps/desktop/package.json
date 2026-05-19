@@ -17,14 +17,14 @@
     "dist:linux": "electron-vite build && electron-builder --linux"
   },
   "dependencies": {
-    "@chain-pay/shared": "workspace:*",
-    "@ckb-ccc/core": "^1.7.0",
+    "@chain-pay/shared": "*",
+    "@ckb-ccc/core": "^1.12.0",
     "@hookform/resolvers": "^3.9.0",
+    "@nervosnetwork/ckb-light-client-js": "^0.5.5",
     "@safe-global/protocol-kit": "^5.0.0",
     "@safe-global/api-kit": "^3.0.0",
     "@tanstack/react-query": "^5.59.0",
     "@tanstack/react-table": "^8.20.0",
-    "ckb-light-client-js": "^0.5.5",
     "clsx": "^2.1.1",
     "lucide-react": "^0.460.0",
     "react": "^19.0.0",
