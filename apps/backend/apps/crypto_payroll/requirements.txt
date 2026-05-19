@@ -1,0 +1,4 @@
+# Pinned during Phase 4. Frappe brings its own runtime deps; only add libraries the
+# crypto_payroll app needs directly.
+# requests is bundled by Frappe but listed here for explicit dependency declaration.
+requests>=2.31.0

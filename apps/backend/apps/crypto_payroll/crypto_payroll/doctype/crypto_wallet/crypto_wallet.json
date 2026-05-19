@@ -1,0 +1,26 @@
+{
+  "doctype": "DocType",
+  "name": "Crypto Wallet",
+  "module": "Crypto Payroll",
+  "engine": "InnoDB",
+  "naming_rule": "By fieldname",
+  "autoname": "field:label",
+  "track_changes": 1,
+  "fields": [
+    { "fieldname": "label",      "fieldtype": "Data",        "label": "Label",        "reqd": 1, "unique": 1 },
+    { "fieldname": "chain",      "fieldtype": "Select",      "label": "Chain",        "reqd": 1,
+      "options": "ckb:mainnet\nckb:testnet\nevm:1\nevm:10\nevm:137\nevm:8453\nevm:42161" },
+    { "fieldname": "address",    "fieldtype": "Data",        "label": "Address",      "reqd": 1 },
+    { "fieldname": "kind",       "fieldtype": "Select",      "label": "Wallet kind",  "reqd": 1,
+      "options": "Multisig (CKB system)\nMultisig (CKB omnilock)\nSafe (EVM)" },
+    { "fieldname": "config_json","fieldtype": "Long Text",   "label": "Multisig config (JSON)" },
+    { "fieldname": "purpose",    "fieldtype": "Select",      "label": "Purpose",
+      "options": "Payroll Treasury\nHot Operating\nCold Reserve\nOther" },
+    { "fieldname": "active",     "fieldtype": "Check",       "label": "Active",       "default": 1 },
+    { "fieldname": "notes",      "fieldtype": "Small Text",  "label": "Notes" }
+  ],
+  "permissions": [
+    { "role": "System Manager", "read": 1, "write": 1, "create": 1, "delete": 1 },
+    { "role": "HR Manager",     "read": 1 }
+  ]
+}

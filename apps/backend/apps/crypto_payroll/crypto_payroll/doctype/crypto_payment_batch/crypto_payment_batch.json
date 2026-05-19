@@ -1,0 +1,27 @@
+{
+  "doctype": "DocType",
+  "name": "Crypto Payment Batch",
+  "module": "Crypto Payroll",
+  "engine": "InnoDB",
+  "naming_rule": "Expression (old style)",
+  "autoname": "format:BATCH-{YY}{MM}-{####}",
+  "track_changes": 1,
+  "is_submittable": 1,
+  "fields": [
+    { "fieldname": "label",         "fieldtype": "Data",  "label": "Label",         "reqd": 1 },
+    { "fieldname": "treasury",      "fieldtype": "Link",  "options": "Crypto Wallet", "label": "Treasury", "reqd": 1 },
+    { "fieldname": "cycle_start",   "fieldtype": "Date",  "label": "Cycle start",   "reqd": 1 },
+    { "fieldname": "cycle_end",     "fieldtype": "Date",  "label": "Cycle end",     "reqd": 1 },
+    { "fieldname": "fx_snapshot",   "fieldtype": "Long Text", "label": "FX snapshot JSON" },
+    { "fieldname": "state",         "fieldtype": "Select","label": "State",
+      "options": "draft\ncalculated\napproved\nbroadcasted\nconfirmed\nfailed\ncancelled",
+      "default": "draft", "reqd": 1 },
+    { "fieldname": "pending_tx_id", "fieldtype": "Data",  "label": "Pending tx id (multisig coordinator)" },
+    { "fieldname": "tx_hash",       "fieldtype": "Data",  "label": "Broadcast tx hash" },
+    { "fieldname": "journal_posted","fieldtype": "Check", "label": "Accounting journal posted", "default": 0 }
+  ],
+  "permissions": [
+    { "role": "System Manager", "read": 1, "write": 1, "create": 1, "submit": 1, "delete": 1 },
+    { "role": "HR Manager",     "read": 1, "write": 1, "create": 1, "submit": 1 }
+  ]
+}

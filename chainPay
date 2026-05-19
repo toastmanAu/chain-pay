@@ -1,0 +1,639 @@
+
+
+I want to build a front end payroll/accounting application suite that handles crypto payments natively. Should accept some fiat ramp third party integration but natively handle Bitcoin, Ethereum, Solana and Nervos Network. Brainstorm plan time. Are there any open source payroll applications that would be a good fork candidate to build from?
+
+
+Yes. Best fork candidates:
+
+
+1. ERPNext + Frappe HR — strongest candidate
+Best fit if you want a real payroll/accounting suite, not just invoices. ERPNext has accounting, HR, expenses, assets, purchasing, sales, and financial reporting; Frappe HR adds payroll, taxation, employee lifecycle, leave, attendance, expense claims, etc. 
+Why fork it: mature ERP foundation, Python/Frappe framework, GPL, already models employees, salary slips, journals, tax components.
+Crypto angle: add crypto wallets/accounts as first-class payment rails, then post every crypto payout as accounting journal entries.
+
+
+2. Bigcapital — best modern accounting core
+Bigcapital is open-source accounting/inventory software focused on bookkeeping automation, financial statements, reports, and business finance workflows. 
+Why fork it: cleaner modern product surface than ERPNext.
+Weakness: not a full payroll/HR stack yet, so you’d need to build payroll more heavily.
+
+
+3. Akaunting — good small-business accounting base
+Akaunting is Laravel/Vue/Tailwind, has invoices, bills, expenses, REST API, modular app-store style architecture. 
+Why fork it: likely easier frontend/product iteration.
+Weakness: payroll depth may be limited; better for “crypto accounting + contractor payments” than serious payroll.
+
+
+4. Dolibarr — pragmatic SMB ERP
+Dolibarr is a modular open-source ERP/CRM for contacts, suppliers, invoices, orders, stocks, agenda, and accounting. 
+Why fork it: stable, modular, SMB friendly.
+Weakness: PHP legacy feel; less attractive if you want a slick crypto-native UI.
+
+
+5. Odoo Community + OCA payroll — powerful but licensing/module complexity
+Odoo has payroll docs and the Community/Enterprise split; OCA provides community payroll modules under AGPL-style licensing. 
+Why fork it: huge ecosystem.
+Weakness: payroll/accounting features can drift into Enterprise or third-party module complexity.
+
+
+My pick: ERPNext/Frappe HR as the backend/accounting/payroll engine, with a custom crypto-native frontend. Build your suite as a new “Crypto Payroll” Frappe app rather than hard-forking everything initially.
+
+
+Core modules I’d plan:
+
+
+Payroll core: employees, contractors, salary rules, payslips, tax withholding, super/benefits, reimbursements.
+
+
+Crypto treasury: BTC, ETH, SOL, CKB wallets; hot/cold wallet separation; xpub/watch-only mode; address book; approval queues.
+
+
+Payment engine: batch payroll runs, per-worker preferred asset, fiat-denominated salary converted at execution, transaction status tracking.
+
+
+Accounting bridge: every payout creates journal entries: salary expense, tax liability, super/benefit liability, crypto asset movement, FX gain/loss.
+
+
+Compliance layer: payslip fiat value, crypto value, timestamped FX rate, transaction hash, network fee, audit log.
+
+
+Third-party fiat ramps: Stripe, Coinbase Commerce, Transak, MoonPay, Banxa, or regional partners later. Keep this as an adapter layer, not core logic.
+
+
+For MVP: contractor/vendor crypto payouts + accounting export first. Full employee payroll compliance is the hard part.
+
+
+
+Give me a full featured scaffold I can feed a coding agent on my pc to start building. Run with your recommendations on fork candidate. What’s the most universal front end for Mac/windows/linux compatibility. My stack leans toward react based generally.
+
+
+For maximum Mac/Windows/Linux compatibility with React, use:
+
+React + Vite + TypeScript as the core web app, then package it with Electron for desktop. Electron bundles Chromium/Node and runs across macOS, Windows, and Linux; Tauri is leaner and excellent, but Electron is still the most universal/predictable target. Tauri supports any frontend and cross-platform builds too, so keep the app shell abstract enough to swap later.  
+
+Backend recommendation: ERPNext/Frappe HR base, extended via a custom Frappe app rather than a hard fork at first. ERPNext is GPL-3.0, open-source, and already covers accounting/HR/payroll foundations.  
+
+PROJECT: Crypto-native Payroll & Accounting Suite
+
+
+GOAL:
+
+Build a React/Electron frontend and Frappe/ERPNext backend extension for a payroll/accounting suite that natively supports Bitcoin, Ethereum, Solana, and Nervos CKB payments.
+
+
+PRIMARY STACK:
+
+- Frontend: React + Vite + TypeScript
+
+- Desktop shell: Electron
+
+- UI: Tailwind + shadcn/ui
+
+- State: TanStack Query + Zustand
+
+- Forms: React Hook Form + Zod
+
+- Charts/tables: TanStack Table + Recharts
+
+- Backend: ERPNext + Frappe HR + custom Frappe app named crypto_payroll
+
+- DB: MariaDB via Frappe
+
+- Queue/jobs: Frappe background jobs / Redis
+
+- Wallet integrations: adapter-based architecture
+
+- First networks: BTC, ETH, SOL, CKB
+
+- Fiat ramp: adapter placeholder layer
+
+
+REPO STRUCTURE:
+
+
+crypto-payroll-suite/
+
+  apps/
+
+    desktop/
+
+      package.json
+
+      electron/
+
+        main.ts
+
+        preload.ts
+
+      src/
+
+        main.tsx
+
+        app/
+
+        routes/
+
+        components/
+
+        features/
+
+          dashboard/
+
+          payroll/
+
+          employees/
+
+          contractors/
+
+          wallets/
+
+          treasury/
+
+          payments/
+
+          accounting/
+
+          compliance/
+
+          settings/
+
+        lib/
+
+          api/
+
+          auth/
+
+          chains/
+
+          formatters/
+
+          validation/
+
+        stores/
+
+        types/
+
+      vite.config.ts
+
+      tailwind.config.ts
+
+
+    backend/
+
+      frappe-bench/
+
+      apps/
+
+        crypto_payroll/
+
+          crypto_payroll/
+
+            doctype/
+
+              crypto_wallet/
+
+              crypto_account/
+
+              crypto_payee_profile/
+
+              crypto_payment_batch/
+
+              crypto_payment/
+
+              crypto_transaction/
+
+              crypto_exchange_rate/
+
+              crypto_network_fee/
+
+              crypto_audit_log/
+
+              fiat_ramp_provider/
+
+              chain_adapter_config/
+
+            api/
+
+              payroll.py
+
+              wallets.py
+
+              payments.py
+
+              accounting.py
+
+              exchange_rates.py
+
+              compliance.py
+
+            services/
+
+              chains/
+
+                base.py
+
+                bitcoin.py
+
+                ethereum.py
+
+                solana.py
+
+                nervos.py
+
+              accounting_bridge.py
+
+              payout_engine.py
+
+              audit.py
+
+              pricing.py
+
+              risk.py
+
+            hooks.py
+
+
+  packages/
+
+    shared/
+
+      src/
+
+        types/
+
+        schemas/
+
+        chainIds.ts
+
+        money.ts
+
+        payroll.ts
+
+
+  docs/
+
+    architecture.md
+
+    accounting-model.md
+
+    crypto-payment-flow.md
+
+    security-model.md
+
+    api-contract.md
+
+    mvp-roadmap.md
+
+
+  docker/
+
+    docker-compose.yml
+
+    frappe.Dockerfile
+
+
+  .env.example
+
+  README.md
+
+MVP SCOPE:
+
+
+1. Frontend shell
+
+- Electron desktop app
+
+- Login screen
+
+- Organisation switcher
+
+- Dashboard
+
+- Sidebar navigation
+
+- Dark mode
+
+- API client wired to Frappe backend
+
+
+2. Backend foundation
+
+- Install ERPNext + Frappe HR
+
+- Create custom Frappe app: crypto_payroll
+
+- Add DocTypes for wallets, payment batches, crypto transactions, exchange rates, payee profiles, and audit logs
+
+- Expose REST endpoints for frontend
+
+
+3. Payroll payment model
+
+- Employee/contractor has payout preferences:
+
+  - fiat salary amount
+
+  - preferred crypto asset
+
+  - preferred network
+
+  - wallet address
+
+  - optional split payments
+
+- Payroll batch produces:
+
+  - gross amount
+
+  - tax/withholding placeholders
+
+  - net fiat amount
+
+  - FX conversion
+
+  - crypto amount
+
+  - network fee estimate
+
+  - approval status
+
+  - transaction hash after execution
+
+
+4. Crypto support architecture
+
+- Do not hardcode chain logic into payroll.
+
+- Build chain adapters:
+
+
+interface ChainAdapter {
+
+  getBalance(account)
+
+  validateAddress(address)
+
+  estimateFee(payment)
+
+  createUnsignedTransaction(payment)
+
+  broadcastTransaction(signedTx)
+
+  getTransactionStatus(txHash)
+
+}
+
+
+Adapters:
+
+- BitcoinAdapter
+
+- EthereumAdapter
+
+- SolanaAdapter
+
+- NervosAdapter
+
+
+5. Accounting bridge
+
+Each crypto payroll payment must generate accounting records:
+
+- Debit salary/wage expense
+
+- Credit crypto treasury asset account
+
+- Record network fee expense
+
+- Record FX gain/loss when applicable
+
+- Store timestamped exchange rate
+
+- Store transaction hash and chain metadata
+
+
+6. Security model
+
+- MVP should support watch-only wallets first
+
+- Do not store private keys in v1
+
+- Manual signing flow first
+
+- Later add:
+
+  - hardware wallet signing
+
+  - multisig treasury
+
+  - MPC/custody provider
+
+  - role-based approval workflow
+
+
+7. Payment lifecycle
+
+Statuses:
+
+- draft
+
+- calculated
+
+- pending_approval
+
+- approved
+
+- awaiting_signature
+
+- broadcasted
+
+- confirming
+
+- confirmed
+
+- failed
+
+- cancelled
+
+
+8. Screens to build
+
+- Dashboard
+
+- Employees/Contractors
+
+- Payee crypto profiles
+
+- Payroll runs
+
+- Payment batch detail
+
+- Treasury wallets
+
+- Crypto transactions
+
+- Exchange rates
+
+- Accounting journal preview
+
+- Compliance/audit export
+
+- Settings/network adapters
+
+
+9. API endpoints
+
+Create backend endpoints:
+
+
+GET /api/method/crypto_payroll.api.wallets.list_wallets
+
+POST /api/method/crypto_payroll.api.wallets.create_wallet
+
+POST /api/method/crypto_payroll.api.wallets.validate_address
+
+
+GET /api/method/crypto_payroll.api.payroll.list_batches
+
+POST /api/method/crypto_payroll.api.payroll.create_batch
+
+POST /api/method/crypto_payroll.api.payroll.calculate_batch
+
+POST /api/method/crypto_payroll.api.payroll.approve_batch
+
+
+POST /api/method/crypto_payroll.api.payments.prepare_payment
+
+POST /api/method/crypto_payroll.api.payments.mark_signed
+
+POST /api/method/crypto_payroll.api.payments.broadcast
+
+GET /api/method/crypto_payroll.api.payments.status
+
+
+GET /api/method/crypto_payroll.api.accounting.preview_journal
+
+POST /api/method/crypto_payroll.api.accounting.post_journal
+
+
+GET /api/method/crypto_payroll.api.exchange_rates.latest
+
+POST /api/method/crypto_payroll.api.exchange_rates.refresh
+
+
+10. First implementation order
+
+PHASE 1:
+
+- Scaffold React/Electron app
+
+- Scaffold Frappe crypto_payroll app
+
+- Add mocked API responses
+
+- Build screens with fake data
+
+
+PHASE 2:
+
+- Add real Frappe DocTypes
+
+- Wire frontend API client
+
+- Create crypto payee profiles
+
+- Create payroll batch calculator
+
+
+PHASE 3:
+
+- Add accounting journal preview
+
+- Add manual transaction hash entry
+
+- Add transaction status tracking
+
+
+PHASE 4:
+
+- Add real chain adapters one by one:
+
+  1. Bitcoin watch-only + manual broadcast
+
+  2. Ethereum RPC support
+
+  3. Solana RPC support
+
+  4. Nervos CKB RPC support
+
+
+PHASE 5:
+
+- Add signing integrations
+
+- Add fiat ramp provider adapter
+
+- Add compliance exports
+
+Agent instruction:
+
+You are building the initial scaffold for a crypto-native payroll/accounting suite.
+
+
+Use React + Vite + TypeScript for the frontend and Electron for desktop packaging. Create a clean modular frontend using Tailwind, shadcn/ui-style components, TanStack Query, Zustand, React Hook Form, and Zod.
+
+
+Assume the backend is ERPNext/Frappe HR extended by a custom Frappe app called crypto_payroll. For now, create frontend API clients and mocked backend responses. Also create backend folder scaffolding, DocType placeholder JSON files, Python service modules, and API method stubs.
+
+
+Do not implement private-key custody. The MVP must use watch-only/manual-signing assumptions.
+
+
+Prioritise:
+
+1. clean architecture
+
+2. type-safe shared schemas
+
+3. realistic payroll/payment/accounting domain models
+
+4. adapter-based crypto network support
+
+5. an attractive desktop-ready UI
+
+
+Generate:
+
+- full repo structure
+
+- package.json files
+
+- Vite config
+
+- Electron main/preload files
+
+- React routes
+
+- sidebar layout
+
+- mocked dashboards
+
+- typed API client
+
+- shared TypeScript domain types
+
+- backend Python stubs
+
+- README with setup commands
+
+- docs/architecture.md
+
+- docs/mvp-roadmap.md
+
+
+Use fake but realistic data for BTC, ETH, SOL, and CKB payment batches.
+
+My build bias: Electron first, Tauri later if size/security becomes a bigger priority.
+
+Sent from my iPhone
+

@@ -1,0 +1,28 @@
+{
+  "doctype": "DocType",
+  "name": "Crypto Transaction",
+  "module": "Crypto Payroll",
+  "engine": "InnoDB",
+  "naming_rule": "Expression (old style)",
+  "autoname": "format:TX-{####}",
+  "track_changes": 1,
+  "fields": [
+    { "fieldname": "chain",          "fieldtype": "Data",  "label": "Chain", "reqd": 1 },
+    { "fieldname": "tx_hash",        "fieldtype": "Data",  "label": "Transaction hash", "reqd": 1, "unique": 1 },
+    { "fieldname": "treasury",       "fieldtype": "Link",  "options": "Crypto Wallet", "label": "Treasury" },
+    { "fieldname": "batch",          "fieldtype": "Link",  "options": "Crypto Payment Batch", "label": "Batch" },
+    { "fieldname": "block_number",   "fieldtype": "Data",  "label": "Block number" },
+    { "fieldname": "confirmed_at",   "fieldtype": "Datetime", "label": "Confirmed at" },
+    { "fieldname": "amount_native",  "fieldtype": "Data",  "label": "Amount (native unit)" },
+    { "fieldname": "asset_symbol",   "fieldtype": "Data",  "label": "Asset symbol" },
+    { "fieldname": "network_fee",    "fieldtype": "Data",  "label": "Network fee (native unit)" },
+    { "fieldname": "fx_rate",        "fieldtype": "Data",  "label": "FX rate at confirm" },
+    { "fieldname": "fiat_value",     "fieldtype": "Data",  "label": "Fiat value at confirm" },
+    { "fieldname": "fiat_currency",  "fieldtype": "Data",  "label": "Fiat currency" }
+  ],
+  "permissions": [
+    { "role": "System Manager", "read": 1, "write": 1, "create": 1 },
+    { "role": "HR Manager",     "read": 1 },
+    { "role": "Accounts User",  "read": 1 }
+  ]
+}

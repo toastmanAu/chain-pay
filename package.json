@@ -1,0 +1,22 @@
+{
+  "name": "chain-pay",
+  "version": "0.1.0-phase0",
+  "private": true,
+  "description": "Crypto-native payroll & accounting suite — CKB + EVM multisig, embedded SQLite light client",
+  "license": "GPL-3.0-or-later",
+  "workspaces": [
+    "apps/desktop",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev:desktop": "npm --workspace apps/desktop run dev",
+    "build:desktop": "npm --workspace apps/desktop run build",
+    "build:shared": "npm --workspace packages/shared run build",
+    "typecheck": "npm --workspaces --if-present run typecheck",
+    "lint": "npm --workspaces --if-present run lint"
+  },
+  "engines": {
+    "node": ">=20.11.0",
+    "npm": ">=10.0.0"
+  }
+}

@@ -1,0 +1,17 @@
+include MANIFEST.in
+include requirements.txt
+include *.json
+include *.md
+include *.py
+include *.txt
+recursive-include crypto_payroll *.css
+recursive-include crypto_payroll *.csv
+recursive-include crypto_payroll *.html
+recursive-include crypto_payroll *.ico
+recursive-include crypto_payroll *.js
+recursive-include crypto_payroll *.json
+recursive-include crypto_payroll *.md
+recursive-include crypto_payroll *.png
+recursive-include crypto_payroll *.py
+recursive-include crypto_payroll *.svg
+recursive-include crypto_payroll *.txt

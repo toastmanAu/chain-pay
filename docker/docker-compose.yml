@@ -1,0 +1,48 @@
+# Phase 4 — Frappe + ERPNext + Frappe HR + crypto_payroll
+# Not used in Phase 0/1/2/3. Stand up only when wiring the accounting bridge.
+
+services:
+  frappe:
+    build:
+      context: .
+      dockerfile: frappe.Dockerfile
+    container_name: chainpay-frappe
+    ports:
+      - "8000:8000"
+    volumes:
+      - frappe-bench:/workspace/frappe-bench
+      - ../apps/backend/apps:/workspace/apps:ro
+    environment:
+      MARIADB_HOST: mariadb
+      REDIS_CACHE: redis://redis:6379/0
+      REDIS_QUEUE: redis://redis:6379/1
+      REDIS_SOCKETIO: redis://redis:6379/2
+    depends_on:
+      - mariadb
+      - redis
+
+  mariadb:
+    image: mariadb:11
+    container_name: chainpay-mariadb
+    restart: unless-stopped
+    environment:
+      MARIADB_ROOT_PASSWORD: ${MARIADB_ROOT_PASSWORD:-frappe}
+      MARIADB_DATABASE: frappe
+    volumes:
+      - mariadb-data:/var/lib/mysql
+    command: >
+      --character-set-server=utf8mb4
+      --collation-server=utf8mb4_unicode_ci
+      --skip-character-set-client-handshake
+
+  redis:
+    image: redis:7-alpine
+    container_name: chainpay-redis
+    restart: unless-stopped
+    volumes:
+      - redis-data:/data
+
+volumes:
+  frappe-bench:
+  mariadb-data:
+  redis-data:
