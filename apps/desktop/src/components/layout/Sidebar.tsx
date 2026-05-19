@@ -1,6 +1,6 @@
 import { NavLink } from "react-router-dom";
 import { LayoutDashboard, Vault, Calendar, Send, Users, Settings as Cog } from "lucide-react";
-import { useSyncStore } from "@/stores/sync";
+import { useSyncStore, type CkbSyncState } from "@/stores/sync";
 
 const items = [
   { to: "/dashboard", icon: LayoutDashboard, label: "Dashboard" },
@@ -18,7 +18,7 @@ export function Sidebar() {
     <aside className="flex w-60 shrink-0 flex-col border-r border-surface-hi bg-surface">
       <div className="border-b border-surface-hi px-5 py-4">
         <div className="text-lg font-semibold tracking-tight">ChainPay</div>
-        <div className="text-xs text-fg-muted">v0.1.0 · Phase 0</div>
+        <div className="text-xs text-fg-muted">v0.1.0 · Phase 1</div>
       </div>
       <nav className="flex-1 space-y-0.5 px-3 py-4">
         {items.map(({ to, icon: Icon, label }) => (
@@ -39,16 +39,30 @@ export function Sidebar() {
       <div className="border-t border-surface-hi px-5 py-3 text-xs">
         <div className="flex items-center justify-between">
           <span className="text-fg-muted">CKB light client</span>
-          <span className={ckb.synced ? "text-accent" : "text-warn"}>
-            {ckb.synced ? "synced" : ckb.started ? "syncing" : "stopped"}
-          </span>
+          <span className={statusTone(ckb)}>{statusLabel(ckb)}</span>
         </div>
         {ckb.started ? (
-          <div className="mt-1 text-fg-muted">
-            tip {String(ckb.tipBlockNumber)} · peers {ckb.peers}
+          <div className="mt-1 text-fg-muted tabular-nums">
+            tip {ckb.tipBlockNumber.toString()} · peers {ckb.peers}
           </div>
         ) : null}
       </div>
     </aside>
   );
+}
+
+function statusLabel(ckb: CkbSyncState): string {
+  if (ckb.lastError) return "error";
+  if (ckb.starting) return "starting";
+  if (!ckb.started) return "stopped";
+  if (ckb.peers === 0) return "connecting";
+  return "running";
+}
+
+function statusTone(ckb: CkbSyncState): string {
+  if (ckb.lastError) return "text-danger";
+  if (ckb.starting) return "text-warn";
+  if (!ckb.started) return "text-fg-muted";
+  if (ckb.peers === 0) return "text-warn";
+  return "text-accent";
 }

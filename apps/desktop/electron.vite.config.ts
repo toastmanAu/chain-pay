@@ -28,6 +28,13 @@ export default defineConfig({
     build: {
       outDir: "out/renderer",
       rollupOptions: { input: resolve(__dirname, "index.html") },
+      target: "esnext",
+    },
+    optimizeDeps: {
+      exclude: ["@nervosnetwork/ckb-light-client-js"],
+    },
+    worker: {
+      format: "es",
     },
     resolve: {
       alias: {
@@ -36,6 +43,12 @@ export default defineConfig({
       },
     },
     plugins: [react(), tailwindcss()],
-    server: { port: 5173 },
+    server: {
+      port: 5173,
+      headers: {
+        "Cross-Origin-Embedder-Policy": "require-corp",
+        "Cross-Origin-Opener-Policy": "same-origin",
+      },
+    },
   },
 });

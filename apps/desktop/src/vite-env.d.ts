@@ -9,3 +9,13 @@ interface ImportMetaEnv {
 interface ImportMeta {
   readonly env: ImportMetaEnv;
 }
+
+import type { PlatformApi } from "../electron/preload/index";
+
+declare global {
+  interface Window {
+    platform: PlatformApi;
+  }
+}
+
+export {};

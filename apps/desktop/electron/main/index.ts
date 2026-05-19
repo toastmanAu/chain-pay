@@ -1,11 +1,21 @@
-import { app, BrowserWindow, ipcMain, shell } from "electron";
+import { app, BrowserWindow, session, shell } from "electron";
 import { join } from "node:path";
-import { LightClientHost } from "./light-client-host";
 
 const isDev = !app.isPackaged;
 
 let mainWindow: BrowserWindow | null = null;
-const lightClient = new LightClientHost();
+
+function applyCrossOriginIsolation(): void {
+  session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
+    callback({
+      responseHeaders: {
+        ...details.responseHeaders,
+        "Cross-Origin-Embedder-Policy": ["require-corp"],
+        "Cross-Origin-Opener-Policy": ["same-origin"],
+      },
+    });
+  });
+}
 
 async function createWindow(): Promise<void> {
   mainWindow = new BrowserWindow({
@@ -38,23 +48,8 @@ async function createWindow(): Promise<void> {
   }
 }
 
-function registerIpc(): void {
-  ipcMain.handle("ckb:start", (_, network: "mainnet" | "testnet") => lightClient.start(network));
-  ipcMain.handle("ckb:stop", () => lightClient.stop());
-  ipcMain.handle("ckb:status", () => lightClient.status());
-  ipcMain.handle("ckb:tip-header", () => lightClient.tipHeader());
-  ipcMain.handle("ckb:get-cells-capacity", (_, searchKey) => lightClient.getCellsCapacity(searchKey));
-  ipcMain.handle("ckb:get-transactions", (_, searchKey, order, limit, cursor) =>
-    lightClient.getTransactions(searchKey, order, limit, cursor),
-  );
-
-  lightClient.on("sync-progress", (progress) => {
-    mainWindow?.webContents.send("ckb:sync-progress", progress);
-  });
-}
-
 app.whenReady().then(async () => {
-  registerIpc();
+  applyCrossOriginIsolation();
   await createWindow();
 
   app.on("activate", () => {
@@ -62,11 +57,6 @@ app.whenReady().then(async () => {
   });
 });
 
-app.on("window-all-closed", async () => {
-  await lightClient.stop();
+app.on("window-all-closed", () => {
   if (process.platform !== "darwin") app.quit();
-});
-
-app.on("before-quit", async () => {
-  await lightClient.stop();
 });

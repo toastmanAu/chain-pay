@@ -1,54 +1,78 @@
 import { create } from "zustand";
+import { lightClient } from "@/lib/light-client/client";
+import type { CkbNetwork } from "@/lib/light-client/network-configs";
 
-interface CkbSyncState {
+export interface CkbSyncState {
   started: boolean;
-  network: "mainnet" | "testnet" | null;
+  starting: boolean;
+  network: CkbNetwork | null;
   tipBlockNumber: bigint;
-  syncedBlockNumber: bigint;
+  tipBlockTimestampMs: bigint;
   peers: number;
-  synced: boolean;
+  lastPolledAt: number;
+  startedAt: number;
+  lastError: string | null;
 }
 
 interface SyncStore {
   ckb: CkbSyncState;
-  startCkb: (network: "mainnet" | "testnet") => Promise<void>;
+  startCkb: (network: CkbNetwork) => Promise<void>;
   stopCkb: () => Promise<void>;
 }
 
 const initialCkb: CkbSyncState = {
   started: false,
+  starting: false,
   network: null,
   tipBlockNumber: 0n,
-  syncedBlockNumber: 0n,
+  tipBlockTimestampMs: 0n,
   peers: 0,
-  synced: false,
+  lastPolledAt: 0,
+  startedAt: 0,
+  lastError: null,
 };
 
-export const useSyncStore = create<SyncStore>((set) => {
-  if (typeof window !== "undefined" && window.ckb) {
-    window.ckb.onSyncProgress((p) => {
-      set({
-        ckb: {
-          started: true,
-          network: p.network,
-          tipBlockNumber: p.tipBlockNumber,
-          syncedBlockNumber: p.syncedBlockNumber,
-          peers: p.peers,
-          synced: p.syncedBlockNumber >= p.tipBlockNumber && p.tipBlockNumber > 0n,
-        },
-      });
-    });
-  }
+const host = lightClient();
 
-  return {
-    ckb: initialCkb,
-    startCkb: async (network) => {
-      await window.ckb.start(network);
-      set((s) => ({ ckb: { ...s.ckb, started: true, network } }));
+host.onSnapshot((snapshot) => {
+  useSyncStore.setState((state) => ({
+    ckb: {
+      ...state.ckb,
+      started: true,
+      starting: false,
+      network: snapshot.network,
+      tipBlockNumber: snapshot.tipBlockNumber,
+      tipBlockTimestampMs: snapshot.tipBlockTimestampMs,
+      peers: snapshot.peers,
+      lastPolledAt: snapshot.lastPolledAt,
+      startedAt: snapshot.startedAt,
+      lastError: null,
     },
-    stopCkb: async () => {
-      await window.ckb.stop();
-      set({ ckb: initialCkb });
-    },
-  };
+  }));
 });
+
+host.onError((error) => {
+  useSyncStore.setState((state) => ({
+    ckb: { ...state.ckb, lastError: error.message },
+  }));
+});
+
+export const useSyncStore = create<SyncStore>((set) => ({
+  ckb: initialCkb,
+  startCkb: async (network) => {
+    if (host.isStarted() && host.currentNetwork() === network) return;
+    set((state) => ({ ckb: { ...state.ckb, starting: true, lastError: null } }));
+    try {
+      await host.start(network);
+      set((state) => ({ ckb: { ...state.ckb, started: true, starting: false, network } }));
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : "failed to start light client";
+      set((state) => ({ ckb: { ...state.ckb, starting: false, lastError: message } }));
+      throw error;
+    }
+  },
+  stopCkb: async () => {
+    await host.stop();
+    set({ ckb: initialCkb });
+  },
+}));
