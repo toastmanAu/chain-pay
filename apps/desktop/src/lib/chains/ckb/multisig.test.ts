@@ -143,7 +143,9 @@ function bytesToHex(bytes: Uint8Array): string {
 }
 
 function blake160(data: Uint8Array): string {
-  return new HasherCkb(20).update(data).digest();
+  // CKB blake160 = first 20 bytes of blake2b-256, NOT blake2b(outlen=20).
+  const full = new HasherCkb(32).update(data).digest();
+  return "0x" + full.slice(2, 42);
 }
 
 function u64LE(value: bigint): Uint8Array {

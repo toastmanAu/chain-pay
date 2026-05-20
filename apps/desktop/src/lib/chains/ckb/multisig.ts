@@ -2,6 +2,18 @@ import { HasherCkb } from "@ckb-ccc/core";
 import type { Hex20 } from "@chain-pay/shared";
 
 /**
+ * Canonical CKB blake160 = first 20 bytes of blake2b-256 (with "ckb-default-hash"
+ * personalization). NOT `blake2b(outlen=20)` — those produce different hashes
+ * because digest_length is mixed into blake2b's IV.
+ *
+ * Matches ckb-sdk-rust util::blake160 and the in-script multisig hash check.
+ */
+function blake160Hex(data: Uint8Array): Hex20 {
+  const full = new HasherCkb(32).update(data).digest();
+  return ("0x" + full.slice(2, 42)) as Hex20;
+}
+
+/**
  * secp256k1_blake160_multisig_all configuration.
  *
  *   multisig_script = S(1) | R(1) | M(1) | N(1) | PubKeyHash1(20) | ... | PubKeyHashN(20)
@@ -51,7 +63,7 @@ export function encodeMultisigScript(cfg: CkbMultisigConfig): EncodedMultisigScr
     multisigScript.set(hexToBytes(hash), 4 + i * PUBKEY_HASH_LEN);
   });
 
-  const scriptHash20 = new HasherCkb(PUBKEY_HASH_LEN).update(multisigScript).digest() as Hex20;
+  const scriptHash20 = blake160Hex(multisigScript);
   return { multisigScript, scriptHash20 };
 }
 

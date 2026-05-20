@@ -16,7 +16,11 @@ export function App() {
   const startCkb = useSyncStore((s) => s.startCkb);
 
   useEffect(() => {
-    void startCkb("mainnet");
+    // Default to testnet for the Phase 2 smoke-test loop. A network selector
+    // belongs in Settings (Phase 2.5+) — switching at runtime needs to stop
+    // the existing LightClient, swap the IndexedDB scope, then re-subscribe
+    // every watched lock under the new network.
+    void startCkb("testnet");
   }, [startCkb]);
 
   return (

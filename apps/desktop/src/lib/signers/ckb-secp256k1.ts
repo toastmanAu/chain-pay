@@ -39,10 +39,14 @@ export function compressedPubkeyFromPrivateKey(privateKeyHex: string): Hex {
 /**
  * Compute the CKB blake160 pubkey hash for a private key. This is what gets
  * embedded in `secp256k1_blake160_multisig_all` lock args / pubkeyHashes.
+ *
+ * Note: CKB blake160 = first 20 bytes of blake2b-256, NOT blake2b(outlen=20).
+ * Those produce different hashes because digest_length is mixed into the IV.
+ * Matches ckb-sdk-rust util::blake160 and the in-script hash check.
  */
 export function pubkeyHashFromPrivateKey(privateKeyHex: string): Hex20 {
   const pubkey = bytesFrom(compressedPubkeyFromPrivateKey(privateKeyHex));
-  return new HasherCkb(20).update(pubkey).digest() as Hex20;
+  return blake160Hex(pubkey);
 }
 
 /**
@@ -105,10 +109,17 @@ export function recoverPubkeyHashFromSignature(
   try {
     const sig = new secp256k1.Signature(r, s).addRecoveryBit(recovery);
     const pubkey = sig.recoverPublicKey(digest).toRawBytes(true);
-    return new HasherCkb(20).update(pubkey).digest() as Hex20;
+    return blake160Hex(pubkey);
   } catch {
     return null;
   }
+}
+
+function blake160Hex(data: Uint8Array): Hex20 {
+  // CKB blake160 = first 20 bytes of blake2b-256 (with "ckb-default-hash"
+  // personalization). NOT blake2b(outlen=20) — different IVs.
+  const full = new HasherCkb(32).update(data).digest();
+  return ("0x" + full.slice(2, 42)) as Hex20;
 }
 
 function bytesToBigint(bytes: Uint8Array): bigint {

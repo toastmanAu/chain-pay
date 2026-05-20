@@ -46,8 +46,10 @@ describe("pubkeyHashFromPrivateKey", () => {
     expect(hash).toMatch(/^0x[0-9a-f]{40}$/);
 
     // Independent reference: derive pubkey from secp256k1 and blake160 ourselves.
+    // CKB blake160 = first 20 bytes of blake2b-256, NOT blake2b(outlen=20).
     const pubkey = secp256k1.getPublicKey(stripHex(TEST_PRIVKEY), true);
-    const expected = new HasherCkb(20).update(pubkey).digest();
+    const full = new HasherCkb(32).update(pubkey).digest();
+    const expected = "0x" + full.slice(2, 42);
     expect(hash).toBe(expected);
   });
 

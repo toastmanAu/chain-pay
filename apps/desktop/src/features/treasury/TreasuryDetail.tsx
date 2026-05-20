@@ -57,13 +57,21 @@ function CkbTreasuryDetail({ treasury }: { treasury: Treasury }) {
   const lcReady = ckbSync.started && ckbSync.tipBlockNumber > 0n;
 
   // Subscribe the light client to this lock script on mount; idempotent.
+  // Start from a small buffer behind the current tip — full genesis back-scan
+  // takes hours on testnet for what we actually want (recent funding txs).
+  // A user-driven "rescan from block X" affordance lives in Phase 2.5.
+  const SUBSCRIBE_BUFFER_BLOCKS = 200n;
   const [subscribed, setSubscribed] = useState(false);
   const [subscribeError, setSubscribeError] = useState<string | null>(null);
   useEffect(() => {
     if (!lcReady || subscribed) return;
+    const fromBlock =
+      ckbSync.tipBlockNumber > SUBSCRIBE_BUFFER_BLOCKS
+        ? ckbSync.tipBlockNumber - SUBSCRIBE_BUFFER_BLOCKS
+        : 0n;
     let cancelled = false;
     void lightClient()
-      .watchLockScript(script, 0n)
+      .watchLockScript(script, fromBlock)
       .then(() => {
         if (!cancelled) setSubscribed(true);
       })
@@ -73,7 +81,7 @@ function CkbTreasuryDetail({ treasury }: { treasury: Treasury }) {
     return () => {
       cancelled = true;
     };
-  }, [lcReady, subscribed, script]);
+  }, [lcReady, subscribed, script, ckbSync.tipBlockNumber]);
 
   const balanceQuery = useQuery({
     queryKey: ["treasury-balance", multisig.address],

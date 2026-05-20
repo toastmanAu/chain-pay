@@ -116,7 +116,10 @@ function hexToBytes(hex) {
 }
 
 function blake160(data) {
-  return blake2b(data, { dkLen: 20, personalization: "ckb-default-hash" });
+  // CKB blake160 = first 20 bytes of blake2b-256 (with "ckb-default-hash"
+  // personalization). NOT blake2b(outlen=20) — different IVs produce different hashes.
+  const full = blake2b(data, { dkLen: 32, personalization: "ckb-default-hash" });
+  return full.slice(0, 20);
 }
 
 function randomUuid() {
