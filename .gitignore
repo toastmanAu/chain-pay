@@ -37,6 +37,7 @@ light-client-store/
 
 coverage/
 *.tsbuildinfo
+debug/
 
 release/
 *.app

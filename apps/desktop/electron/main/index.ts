@@ -5,13 +5,31 @@ const isDev = !app.isPackaged;
 
 let mainWindow: BrowserWindow | null = null;
 
-function applyCrossOriginIsolation(): void {
+// 'wasm-unsafe-eval' is needed for WebAssembly.instantiate.
+// blob: for the ckb-light-client-js workers, which esbuild inlines and spawns via blob URLs.
+// In dev, 'unsafe-inline' is needed for Vite's HMR preamble script. Stripped in prod.
+const scriptSrc = isDev
+  ? "script-src 'self' 'wasm-unsafe-eval' 'unsafe-inline' blob:"
+  : "script-src 'self' 'wasm-unsafe-eval' blob:";
+
+const CSP = [
+  "default-src 'self'",
+  scriptSrc,
+  "worker-src 'self' blob:",
+  "style-src 'self' 'unsafe-inline'",
+  "connect-src 'self' https: wss: ws: blob:",
+  "img-src 'self' data: https:",
+  "font-src 'self' data:",
+].join("; ");
+
+function applyResponseHeaders(): void {
   session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
     callback({
       responseHeaders: {
         ...details.responseHeaders,
         "Cross-Origin-Embedder-Policy": ["require-corp"],
         "Cross-Origin-Opener-Policy": ["same-origin"],
+        "Content-Security-Policy": [CSP],
       },
     });
   });
@@ -41,6 +59,14 @@ async function createWindow(): Promise<void> {
 
   mainWindow.once("ready-to-show", () => mainWindow?.show());
 
+  if (isDev) {
+    mainWindow.webContents.on("console-message", (_event, level, message, line, sourceId) => {
+      const tag = ["LOG", "WARN", "ERROR", "DBG"][level] ?? "LOG";
+      process.stdout.write(`[renderer ${tag}] ${message} (${sourceId}:${line})\n`);
+    });
+    mainWindow.webContents.openDevTools({ mode: "detach" });
+  }
+
   if (isDev && process.env.ELECTRON_RENDERER_URL) {
     await mainWindow.loadURL(process.env.ELECTRON_RENDERER_URL);
   } else {
@@ -49,7 +75,7 @@ async function createWindow(): Promise<void> {
 }
 
 app.whenReady().then(async () => {
-  applyCrossOriginIsolation();
+  applyResponseHeaders();
   await createWindow();
 
   app.on("activate", () => {

@@ -1,13 +1,7 @@
-import { useEffect } from "react";
 import { useSyncStore } from "@/stores/sync";
 
 export function Dashboard() {
   const ckb = useSyncStore((s) => s.ckb);
-  const startCkb = useSyncStore((s) => s.startCkb);
-
-  useEffect(() => {
-    if (!ckb.started && !ckb.starting) void startCkb("mainnet");
-  }, [ckb.started, ckb.starting, startCkb]);
 
   return (
     <div className="space-y-6">

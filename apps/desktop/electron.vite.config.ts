@@ -18,8 +18,10 @@ export default defineConfig({
   preload: {
     build: {
       outDir: "out/preload",
+      // sandbox: true (in electron/main/index.ts) requires CJS preload — ESM is not supported.
       rollupOptions: {
         input: { index: resolve(__dirname, "electron/preload/index.ts") },
+        output: { format: "cjs", entryFileNames: "index.js" },
       },
     },
   },

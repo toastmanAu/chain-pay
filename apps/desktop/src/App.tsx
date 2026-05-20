@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import { Routes, Route, Navigate } from "react-router-dom";
 import { AppShell } from "./components/layout/AppShell";
 import { Dashboard } from "./features/dashboard/Dashboard";
@@ -7,8 +8,15 @@ import { PayrollBatches } from "./features/payroll/PayrollBatches";
 import { PendingPayments } from "./features/payments/PendingPayments";
 import { Employees } from "./features/employees/Employees";
 import { Settings } from "./features/settings/Settings";
+import { useSyncStore } from "./stores/sync";
 
 export function App() {
+  const startCkb = useSyncStore((s) => s.startCkb);
+
+  useEffect(() => {
+    void startCkb("mainnet");
+  }, [startCkb]);
+
   return (
     <AppShell>
       <Routes>

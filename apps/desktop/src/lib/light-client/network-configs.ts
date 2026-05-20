@@ -1,5 +1,21 @@
-// Embedded ckb-light-client network configs — bootnode lists and sync params.
-// Source: @nervosnetwork/ckb-light-client-js README. Update when the package ships new defaults.
+// CKB light client network configs.
+//
+// We MUST supply a config. The WASM build's internal defaults only include IP-based
+// bootnodes, none of which support WSS — browsers can't reach them. The `*.ckb.guide`
+// addresses below are the canonical WSS-capable bootnodes (from ckb-light-client-js
+// README and Quantum Purse / Neuron) — the only practical way to bootstrap a
+// browser light client.
+//
+// The `[rpc]` block is required by the Rust serde deserializer in v0.5.5 even
+// though the WASM build doesn't actually bind an RPC port — omitting it fails
+// with "missing field `rpc`".
+
+export type CkbNetwork = "mainnet" | "testnet";
+
+const RPC_BLOCK = `
+[rpc]
+listen_address = "127.0.0.1:9000"
+`;
 
 export const MAINNET_CONFIG = `
 chain = "mainnet"
@@ -49,7 +65,7 @@ connect_outbound_interval_secs = 15
 upnp = false
 discovery_local_address = false
 bootnode_mode = false
-`;
+${RPC_BLOCK}`;
 
 export const TESTNET_CONFIG = `
 chain = "testnet"
@@ -85,9 +101,7 @@ connect_outbound_interval_secs = 15
 upnp = false
 discovery_local_address = false
 bootnode_mode = false
-`;
-
-export type CkbNetwork = "mainnet" | "testnet";
+${RPC_BLOCK}`;
 
 export function configFor(network: CkbNetwork): string {
   return network === "mainnet" ? MAINNET_CONFIG : TESTNET_CONFIG;

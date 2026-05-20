@@ -41,7 +41,14 @@ export class LightClientHost {
 
     const secretKey = loadOrCreateSecretKey(network);
     const client = new LightClient();
-    await client.start({ type: network === "mainnet" ? "MainNet" : "TestNet", config: configFor(network) }, secretKey, "info", "wss");
+    // We MUST pass our own config — see network-configs.ts. The WASM default
+    // bootnodes are IP-only and unreachable from a browser WSS context.
+    await client.start(
+      { type: network === "mainnet" ? "MainNet" : "TestNet", config: configFor(network) },
+      secretKey,
+      "info",
+      "wss",
+    );
 
     this.client = client;
     this.network = network;

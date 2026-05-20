@@ -1,21 +1,165 @@
 # Light client integration
 
-ChainPay embeds the **CKB light client (SQLite backend)** directly in the Electron main process. This document explains why, where it runs, and how Phase 1 wires it up.
+ChainPay embeds the **CKB light client** (`@nervosnetwork/ckb-light-client-js`
+WASM bundle) directly in the Electron **renderer** process. This document
+explains why we embed it, why it runs in the renderer, and the runtime
+ceremonies needed to make it work.
 
 ## Why embed it
 
 The CKB light client is **the only one in our chain set** with both:
 
-1. A WASM browser/Electron build (`ckb-light-client-js`).
-2. A SQLite storage backend small enough for desktop apps (2.4–5.8 MB store, ~3 MB WASM).
+1. A WASM browser/Electron build (`@nervosnetwork/ckb-light-client-js`).
+2. A storage backend small enough for desktop apps (a few MB per network).
 
-This means ChainPay can **verify CKB mainnet state directly**, without trusting Infura-style RPC providers. There is no equivalent for EVM today (Helios is close but not production-stable), no equivalent for BTC at WASM-embeddable scale, and Solana fundamentally requires a full node for trust-minimised access.
+This means ChainPay can **verify CKB mainnet state directly**, without trusting
+Infura-style RPC providers. There is no equivalent for EVM today (Helios is
+close but not production-stable), no equivalent for BTC at WASM-embeddable
+scale, and Solana fundamentally requires a full node for trust-minimised access.
 
-So CKB gets first-class self-custody. EVM gets best-effort RPC. That asymmetry is the product's strongest differentiator.
+So CKB gets first-class self-custody. EVM gets best-effort RPC. That asymmetry
+is the product's strongest differentiator.
 
-## Source: Phill's own benchmark
+## Why it runs in the **renderer**, not Electron main
 
-Full report at `~/ckb-wallet/research/ckb-light-client/raw/lite-sqlite-findings.md`. Headline:
+The package ships a WASM bundle that requires three browser-only primitives:
+
+- **Web Workers** (`db.worker.js`, `lightclient.worker.js`)
+- **`SharedArrayBuffer`** (worker ↔ WASM data exchange)
+- **A browser storage backend** (OPFS / IndexedDB via the bundled
+  `ckb-light-client-db-worker`)
+
+Electron main is a Node.js environment. None of the above work there. The
+original Phase 1 plan was to run the client in main and expose an IPC bridge —
+that plan was reversed when the bundle's runtime requirements became clear.
+
+Consequence: the on-disk store path is **not** caller-controlled. The TOML
+config's `[store] path` line is a no-op for the JS build; storage is opaque to
+us. Acceptable for desktop because Electron's per-app IndexedDB partition gives
+effectively the same isolation as a user-data file would.
+
+## The five runtime ceremonies (none of which are documented in the package's README in one place)
+
+### 1. Cross-Origin Isolation (COOP/COEP)
+
+`SharedArrayBuffer` requires cross-origin isolation. Set in
+`electron/main/index.ts`:
+
+```
+Cross-Origin-Embedder-Policy: require-corp
+Cross-Origin-Opener-Policy: same-origin
+```
+
+…on every response, via `session.defaultSession.webRequest.onHeadersReceived`.
+Also set in Vite's dev server `headers` so dev mode matches.
+
+### 2. CSP must allow `blob:` workers and `wasm-unsafe-eval`
+
+The bundle inlines workers via esbuild's `inline-worker` plugin and spawns
+them as `new Worker(URL.createObjectURL(blob))`. A strict `script-src 'self'`
+falls through to `worker-src 'self'` and silently refuses every worker — the
+client appears to "start" but its background workers never run.
+
+```
+script-src 'self' 'wasm-unsafe-eval' blob:
+worker-src 'self' blob:
+```
+
+In dev, add `'unsafe-inline'` to `script-src` for Vite's HMR preamble; CSP is
+applied in `electron/main/index.ts` so dev and prod can differ from one source
+of truth (the `<meta>` tag would conflict — keep it out of `index.html`).
+
+### 3. Preload script must be CJS
+
+`sandbox: true` in BrowserWindow webPreferences forbids ESM preload. Configure
+electron-vite to emit CJS:
+
+```ts
+preload: {
+  build: {
+    rollupOptions: {
+      output: { format: "cjs", entryFileNames: "index.js" },
+    },
+  },
+}
+```
+
+### 4. Custom TOML config is mandatory — the WASM defaults will not work in a browser
+
+The bundle's internal default `MainNet`/`TestNet` configs ship with **IP-only**
+bootnodes on port 8114. Browsers can't open `wss://<ip>:8114/` because raw IPs
+can't have valid TLS certs. Without custom config, the client connects to zero
+peers and stays in "connecting" forever.
+
+We supply our own config with the `/dns4/<host>.ckb.guide/tcp/443/wss/p2p/<id>`
+bootnode list (canonical, from the package README and used by other browser
+light-client wallets like Quantum Purse). See
+`src/lib/light-client/network-configs.ts`.
+
+### 5. TOML must include a stub `[rpc]` block
+
+The embedded Rust serde deserializer in v0.5.5 fails with
+`missing field 'rpc' at line N column 1` if the config omits an `[rpc]` block.
+The WASM build doesn't bind any RPC port — the field is vestigial — but the
+deserializer demands it. Append:
+
+```toml
+[rpc]
+listen_address = "127.0.0.1:9000"
+```
+
+## Where it runs
+
+```
+Electron main process
+└── BrowserWindow
+      ├── sets COOP/COEP and CSP on every response (webRequest.onHeadersReceived)
+      ├── opens DevTools detached in dev mode
+      └── mirrors renderer console messages to stdout in dev mode
+
+Renderer process
+└── src/lib/light-client/host.ts ── LightClientHost
+       │
+       ├── @nervosnetwork/ckb-light-client-js · LightClient
+       │     ├── lightclient.worker (sync, peers, RPC)
+       │     └── db.worker (storage — OPFS / IndexedDB)
+       │
+       └── 5 s polling loop → snapshot listeners
+              └── src/stores/sync.ts (Zustand) → Dashboard tile + Sidebar status
+```
+
+Auto-start lives at the **App** level (`src/App.tsx`), not in any feature
+route. The whole UI needs sync state regardless of which page the user lands
+on — coupling boot to one route mount is fragile.
+
+## API surface (renderer-internal — no IPC)
+
+`LightClientHost` is the only seam. Phase 2 / 2.5 features call its async
+methods or subscribe to its snapshots. There is no `window.ckb.*` bridge.
+
+| Method | Use |
+|---|---|
+| `start(network)` | Boot the client on `"mainnet"` or `"testnet"` |
+| `stop()` | Graceful shutdown |
+| `isStarted()` / `currentNetwork()` | Lifecycle introspection |
+| `snapshot()` | Last-known sync state (tip, peers, lastPolledAt) |
+| `onSnapshot(cb)` | Subscribe to 5 s polling snapshots; returns unsub |
+| `onError(cb)` | Subscribe to async errors; returns unsub |
+| `getTipHeader()` | Current chain head |
+| `getPeers()` | Connected peer list |
+| `getCellsCapacity(searchKey)` | Treasury balance (Phase 2) |
+| `getTransactions(searchKey, order, limit, cursor)` | Tx history (Phase 2.5) |
+
+Persistent secret key per network lives at
+`localStorage["chainpay.ckb.lc.secret-key.<network>"]` — regenerated on first
+launch, kept for peer identity continuity.
+
+## Source: Phill's own benchmark (still load-bearing)
+
+Full report at `~/ckb-wallet/research/ckb-light-client/raw/lite-sqlite-findings.md`.
+Headline numbers compare the **native** RocksDB vs SQLite backends — they
+justify why we picked CKB's light client (not a competitor) and why upstream
+SQLite work was worth doing, even though we don't run a native build ourselves:
 
 | Metric | RocksDB (default) | SQLite (embedded) |
 |---|---|---|
@@ -25,62 +169,30 @@ Full report at `~/ckb-wallet/research/ckb-light-client/raw/lite-sqlite-findings.
 | Peak RSS | ~51 MB | ~44 MB |
 | Correctness | ✅ | ✅ (identical balances across 24 runs) |
 
-96 – 98 % less disk, 23 % faster cold scan, 14 % less RAM, zero correctness drift. SQLite is unambiguously the right choice for desktop / mobile / embedded.
+96–98% less disk, 23% faster cold scan, 14% less RAM, zero correctness drift.
+Those wins shaped the upstream WASM build's footprint too.
 
-## Where it runs
+## Failure modes handled (Phase 1)
 
-```
-Electron main process
-└── light-client-host.ts ── owns LightClient instance ── SQLite store
-       │                                                  └── app.getPath('userData')/light-client-store/<network>/
-       │
-       ▼ ipcMain.handle(...)
-   Electron preload (contextBridge)
-       │
-       ▼ window.ckb.*
-   Renderer (React)
-       └── src/lib/light-client/ipc.ts ── TanStack Query wrapper
-```
+| Failure | Behaviour |
+|---|---|
+| No internet | Tip tile stays at last-known value; `lastPolledAt` freshness in seconds visible; errors surface in tile hint |
+| Polling failure | Logged via `onError` listener → Zustand `lastError`; sidebar status turns red |
+| Worker/WASM init failure | `start()` rejects; `useSyncStore.startCkb` traps and stores `lastError` |
+| No peers attached | Status shows "connecting" instead of "running" until peer count > 0 |
 
-The renderer is sandboxed. It can call `window.ckb.tipHeader()` but cannot reach the SQLite file, the WASM instance, or the network sockets directly.
+## Failure modes deferred to later phases
 
-## IPC surface
-
-| Renderer call | Main handler | Use |
-|---|---|---|
-| `window.ckb.start(network)` | `lightClient.start(network)` | Boot the light client |
-| `window.ckb.stop()` | `lightClient.stop()` | Graceful shutdown |
-| `window.ckb.status()` | `lightClient.status()` | `{ started, network }` |
-| `window.ckb.tipHeader()` | `lightClient.tipHeader()` | Current chain head |
-| `window.ckb.getCellsCapacity(searchKey)` | `lightClient.getCellsCapacity(searchKey)` | Treasury balance |
-| `window.ckb.getTransactions(searchKey, order, limit, cursor)` | `lightClient.getTransactions(...)` | Tx history |
-| `window.ckb.onSyncProgress(cb)` | event `ckb:sync-progress` | Live sync indicator |
-
-Subscribe-once via `onSyncProgress` returns an unsubscribe function — store it in a Zustand store, call it on unmount.
-
-## Phase 1 implementation order
-
-1. Install deps (`ckb-light-client-js` + peer deps).
-2. Replace `LightClientHost` stubs with real `ckb-light-client-js` calls (see `light-client-host.ts`).
-3. Pass the SQLite store path via `app.getPath('userData')/light-client-store/<network>/`.
-4. Pipe sync progress: poll `tipHeader` + connected peer count, emit `sync-progress` events every 2–5 s.
-5. Renderer subscribes via `window.ckb.onSyncProgress` (already wired in `src/stores/sync.ts`).
-6. Dashboard's "CKB tip block" tile starts updating live — this is the verification gate.
+| Failure | When |
+|---|---|
+| Storage corruption | Phase 2 — when treasury data depends on the store, we need a "reset and re-sync" UX |
+| Slow first sync ETA | Phase 2 — first-time treasury setup is when this matters |
+| Process crash auto-restart | Not applicable: the client runs in the same renderer process as the UI; a crash takes the window with it. Renderer-level error boundary + soft restart if revisited |
+| Bootnode list drift | If `*.ckb.guide` bootnodes go offline, the config in `network-configs.ts` needs refreshing from upstream |
 
 ## Optional: optimisations to port
 
-Phill's two upstream-pending PRs (see lite-sqlite-findings.md § 5):
-
-1. **WITHOUT ROWID + redundant index removal** — disk + lookup speed
-2. **Multi-block transaction batching** — sync speed on flash
-
-If either lands in `ckb-light-client-js` before Phase 1 starts, prefer the patched version. Otherwise the default v0.5.5-rc1+ build is fine.
-
-## Failure modes to handle (Phase 1)
-
-| Failure | UX |
-|---|---|
-| No internet | Sync indicator shows "offline", balance reads return last-known cached value with timestamp |
-| Light client process crash | Auto-restart with backoff; show toast "light client restarted" |
-| Store corruption | Detect on open; offer "reset store and re-sync" (data is reconstructable from network) |
-| Slow first sync | Progress UI shows blocks-per-second and ETA based on rolling average |
+Phill's two upstream-pending PRs (see lite-sqlite-findings.md § 5) target the
+native SQLite backend and don't affect the WASM build directly. If they land
+and the WASM `db-worker` adopts equivalent changes (or if we switch to a
+future native binding), reconsider.
