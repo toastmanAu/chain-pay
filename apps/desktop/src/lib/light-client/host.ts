@@ -4,7 +4,15 @@ import {
   randomSecretKey,
   type ScriptStatus,
 } from "@nervosnetwork/ckb-light-client-js";
-import type { Hex, ScriptLike } from "@ckb-ccc/core";
+import {
+  Cell,
+  hexFrom,
+  numFrom,
+  OutPoint,
+  type Hex,
+  type ScriptLike,
+  type Transaction,
+} from "@ckb-ccc/core";
 import { configFor, type CkbNetwork } from "./network-configs";
 
 export interface SyncSnapshot {
@@ -138,6 +146,37 @@ export class LightClientHost {
       scriptSearchMode: "exact",
     });
     return BigInt(capacity);
+  }
+
+  /** List unspent cells belonging to a lock script (paginated, max 100/page). */
+  async listCellsForLock(script: ScriptLike, limit = 100): Promise<Cell[]> {
+    const response = await this.requireClient().getCells(
+      { script, scriptType: "lock", scriptSearchMode: "exact" },
+      "asc",
+      limit,
+    );
+    return response.cells.map((c) =>
+      Cell.from({
+        outPoint: OutPoint.from({
+          txHash: hexFrom(c.outPoint.txHash),
+          index: numFrom(c.outPoint.index),
+        }),
+        cellOutput: {
+          capacity: numFrom(c.cellOutput.capacity),
+          lock: c.cellOutput.lock,
+          type: c.cellOutput.type ?? null,
+        },
+        outputData: hexFrom(c.outputData),
+      }),
+    );
+  }
+
+  /** Broadcast a fully-signed transaction. Returns the txHash. */
+  async broadcastTransaction(tx: Transaction): Promise<Hex> {
+    // CCC's `Transaction` is structurally a TransactionLike at runtime; the
+    // strict-optional typing diff means TS refuses the direct assignment.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    return this.requireClient().sendTransaction(tx as any);
   }
 
   async getTransactions(

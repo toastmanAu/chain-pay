@@ -81,6 +81,36 @@ export function verifyDigestSignature(
   }
 }
 
+/**
+ * Recover the compressed pubkey from a CKB-format (r || s || v) signature
+ * over a 32-byte digest, then blake160-hash it.
+ *
+ * Returns null if the sig is malformed or recovery fails. Used by
+ * mergeSignatures to verify each partial sig corresponds to its claimed
+ * co-signer slot.
+ */
+export function recoverPubkeyHashFromSignature(
+  digestHex: string,
+  signatureHex: string,
+): Hex20 | null {
+  const digest = bytesFrom(digestHex);
+  const sigBytes = bytesFrom(signatureHex);
+  if (sigBytes.length !== 65) return null;
+
+  const r = bytesToBigint(sigBytes.slice(0, 32));
+  const s = bytesToBigint(sigBytes.slice(32, 64));
+  const recovery = sigBytes[64];
+  if (recovery === undefined || recovery > 1) return null;
+
+  try {
+    const sig = new secp256k1.Signature(r, s).addRecoveryBit(recovery);
+    const pubkey = sig.recoverPublicKey(digest).toRawBytes(true);
+    return new HasherCkb(20).update(pubkey).digest() as Hex20;
+  } catch {
+    return null;
+  }
+}
+
 function bytesToBigint(bytes: Uint8Array): bigint {
   let n = 0n;
   for (const b of bytes) n = (n << 8n) | BigInt(b);

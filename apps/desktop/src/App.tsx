@@ -6,7 +6,7 @@ import { TreasuryList } from "./features/treasury/TreasuryList";
 import { SetupMultisig } from "./features/treasury/SetupMultisig";
 import { TreasuryDetail } from "./features/treasury/TreasuryDetail";
 import { PayrollBatches } from "./features/payroll/PayrollBatches";
-import { PendingPayments } from "./features/payments/PendingPayments";
+import { PayPanel } from "./features/payments/PayPanel";
 import { SignPanel } from "./features/sign/SignPanel";
 import { Employees } from "./features/employees/Employees";
 import { Settings } from "./features/settings/Settings";
@@ -28,7 +28,7 @@ export function App() {
         <Route path="/treasury/new" element={<SetupMultisig />} />
         <Route path="/treasury/:id" element={<TreasuryDetail />} />
         <Route path="/payroll" element={<PayrollBatches />} />
-        <Route path="/payments" element={<PendingPayments />} />
+        <Route path="/payments" element={<PayPanel />} />
         <Route path="/sign" element={<SignPanel />} />
         <Route path="/employees" element={<Employees />} />
         <Route path="/settings" element={<Settings />} />
