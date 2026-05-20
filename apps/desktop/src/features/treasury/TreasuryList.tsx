@@ -45,16 +45,16 @@ function TreasuryRow({ treasury, onDelete }: { treasury: Treasury; onDelete: () 
       : "—";
 
   return (
-    <li className="rounded-lg border border-surface-hi bg-surface p-4">
-      <div className="flex items-start justify-between gap-4">
-        <div className="min-w-0 flex-1">
+    <li className="rounded-lg border border-surface-hi bg-surface transition-colors hover:border-surface-hi/80">
+      <div className="flex items-start justify-between gap-4 p-4">
+        <Link to={`/treasury/${treasury.id}`} className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
-            <span className="text-sm font-medium text-fg">{treasury.label}</span>
+            <span className="text-sm font-medium text-fg hover:text-accent">{treasury.label}</span>
             <span className="rounded-md bg-surface-hi px-2 py-0.5 text-xs text-fg-muted">{chainLabel}</span>
             <span className="text-xs text-fg-muted tabular-nums">{summary}</span>
           </div>
           <div className="mt-1 break-all font-mono text-xs text-fg-muted">{m.address}</div>
-        </div>
+        </Link>
         <button
           type="button"
           onClick={onDelete}

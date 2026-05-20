@@ -4,6 +4,7 @@ import { AppShell } from "./components/layout/AppShell";
 import { Dashboard } from "./features/dashboard/Dashboard";
 import { TreasuryList } from "./features/treasury/TreasuryList";
 import { SetupMultisig } from "./features/treasury/SetupMultisig";
+import { TreasuryDetail } from "./features/treasury/TreasuryDetail";
 import { PayrollBatches } from "./features/payroll/PayrollBatches";
 import { PendingPayments } from "./features/payments/PendingPayments";
 import { Employees } from "./features/employees/Employees";
@@ -24,6 +25,7 @@ export function App() {
         <Route path="/dashboard" element={<Dashboard />} />
         <Route path="/treasury" element={<TreasuryList />} />
         <Route path="/treasury/new" element={<SetupMultisig />} />
+        <Route path="/treasury/:id" element={<TreasuryDetail />} />
         <Route path="/payroll" element={<PayrollBatches />} />
         <Route path="/payments" element={<PendingPayments />} />
         <Route path="/employees" element={<Employees />} />

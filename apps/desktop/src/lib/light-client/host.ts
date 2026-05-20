@@ -1,5 +1,10 @@
-import { LightClient, randomSecretKey } from "@nervosnetwork/ckb-light-client-js";
-import type { Hex } from "@ckb-ccc/core";
+import {
+  LightClient,
+  LightClientSetScriptsCommand,
+  randomSecretKey,
+  type ScriptStatus,
+} from "@nervosnetwork/ckb-light-client-js";
+import type { Hex, ScriptLike } from "@ckb-ccc/core";
 import { configFor, type CkbNetwork } from "./network-configs";
 
 export interface SyncSnapshot {
@@ -103,6 +108,36 @@ export class LightClientHost {
 
   async getCellsCapacity(searchKey: Parameters<LightClient["getCellsCapacity"]>[0]) {
     return this.requireClient().getCellsCapacity(searchKey);
+  }
+
+  /**
+   * Subscribe the light client to a lock script so it syncs the blocks that
+   * touch it. Without this, getCellsCapacity returns 0 — the WASM client only
+   * fetches blocks for scripts it's been told to watch.
+   *
+   * Idempotent: re-watching an existing script is a no-op upstream.
+   */
+  async watchLockScript(script: ScriptLike, fromBlock: bigint = 0n): Promise<void> {
+    const status: ScriptStatus = {
+      script,
+      scriptType: "lock",
+      blockNumber: fromBlock,
+    };
+    await this.requireClient().setScripts([status], LightClientSetScriptsCommand.Partial);
+  }
+
+  async getWatchedScripts(): Promise<ScriptStatus[]> {
+    return this.requireClient().getScripts();
+  }
+
+  /** Convenience: total CKB balance (in shannons) for a lock script. */
+  async getLockBalance(script: ScriptLike): Promise<bigint> {
+    const capacity = await this.requireClient().getCellsCapacity({
+      script,
+      scriptType: "lock",
+      scriptSearchMode: "exact",
+    });
+    return BigInt(capacity);
   }
 
   async getTransactions(
