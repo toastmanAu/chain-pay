@@ -50,7 +50,9 @@ export interface ProfileFetchResult {
 
 export class CEMPTransactionBuilder {
   constructor(client: ccc.Client);
-  fetchRecipientProfile(recipientLock: ccc.Script): Promise<ProfileFetchResult | null>;
+  // NOTE: runtime returns bare Uint8Array (KEM pubkey bytes) and throws if not found.
+  // The .d.ts ProfileFetchResult shape is aspirational for 2.7b enrichment.
+  fetchRecipientProfile(recipientLock: ccc.Script): Promise<Uint8Array>;
   buildCreateProfileTx(
     signer: MLDSASigner,
     mlDSAPubKey: Uint8Array,
@@ -61,8 +63,17 @@ export class CEMPTransactionBuilder {
   buildSendMessageTx(
     senderSigner: MLDSASigner,
     recipientLock: ccc.Script,
-    message: Uint8Array,
+    // Runtime calls TextEncoder().encode(message) — pass a string for text, NOT Uint8Array.
+    // For pre-serialised binary envelopes use CEMPPQ.encrypt + a manual tx instead.
+    message: string,
     feeRate?: bigint,
     recipientMLKEMPubKey?: Uint8Array | null,
   ): Promise<ccc.Transaction>;
+}
+
+export class CEMPPQ {
+  /** Encrypt raw bytes for a recipient: encapsulate KEM, AES-GCM, serialize. */
+  static encrypt(message: Uint8Array, recipientPublicKey: Uint8Array): Promise<Uint8Array>;
+  /** Decrypt using the recipient's ML-KEM secret key. */
+  static decrypt(encryptedData: Uint8Array, recipientSecretKey: Uint8Array): Promise<Uint8Array>;
 }
