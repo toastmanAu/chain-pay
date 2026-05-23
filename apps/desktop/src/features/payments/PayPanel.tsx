@@ -1,13 +1,24 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { addressPayloadFromString } from "@ckb-ccc/core/advanced";
-import { hashTypeFrom, hexFrom, Script } from "@ckb-ccc/core";
+import {
+  bytesFrom,
+  hashTypeFrom,
+  hexFrom,
+  Script,
+  Transaction,
+  WitnessArgs,
+} from "@ckb-ccc/core";
 import type { CkbMultisig, Treasury } from "@chain-pay/shared";
 import { useTreasuryStore } from "@/stores/treasury";
 import { useSyncStore } from "@/stores/sync";
 import { lightClient } from "@/lib/light-client/client";
 import { treasuryLockScript } from "@/lib/chains/ckb/address";
-import type { CkbMultisigConfig } from "@/lib/chains/ckb/multisig";
+import {
+  encodeMultisigScript,
+  lockArgsFromConfig,
+  type CkbMultisigConfig,
+} from "@/lib/chains/ckb/multisig";
 import {
   buildPaymentSkeleton,
   type PaymentSkeleton,
@@ -20,6 +31,23 @@ import {
   mergeSignatures,
   type PartialSignature,
 } from "@/lib/chains/ckb/merge-signatures";
+import { CopyButton } from "@/components/clipboard/CopyButton";
+import { PasteButton } from "@/components/clipboard/PasteButton";
+import { PayeePicker } from "./PayeePicker";
+import type {
+  FxQuote,
+  PartialSigEntry,
+  PayeeProfile,
+  PayrollBatch,
+  PayrollBatchLine,
+} from "@chain-pay/shared";
+import { usePayeesStore } from "@/stores/payees";
+import { usePayrollBatchesStore } from "@/stores/payroll-batches";
+import {
+  fetchCkbPrices,
+  fiatToCkbShannons,
+  formatFxQuote,
+} from "@/lib/fx/coingecko";
 
 const SHANNONS_PER_CKB = 100_000_000n;
 const DEFAULT_FEE_RATE = 1000n;
@@ -27,6 +55,10 @@ const DEFAULT_FEE_RATE = 1000n;
 interface RecipientRow {
   address: string;
   amountCkb: string;
+  /** Set when the row came from PayeePicker; lets FX recomputation re-fill amountCkb. */
+  payeeId?: string;
+  /** FX rate used to compute amountCkb, captured per-row so PayrollBatchLine has lineage. */
+  fxRate?: string;
 }
 
 interface SignatureRow {
@@ -39,6 +71,8 @@ type Phase = "draft" | "packet-ready" | "broadcast-ready" | "broadcasted";
 export function PayPanel() {
   const treasuries = useTreasuryStore((s) => s.treasuries);
   const ckbSync = useSyncStore((s) => s.ckb);
+  const payeeStore = usePayeesStore();
+  const batchStore = usePayrollBatchesStore();
 
   const ckbTreasuries = treasuries.filter((t) => t.multisig.chain.startsWith("ckb:"));
 
@@ -54,6 +88,17 @@ export function PayPanel() {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
+  // FX snapshot, lifted from DraftForm so handleBuild can persist it on the
+  // PayrollBatch record. fxSnapshot maps CURRENCY → FxQuote (CKB-based).
+  const [fxSnapshot, setFxSnapshot] = useState<Map<string, FxQuote>>(new Map());
+  const [fxLoading, setFxLoading] = useState(false);
+  const [fxError, setFxError] = useState<string | null>(null);
+
+  // Active batch id for this draft. Set when build succeeds with payee-sourced
+  // rows; advances state on broadcast. null = manual one-off payment, no batch
+  // lifecycle attached.
+  const [activeBatchId, setActiveBatchId] = useState<string | null>(null);
+
   const treasury = ckbTreasuries.find((t) => t.id === treasuryId);
   const multisig = treasury?.multisig as CkbMultisig | undefined;
   const cfg = useMemo<CkbMultisigConfig | null>(() => {
@@ -67,6 +112,75 @@ export function PayPanel() {
       ...(multisig.since !== undefined ? { since: multisig.since } : {}),
     };
   }, [multisig]);
+
+  // Hydrate from a persisted draft when the user clicks "Resume" on a
+  // PayrollBatches card. Resume sets `selectedDraftId` in the store; we
+  // read it once, switch to the right treasury if needed, then rebuild the
+  // ephemeral PayPanel state (skeleton, packet, sigs) without recomputing
+  // anything that could drift (FX, capacities, digest).
+  useEffect(() => {
+    const draftId = batchStore.selectedDraftId;
+    if (!draftId) return;
+    const batch = batchStore.findById(draftId);
+    if (!batch || !batch.txBytes || !batch.sighashDigest || !batch.totals) {
+      batchStore.selectDraft(null);
+      return;
+    }
+    if (batch.treasuryId !== treasuryId) {
+      // Switch treasuries first; the next render will materialize `cfg` and
+      // re-enter this effect to actually hydrate.
+      setTreasuryId(batch.treasuryId);
+      return;
+    }
+    if (!cfg || !multisig) return;
+    try {
+      const tx = Transaction.fromBytes(bytesFrom(batch.txBytes));
+      const restored: PaymentSkeleton = {
+        tx,
+        totalIn: batch.totals.totalIn,
+        totalOut: batch.totals.totalOut,
+        fee: batch.totals.fee,
+        change: batch.totals.change,
+      };
+      const json = encodeTransferPacket({
+        skeleton: restored,
+        treasuryConfig: cfg,
+        network: multisig.chain === "ckb:mainnet" ? "mainnet" : "testnet",
+        ...(batch.label ? { label: batch.label } : {}),
+      });
+      const restoredSigs: SignatureRow[] = Array.from(
+        { length: cfg.m },
+        (_, i) => {
+          const found = batch.partialSigs?.find((p) => p.slotIndex === i);
+          return { slotIndex: i, signature: found?.signature ?? "" };
+        },
+      );
+      setSkeleton(restored);
+      setPacketJson(json);
+      setSigs(restoredSigs);
+      setLabel(batch.label);
+      setActiveBatchId(batch.id);
+      setPhase("packet-ready");
+      setError(null);
+    } catch (e) {
+      setError(`Failed to resume draft: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      batchStore.selectDraft(null);
+    }
+  }, [batchStore, treasuryId, cfg, multisig]);
+
+  // Persist sig collection incrementally so closing the window mid-collection
+  // doesn't lose work. Wrapped setter — same shape as setSigs for callers,
+  // but writes through to the active batch's partialSigs on every change.
+  const updateSigs = (next: SignatureRow[]) => {
+    setSigs(next);
+    if (activeBatchId) {
+      const partials: PartialSigEntry[] = next
+        .filter((s) => s.signature.trim().length > 0)
+        .map((s) => ({ slotIndex: s.slotIndex, signature: s.signature.trim() }));
+      batchStore.updateBatch(activeBatchId, { partialSigs: partials });
+    }
+  };
 
   const handleBuild = async () => {
     if (!cfg || !multisig) return;
@@ -106,6 +220,46 @@ export function PayPanel() {
         Array.from({ length: cfg.m }, (_, i) => ({ slotIndex: i, signature: "" })),
       );
       setPhase("packet-ready");
+
+      // If the draft was sourced from payees, snapshot it as a PayrollBatch
+      // in the 'calculated' state. Manual one-off payments (no payeeId on any
+      // row) skip batch creation — they're not payroll, they're treasury
+      // spends. The persisted snapshot carries the serialized tx + sighash
+      // digest so PayPanel can resume from step 5/6 across navigation and
+      // window reloads — critical because FX-rate drift on re-fetch would
+      // otherwise change capacities → invalidate sigs already collected.
+      const payeeLines = buildBatchLinesFromRecipients(
+        recipients,
+        payeeStore.findById,
+      );
+      if (payeeLines.length > 0) {
+        const id = (globalThis.crypto?.randomUUID?.() ?? `b-${Date.now()}`) as string;
+        const now = new Date().toISOString();
+        const digest = treasurySighashDigest(result.tx);
+        const batch: PayrollBatch = {
+          id,
+          label: label.trim() || autoLabel(),
+          treasuryId,
+          cycleStart: monthStart(),
+          cycleEnd: monthEnd(),
+          fxSnapshot: Array.from(fxSnapshot.values()),
+          lines: payeeLines,
+          state: "calculated",
+          createdAt: now,
+          updatedAt: now,
+          txBytes: hexFrom(result.tx.toBytes()),
+          sighashDigest: digest,
+          totals: {
+            totalIn: result.totalIn,
+            totalOut: result.totalOut,
+            fee: result.fee,
+            change: result.change,
+          },
+          partialSigs: [],
+        };
+        batchStore.addBatch(batch);
+        setActiveBatchId(id);
+      }
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -124,11 +278,62 @@ export function PayPanel() {
       });
       const digest = treasurySighashDigest(skeleton.tx);
       mergeSignatures(skeleton.tx, cfg, digest, partials);
+
+      // Pre-broadcast sanity: the multisig_script now sitting in witness[0]
+      // MUST blake160 to the input cells' lock.args, or the chain returns -52
+      // (ERROR_MULTSIG_SCRIPT_HASH). We check three things, in order of
+      // diagnostic value:
+      //
+      //   1. cfg ↔ treasury.address: the stored treasury address must
+      //      decode to lock.args matching what cfg.pubkeyHashes encode.
+      //      If this fails, the wizard/persist layer mutated cfg without
+      //      keeping address in sync.
+      //   2. witness[0] ↔ cfg: the bytes mergeSignatures just wrote must
+      //      blake160 to the same lock.args. If this fails, mergeSignatures
+      //      or WitnessArgs round-trip is corrupting bytes.
+      //   3. tx.inputs[0] ↔ treasury: caller's responsibility — the cells
+      //      we're spending must be at the treasury's lock. Not checked
+      //      inline (would need a chain query) but logged for inspection.
+      if (multisig) {
+        assertMultisigBytesMatchTreasury(skeleton.tx, cfg, multisig);
+        dumpInputsForInspection(skeleton.tx, multisig);
+      }
+      // Mark the batch approved just before send so a network failure leaves
+      // us in a recoverable state (approved → calculated is a legal revert).
+      if (activeBatchId) {
+        try {
+          batchStore.transition(activeBatchId, "approved");
+        } catch {
+          // ignore — batch may have been manually advanced or deleted
+        }
+      }
       const txHash = await lightClient().broadcastTransaction(skeleton.tx);
       setBroadcastedTxHash(txHash);
       setPhase("broadcasted");
+      if (activeBatchId) {
+        try {
+          batchStore.transition(activeBatchId, "broadcasted");
+          batchStore.updateBatch(activeBatchId, {
+            pendingTxId: txHash,
+            // Sigs are now embedded in the broadcast tx — no reason to keep
+            // them around in the persisted batch.
+            partialSigs: [],
+          });
+        } catch {
+          // ignore — same recovery as above
+        }
+      }
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : String(e));
+      const base = e instanceof Error ? e.message : String(e);
+      // Append input outpoints to broadcast errors so the user can paste them
+      // straight into an explorer without digging in DevTools — diagnoses -52
+      // (input at wrong lock) and -51 (sig vs lock mismatch) by inspection.
+      const inputs = skeleton?.tx.inputs ?? [];
+      const inputSummary = inputs
+        .map((inp, i) => `  [${i}] ${hexFrom(inp.previousOutput.txHash)} #${inp.previousOutput.index}`)
+        .join("\n");
+      const debug = inputs.length > 0 ? `\n\nTx inputs:\n${inputSummary}` : "";
+      setError(`${base}${debug}`);
     } finally {
       setBusy(false);
     }
@@ -141,7 +346,84 @@ export function PayPanel() {
     setSigs([]);
     setBroadcastedTxHash(null);
     setError(null);
+    setActiveBatchId(null);
+    setFxSnapshot(new Map());
+    setFxError(null);
   };
+
+  function fillAmountsFromFx(
+    rows: RecipientRow[],
+    fx: Map<string, FxQuote>,
+  ): RecipientRow[] {
+    return rows.map((row) => {
+      if (!row.payeeId) return row;
+      const payee = payeeStore.findById(row.payeeId);
+      if (!payee) return row;
+      const quote = fx.get(payee.salaryFiat.currency.toUpperCase());
+      if (!quote) return row;
+      try {
+        const shannons = fiatToCkbShannons(payee.salaryFiat, quote);
+        const ckb = shannonsToCkbDisplay(shannons);
+        return { ...row, amountCkb: ckb, fxRate: quote.rate };
+      } catch {
+        return row;
+      }
+    });
+  }
+
+  async function loadPayees(payees: PayeeProfile[]) {
+    const existing = recipients.filter((r) => r.address.trim() || r.amountCkb.trim());
+    const additions = payees.map((p) => ({
+      address: p.walletAddress,
+      amountCkb: "",
+      payeeId: p.id,
+    }));
+    let next = [...existing, ...additions];
+    if (next.length === 0) next = [{ address: "", amountCkb: "" }];
+    setRecipients(next);
+
+    const currencies = Array.from(
+      new Set(payees.map((p) => p.salaryFiat.currency.toUpperCase())),
+    );
+    if (currencies.length === 0) return;
+
+    setFxLoading(true);
+    setFxError(null);
+    try {
+      const fx = await fetchCkbPrices(currencies);
+      const merged = new Map(fxSnapshot);
+      for (const [k, v] of fx) merged.set(k, v);
+      setFxSnapshot(merged);
+      setRecipients(fillAmountsFromFx(next, merged));
+    } catch (e) {
+      setFxError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setFxLoading(false);
+    }
+  }
+
+  async function refetchFx() {
+    const currencies = Array.from(
+      new Set(
+        recipients
+          .map((r) => (r.payeeId ? payeeStore.findById(r.payeeId)?.salaryFiat.currency : null))
+          .filter((c): c is string => Boolean(c))
+          .map((c) => c.toUpperCase()),
+      ),
+    );
+    if (currencies.length === 0) return;
+    setFxLoading(true);
+    setFxError(null);
+    try {
+      const fx = await fetchCkbPrices(currencies);
+      setFxSnapshot(fx);
+      setRecipients(fillAmountsFromFx(recipients, fx));
+    } catch (e) {
+      setFxError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setFxLoading(false);
+    }
+  }
 
   if (ckbTreasuries.length === 0) {
     return (
@@ -188,8 +470,9 @@ export function PayPanel() {
         ) : null}
       </Section>
 
-      {phase === "draft" ? (
+      {phase === "draft" && multisig ? (
         <DraftForm
+          treasuryChain={multisig.chain}
           recipients={recipients}
           setRecipients={setRecipients}
           feeRate={feeRate}
@@ -199,6 +482,11 @@ export function PayPanel() {
           onBuild={handleBuild}
           busy={busy}
           syncReady={ckbSync.started && ckbSync.peers > 0}
+          loadPayees={loadPayees}
+          refetchFx={refetchFx}
+          fxQuotes={Array.from(fxSnapshot.values())}
+          fxLoading={fxLoading}
+          fxError={fxError}
         />
       ) : null}
 
@@ -213,7 +501,7 @@ export function PayPanel() {
         <SignaturePanel
           cfg={cfg}
           sigs={sigs}
-          setSigs={setSigs}
+          setSigs={updateSigs}
           onBroadcast={handleBroadcast}
           busy={busy}
         />
@@ -233,6 +521,7 @@ export function PayPanel() {
 }
 
 function DraftForm({
+  treasuryChain,
   recipients,
   setRecipients,
   feeRate,
@@ -242,7 +531,13 @@ function DraftForm({
   onBuild,
   busy,
   syncReady,
+  loadPayees,
+  refetchFx,
+  fxQuotes,
+  fxLoading,
+  fxError,
 }: {
+  treasuryChain: PayeeProfile["preferredChain"];
   recipients: RecipientRow[];
   setRecipients: (r: RecipientRow[]) => void;
   feeRate: string;
@@ -252,7 +547,15 @@ function DraftForm({
   onBuild: () => void;
   busy: boolean;
   syncReady: boolean;
+  loadPayees: (payees: PayeeProfile[]) => void | Promise<void>;
+  refetchFx: () => void | Promise<void>;
+  fxQuotes: FxQuote[];
+  fxLoading: boolean;
+  fxError: string | null;
 }) {
+  const fxAge = fxQuotes[0]?.takenAt
+    ? new Date(fxQuotes[0].takenAt).toLocaleTimeString()
+    : null;
   return (
     <>
       <Section title="2. Recipients">
@@ -289,13 +592,23 @@ function DraftForm({
               </button>
             </div>
           ))}
-          <button
-            type="button"
-            onClick={() => setRecipients([...recipients, { address: "", amountCkb: "" }])}
-            className="text-xs text-fg-muted hover:text-fg"
-          >
-            + add recipient
-          </button>
+          <div className="flex items-center gap-4">
+            <button
+              type="button"
+              onClick={() => setRecipients([...recipients, { address: "", amountCkb: "" }])}
+              className="text-xs text-fg-muted hover:text-fg"
+            >
+              + add recipient
+            </button>
+            <PayeePicker chainFilter={treasuryChain} onAdd={loadPayees} />
+          </div>
+          <FxSnapshotPanel
+            quotes={fxQuotes}
+            loading={fxLoading}
+            error={fxError}
+            takenAtLabel={fxAge}
+            onRefresh={refetchFx}
+          />
         </div>
       </Section>
 
@@ -352,16 +665,174 @@ function PacketPanel({
           in {formatCkb(skeleton.totalIn)} · out {formatCkb(skeleton.totalOut)} · fee{" "}
           {formatCkb(skeleton.fee)} CKB
         </div>
-        <button
-          type="button"
-          onClick={() => void navigator.clipboard.writeText(packetJson)}
-          className="rounded-md border border-surface-hi bg-surface px-3 py-1 text-xs hover:text-fg"
-        >
-          Copy packet
-        </button>
+        <CopyButton value={packetJson} label="packet" title="Copy packet + stash in a bin" />
       </div>
     </Section>
   );
+}
+
+function FxSnapshotPanel({
+  quotes,
+  loading,
+  error,
+  takenAtLabel,
+  onRefresh,
+}: {
+  quotes: FxQuote[];
+  loading: boolean;
+  error: string | null;
+  takenAtLabel: string | null;
+  onRefresh: () => void;
+}) {
+  if (loading) {
+    return <p className="text-xs text-fg-muted">Fetching CKB price from CoinGecko…</p>;
+  }
+  if (error) {
+    return (
+      <p className="text-xs text-danger">
+        FX fetch failed: {error}. Enter amounts manually or{" "}
+        <button type="button" onClick={onRefresh} className="underline">
+          retry
+        </button>
+        .
+      </p>
+    );
+  }
+  if (quotes.length === 0) return null;
+  return (
+    <div className="flex items-center justify-between text-xs text-fg-muted">
+      <span>
+        FX snapshot: {quotes.map((q) => formatFxQuote(q)).join(" · ")} ·{" "}
+        <span className="text-fg">CoinGecko</span>
+        {takenAtLabel ? <> · {takenAtLabel}</> : null}
+      </span>
+      <button type="button" onClick={onRefresh} className="underline hover:text-fg">
+        re-fetch
+      </button>
+    </div>
+  );
+}
+
+/**
+ * Pre-broadcast sanity: catch the -52 (ERROR_MULTSIG_SCRIPT_HASH) class of
+ * failures before the tx leaves the renderer. Reports drift in plain bytes
+ * so we can diagnose without round-tripping the chain.
+ */
+function assertMultisigBytesMatchTreasury(
+  tx: Transaction,
+  cfg: CkbMultisigConfig,
+  multisig: CkbMultisig,
+): void {
+  const addrPayload = addressPayloadFromString(multisig.address);
+  // CCC's addressPayloadFromString returns `format` separately and `payload` =
+  // code_hash(32) | hash_type(1) | args(variable). Args therefore starts at
+  // index 33 (NOT 34 — the format byte lives in `format`, not `payload`).
+  const addrArgs = new Uint8Array(addrPayload.payload.slice(33));
+  const fromCfg = lockArgsFromConfig(cfg);
+  if (!bytesEqual(addrArgs, fromCfg)) {
+    throw new Error(
+      `Treasury config drift: blake160(multisig_script(cfg)) = 0x${bytesHex(fromCfg)}, ` +
+        `but treasury.address decodes to lock.args 0x${bytesHex(addrArgs)}. ` +
+        `cfg.pubkeyHashes order may have been mutated since wizard. ` +
+        `Re-create the treasury from debug/keystores/setup.json.`,
+    );
+  }
+
+  // Witness[0] consistency: the multisig_script we wrote must match what cfg encodes.
+  const witnessBytes = bytesFrom(tx.witnesses[0] ?? "0x");
+  const witnessArgs = WitnessArgs.fromBytes(witnessBytes);
+  const lockBytes = witnessArgs.lock ? bytesFrom(witnessArgs.lock) : new Uint8Array(0);
+  const scriptPrefixLen = 4 + 20 * cfg.n;
+  if (lockBytes.length < scriptPrefixLen) {
+    throw new Error(
+      `witness[0].lock too short: ${lockBytes.length} bytes, need at least ${scriptPrefixLen}`,
+    );
+  }
+  const expectedScript = encodeMultisigScript(cfg).multisigScript;
+  if (!bytesEqual(lockBytes.slice(0, scriptPrefixLen), expectedScript)) {
+    throw new Error(
+      `witness[0] multisig_script doesn't match cfg.pubkeyHashes — mergeSignatures bug?`,
+    );
+  }
+}
+
+/**
+ * Pre-broadcast diagnostic: surface the outpoints of every input so we can
+ * look them up on an explorer when -52 fires. Doesn't throw — just enriches
+ * the error path by dumping context onto window.__chainpay_debug.
+ */
+function dumpInputsForInspection(tx: Transaction, multisig: CkbMultisig): void {
+  const summary = tx.inputs.map((inp, i) => ({
+    slot: i,
+    txHash: hexFrom(inp.previousOutput.txHash),
+    index: Number(inp.previousOutput.index),
+  }));
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  (globalThis as any).__chainpay_debug = {
+    treasuryAddress: multisig.address,
+    expectedLockArgs: "0x" + bytesHex(
+      new Uint8Array(addressPayloadFromString(multisig.address).payload.slice(33, 53)),
+    ),
+    inputs: summary,
+  };
+  console.warn("[chainpay] tx inputs to broadcast", summary);
+}
+
+function bytesEqual(a: Uint8Array, b: Uint8Array): boolean {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;
+  return true;
+}
+
+function bytesHex(b: Uint8Array): string {
+  return Array.from(b, (x) => x.toString(16).padStart(2, "0")).join("");
+}
+
+function shannonsToCkbDisplay(shannons: bigint): string {
+  const whole = shannons / 100_000_000n;
+  const frac = (shannons % 100_000_000n).toString().padStart(8, "0").replace(/0+$/, "");
+  return frac ? `${whole.toString()}.${frac}` : whole.toString();
+}
+
+function buildBatchLinesFromRecipients(
+  rows: RecipientRow[],
+  findPayee: (id: string) => PayeeProfile | undefined,
+): PayrollBatchLine[] {
+  const lines: PayrollBatchLine[] = [];
+  for (const row of rows) {
+    if (!row.payeeId || !row.fxRate) continue;
+    const payee = findPayee(row.payeeId);
+    if (!payee) continue;
+    const shannons = ckbToShannons(row.amountCkb);
+    if (shannons === null) continue;
+    lines.push({
+      payeeId: row.payeeId,
+      fiat: payee.salaryFiat,
+      crypto: { asset: "CKB", value: shannons, decimals: 8 },
+      fxRate: row.fxRate,
+      // Per-line fee allocation is a polish concern; tx-level fee is on the
+      // skeleton already. Start at 0; a follow-up can pro-rate the actual
+      // skeleton.fee across lines.
+      feeAllocated: { asset: "CKB", value: 0n, decimals: 8 },
+    });
+  }
+  return lines;
+}
+
+function autoLabel(): string {
+  const d = new Date();
+  return `Batch ${d.toISOString().slice(0, 10)}`;
+}
+
+function monthStart(): string {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-01`;
+}
+
+function monthEnd(): string {
+  const d = new Date();
+  const next = new Date(d.getFullYear(), d.getMonth() + 1, 0);
+  return `${next.getFullYear()}-${String(next.getMonth() + 1).padStart(2, "0")}-${String(next.getDate()).padStart(2, "0")}`;
 }
 
 function SignaturePanel({
@@ -382,22 +853,36 @@ function SignaturePanel({
       <div className="space-y-3">
         {sigs.map((row, i) => (
           <div key={i} className="space-y-1">
-            <label className="text-xs text-fg-muted">
-              Signature {i + 1} — from co-signer
-              <select
-                value={row.slotIndex}
-                onChange={(e) =>
-                  setSigs(sigs.map((r, idx) => (idx === i ? { ...r, slotIndex: Number(e.target.value) } : r)))
+            <div className="flex items-center justify-between gap-2">
+              <label className="flex flex-1 items-center gap-2 text-xs text-fg-muted">
+                <span>Signature {i + 1} — from co-signer</span>
+                <select
+                  value={row.slotIndex}
+                  onChange={(e) =>
+                    setSigs(
+                      sigs.map((r, idx) =>
+                        idx === i ? { ...r, slotIndex: Number(e.target.value) } : r,
+                      ),
+                    )
+                  }
+                  className="rounded-md border border-surface-hi bg-bg px-2 py-1 text-xs"
+                >
+                  {cfg.pubkeyHashes.map((h, idx) => (
+                    <option key={idx} value={idx}>
+                      {idx + 1}: {h.slice(0, 12)}…{h.slice(-6)}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <PasteButton
+                title={`Paste signature ${i + 1}`}
+                onValue={(v) =>
+                  setSigs(
+                    sigs.map((r, idx) => (idx === i ? { ...r, signature: v.trim() } : r)),
+                  )
                 }
-                className="ml-2 rounded-md border border-surface-hi bg-bg px-2 py-1 text-xs"
-              >
-                {cfg.pubkeyHashes.map((h, idx) => (
-                  <option key={idx} value={idx}>
-                    {idx + 1}: {h.slice(0, 12)}…{h.slice(-6)}
-                  </option>
-                ))}
-              </select>
-            </label>
+              />
+            </div>
             <textarea
               value={row.signature}
               onChange={(e) =>
