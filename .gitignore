@@ -48,3 +48,6 @@ release/
 
 # Local worktrees (subagent-driven development)
 .worktrees/
+
+# Graphify output (knowledge-graph artifacts)
+graphify-out/
