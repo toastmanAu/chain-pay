@@ -90,14 +90,22 @@ function fromHex(hex: string): Uint8Array {
 }
 
 /**
- * Derive the CKB testnet address for a given 32-byte ML-DSA seed.
+ * Derive the CKB testnet address + 20-byte addrHash for a given 32-byte ML-DSA seed.
  * We instantiate a throw-away MLDSASigner (which computes the lock internally)
  * rather than replicating the hashCkb/args derivation here.
  */
-async function addressFromDsaSeed(seed: Uint8Array): Promise<string> {
+async function deriveIdentityLock(seed: Uint8Array): Promise<{ address: string; addrHash: Uint8Array }> {
   const signer = new MLDSASigner(getClient(), seed);
   const addrObj = await signer.getRecommendedAddressObj();
-  return addrObj.toString();
+  const argsHex = addrObj.script.args.startsWith("0x")
+    ? addrObj.script.args.slice(2)
+    : addrObj.script.args;
+  // First 20 bytes of args = the canonical comm-identity hash used for the refusal invariant.
+  const addrHash = new Uint8Array(20);
+  for (let i = 0; i < 20; i++) {
+    addrHash[i] = parseInt(argsHex.slice(i * 2, i * 2 + 2), 16);
+  }
+  return { address: addrObj.toString(), addrHash };
 }
 
 // ── Public API ────────────────────────────────────────────────────────────────
@@ -114,7 +122,7 @@ export async function generateIdentity(): Promise<PublicIdentity> {
   const dsa = ml_dsa65.keygen(dsaSeed);
   const kemSeed = crypto.getRandomValues(new Uint8Array(64));
   const kem = ml_kem768.keygen(kemSeed);
-  const address = await addressFromDsaSeed(dsaSeed);
+  const { address, addrHash } = await deriveIdentityLock(dsaSeed);
 
   const plain: PlainIdentity = {
     mlDsaSec: dsaSeed, // store the 32-byte seed; MLDSASigner will expand on use
@@ -122,6 +130,7 @@ export async function generateIdentity(): Promise<PublicIdentity> {
     mlDsaPub: dsa.publicKey,
     mlKemPub: kem.publicKey,
     address,
+    addrHash,
     createdAt: Date.now(),
   };
   await saveCommIdentity(plain);
@@ -134,6 +143,7 @@ export async function generateIdentity(): Promise<PublicIdentity> {
     mlDsaPub: toHex(dsa.publicKey),
     mlKemPub: toHex(kem.publicKey),
     address,
+    addrHash: toHex(addrHash),
     createdAt: plain.createdAt,
   };
 }
@@ -223,12 +233,15 @@ export async function sendMessage(
     const signer = new MLDSASigner(getClient(), secrets.mlDsaSec);
     const { script: senderLock } = await signer.getRecommendedAddressObj();
 
-    // Fetch recipient's ML-KEM public key from their Profile Cell.
+    // Fetch recipient's profile (ML-KEM public key + ML-DSA pubkey + metadata).
     const builder = new CEMPTransactionBuilder(getClient());
-    const kemPubKey = await builder.fetchRecipientProfile(recipientLock);
+    const profile = await builder.fetchRecipientProfile(recipientLock);
+    if (!profile) {
+      throw new Error(`profile not found for recipient ${recipientAddress}`);
+    }
 
     // Encrypt envelope bytes directly (not via buildSendMessageTx which expects a string).
-    const encryptedData = await CEMPPQ.encrypt(envelopeBytes, kemPubKey);
+    const encryptedData = await CEMPPQ.encrypt(envelopeBytes, profile.mlKemPubKey);
 
     // Build tx manually, matching buildSendMessageTx's output structure.
     const tx = ccc.Transaction.from({
@@ -310,12 +323,10 @@ export async function decryptIncoming(messageOutPoint: {
 }
 
 /**
- * Resolve a remote participant's Profile Cell to obtain their ML-KEM public key.
+ * Resolve a remote participant's Profile Cell.
  *
- * Phase 2.7a: returns only the ML-KEM public key extracted by CEMP-PQ's
- * fetchRecipientProfile. The mlDsaPubKey and metadata fields are empty
- * placeholders — full enrichment is deferred to Phase 2.7b which will parse
- * the profile molecule directly.
+ * Returns the full profile (ML-DSA pubkey, ML-KEM pubkey, UTF-8 metadata).
+ * Throws if the profile cell is not found.
  */
 export async function resolveProfile(
   address: string,
@@ -324,22 +335,15 @@ export async function resolveProfile(
   const lock = addrObj.script;
   const builder = new CEMPTransactionBuilder(getClient());
 
-  let kemPubKey: Uint8Array;
-  try {
-    // Runtime returns bare Uint8Array (KEM pubkey bytes) and throws if not found.
-    // The .d.ts ProfileFetchResult shape is aspirational — actual JS returns Uint8Array.
-    kemPubKey = await builder.fetchRecipientProfile(lock);
-  } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err);
-    throw new Error(`profile not found for ${address}: ${msg}`);
+  const profile = await builder.fetchRecipientProfile(lock);
+  if (!profile) {
+    throw new Error(`profile not found for ${address}`);
   }
 
   return {
     address,
-    // TODO(2.7b): fetch ML-DSA pubkey by parsing the profile molecule directly.
-    mlDsaPubKey: "",
-    mlKemPubKey: toHex(kemPubKey),
-    // TODO(2.7b): decode metadata field from profile molecule.
-    metadata: "",
+    mlDsaPubKey: toHex(profile.mlDsaPubKey),
+    mlKemPubKey: toHex(profile.mlKemPubKey),
+    metadata: new TextDecoder().decode(profile.metadata),
   };
 }
