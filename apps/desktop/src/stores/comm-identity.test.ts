@@ -10,6 +10,7 @@ const FIXTURE = {
   mlDsaPub: "0x" + "11".repeat(1952),
   mlKemPub: "0x" + "22".repeat(1184),
   address: "ckt1qmldsa...",
+  addrHash: "0x" + "33".repeat(20),
   createdAt: 1747900000_000,
   fundedAt: null,
   profileTxHash: null,
@@ -66,5 +67,48 @@ describe("comm-identity store", () => {
     useCommIdentityStore.getState().setIdentity(FIXTURE);
     useCommIdentityStore.persist.rehydrate();
     expect(useCommIdentityStore.getState().identity).toEqual(FIXTURE);
+  });
+});
+
+describe("comm-identity store — addrHash field (v2 migration)", () => {
+  beforeEach(resetStore);
+
+  it("setIdentity persists addrHash", () => {
+    useCommIdentityStore.getState().setIdentity(FIXTURE);
+    expect(useCommIdentityStore.getState().identity?.addrHash).toBe("0x" + "33".repeat(20));
+  });
+
+  it("setIdentity rejects records without addrHash", () => {
+    const idMissingHash = {
+      mlDsaPub: "0x00",
+      mlKemPub: "0x00",
+      address: "ckt1qmldsa...",
+      // addrHash missing
+      createdAt: 0,
+      fundedAt: null,
+      profileTxHash: null,
+      profilePublishedAt: null,
+    } as never;
+    expect(() => useCommIdentityStore.getState().setIdentity(idMissingHash)).toThrow(/addrHash/i);
+  });
+
+  it("v1 records are dropped on rehydrate", () => {
+    const v1State = {
+      state: {
+        identity: {
+          mlDsaPub: "0x00",
+          mlKemPub: "0x00",
+          address: "ckt1qoldv1",
+          createdAt: 0,
+          fundedAt: null,
+          profileTxHash: null,
+          profilePublishedAt: null,
+        },
+      },
+      version: 1,
+    };
+    globalThis.localStorage?.setItem("chain-pay:comm-identity", JSON.stringify(v1State));
+    void useCommIdentityStore.persist.rehydrate();
+    expect(useCommIdentityStore.getState().identity).toBeNull();
   });
 });

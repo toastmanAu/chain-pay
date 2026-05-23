@@ -8,6 +8,8 @@ export interface CommIdentityState {
   mlKemPub: string;
   /** ckb-mldsa-lock address derived from mlDsaPub. */
   address: string;
+  /** 0x-prefixed 20-byte hex of address args (cached at keygen for sync access). */
+  addrHash: string;
   /** Epoch ms. */
   createdAt: number;
   /** Epoch ms when the address first observed >= 70 CKB. Null until funded. */
@@ -38,6 +40,9 @@ export const useCommIdentityStore = create<CommIdentityStore>()(
       identity: null,
       setIdentity: (identity) => {
         if (get().identity) throw new Error("comm identity already exists; clear() first");
+        if (!identity.addrHash || !/^0x[0-9a-f]{40}$/i.test(identity.addrHash)) {
+          throw new Error("addrHash must be a 0x-prefixed 20-byte hex string");
+        }
         set({ identity });
       },
       recordFunded: (epochMs) => {
@@ -55,7 +60,14 @@ export const useCommIdentityStore = create<CommIdentityStore>()(
     {
       name: "chain-pay:comm-identity",
       storage: createJSONStorage(() => storageImpl),
-      version: 1,
+      version: 2,
+      migrate: (_persisted, fromVersion) => {
+        if (fromVersion < 2) {
+          // Pre-v2 records lacked addrHash. Drop them — no production users yet.
+          return { identity: null };
+        }
+        return _persisted as { identity: CommIdentityState | null };
+      },
       partialize: (state) => ({ identity: state.identity }),
     },
   ),
