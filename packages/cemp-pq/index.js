@@ -262,3 +262,6 @@ export class CEMPPQ {
         return new Uint8Array(decryptedBuffer);
     }
 }
+
+// Re-export tx-builder symbols so downstream code can import from "cemp-pq" (root).
+export { MLDSASigner, CEMPTransactionBuilder } from './tx-builder.js';
