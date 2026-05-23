@@ -11,9 +11,18 @@ import { SignPanel } from "./features/sign/SignPanel";
 import { Employees } from "./features/employees/Employees";
 import { Settings } from "./features/settings/Settings";
 import { useSyncStore } from "./stores/sync";
+import { useNetworkConfigStore } from "./stores/network-config";
+import { lightClient } from "./lib/light-client/client";
 
 export function App() {
   const startCkb = useSyncStore((s) => s.startCkb);
+  const broadcastRpcUrl = useNetworkConfigStore((s) => s.broadcastRpcUrl);
+
+  useEffect(() => {
+    // Sync the persisted broadcast-RPC override to the LightClientHost on
+    // every change. The host's setter is idempotent.
+    lightClient().setBroadcastRpcUrl(broadcastRpcUrl);
+  }, [broadcastRpcUrl]);
 
   useEffect(() => {
     // Default to testnet for the Phase 2 smoke-test loop. A network selector
