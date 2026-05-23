@@ -182,6 +182,13 @@ export class CEMPTransactionBuilder {
         await tx.completeInputsByCapacity(senderSigner);
         await tx.completeFeeBy(senderSigner, feeRate);
 
+        // Phase 2.7b-1: write MessagePointer into the notification cell so receivers
+        // can locate the corresponding Message Cell. CCC tx.hash() excludes the
+        // witness, so it is stable here before signOnlyTransaction fills it in.
+        const messageTxHash = tx.hash();
+        const messagePointer = serializeMessagePointer(messageTxHash, 0);
+        tx.outputsData[1] = ccc.hexFrom(messagePointer);
+
         return tx;
     }
 }
