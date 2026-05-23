@@ -195,3 +195,156 @@ describe("buildPaymentSkeleton", () => {
     ).toThrow(/recipient/i);
   });
 });
+
+describe("buildPaymentSkeleton — N-to-many (payroll batch)", () => {
+  const payeeA = Script.from({
+    codeHash: SECP256K1_BLAKE160_CODE_HASH,
+    hashType: "type",
+    args: "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  });
+  const payeeB = Script.from({
+    codeHash: SECP256K1_BLAKE160_CODE_HASH,
+    hashType: "type",
+    args: "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  });
+  const payeeC = Script.from({
+    codeHash: SECP256K1_BLAKE160_CODE_HASH,
+    hashType: "type",
+    args: "0xcccccccccccccccccccccccccccccccccccccccc",
+  });
+
+  it("fans out a single input across 3 payees + change", () => {
+    const cells = [makeCell(500n * CKB, treasuryScript, "01")];
+    const result = buildPaymentSkeleton({
+      treasuryConfig: cfg,
+      treasuryScript,
+      recipients: [
+        { lock: payeeA, capacity: 75n * CKB },
+        { lock: payeeB, capacity: 75n * CKB },
+        { lock: payeeC, capacity: 75n * CKB },
+      ],
+      availableCells: cells,
+      network: "testnet",
+      feeRateShannonsPerByte: 1000n,
+    });
+
+    expect(result.tx.inputs.length).toBe(1);
+    expect(result.tx.outputs.length).toBe(4); // 3 payees + 1 change
+    expect(result.tx.outputs[0]?.capacity).toBe(75n * CKB);
+    expect(result.tx.outputs[1]?.capacity).toBe(75n * CKB);
+    expect(result.tx.outputs[2]?.capacity).toBe(75n * CKB);
+    expect(result.tx.outputs[3]?.lock.codeHash).toBe(treasuryScript.codeHash);
+    expect(result.totalOut).toBe(225n * CKB + result.change);
+    expect(result.change).toBeGreaterThanOrEqual(61n * CKB);
+  });
+
+  it("preserves recipient order in outputs (deterministic indexing)", () => {
+    const cells = [makeCell(500n * CKB, treasuryScript, "01")];
+    const result = buildPaymentSkeleton({
+      treasuryConfig: cfg,
+      treasuryScript,
+      recipients: [
+        { lock: payeeC, capacity: 75n * CKB }, // C first
+        { lock: payeeA, capacity: 75n * CKB }, // A second
+        { lock: payeeB, capacity: 75n * CKB }, // B third
+      ],
+      availableCells: cells,
+      network: "testnet",
+      feeRateShannonsPerByte: 1000n,
+    });
+
+    expect(result.tx.outputs[0]?.lock.args).toBe(payeeC.args);
+    expect(result.tx.outputs[1]?.lock.args).toBe(payeeA.args);
+    expect(result.tx.outputs[2]?.lock.args).toBe(payeeB.args);
+  });
+
+  it("uses multiple inputs when the batch is larger than any single cell", () => {
+    // 150 + 150 = 300 CKB inputs, 100 + 100 = 200 CKB outputs → ~100 CKB change,
+    // comfortably above 61 CKB min so the change cell survives.
+    const cells = [
+      makeCell(150n * CKB, treasuryScript, "01"),
+      makeCell(150n * CKB, treasuryScript, "02"),
+      makeCell(150n * CKB, treasuryScript, "03"),
+    ];
+    const result = buildPaymentSkeleton({
+      treasuryConfig: cfg,
+      treasuryScript,
+      recipients: [
+        { lock: payeeA, capacity: 100n * CKB },
+        { lock: payeeB, capacity: 100n * CKB },
+      ],
+      availableCells: cells,
+      network: "testnet",
+      feeRateShannonsPerByte: 1000n,
+    });
+
+    expect(result.tx.inputs.length).toBeGreaterThanOrEqual(2);
+    expect(result.tx.outputs.length).toBe(3); // 2 payees + change
+    expect(result.change).toBeGreaterThanOrEqual(61n * CKB);
+  });
+
+  it("pads tx.witnesses to match tx.inputs.length so on-chain & local digests agree", () => {
+    // Regression for testnet -52 (ERROR_VERIFICATION): when a tx has >1 input
+    // in the same script group but witnesses[i] is missing for i>0, the
+    // on-chain multisig script breaks its hash loop at CKB_INDEX_OUT_OF_BOUND
+    // while our local treasurySighashDigest falls back to "0x" — digests
+    // diverge → sigs verify locally but fail on chain. Build must pad.
+    const cells = [
+      makeCell(150n * CKB, treasuryScript, "01"),
+      makeCell(150n * CKB, treasuryScript, "02"),
+    ];
+    const result = buildPaymentSkeleton({
+      treasuryConfig: cfg,
+      treasuryScript,
+      recipients: [{ lock: payeeA, capacity: 200n * CKB }],
+      availableCells: cells,
+      network: "testnet",
+      feeRateShannonsPerByte: 1000n,
+    });
+    expect(result.tx.inputs.length).toBe(2);
+    expect(result.tx.witnesses.length).toBe(result.tx.inputs.length);
+    // witness[0] = the primed multisig placeholder; later witnesses = empty 0x.
+    expect(result.tx.witnesses[1]).toBe("0x");
+  });
+
+  it("supports a payee receiving multiple disbursements in the same batch (no aggregation)", () => {
+    // A payee that appears twice in the recipient list stays as two distinct output cells.
+    // Useful for vested-split semantics later; aggregation is a UI concern, not a builder concern.
+    const cells = [makeCell(500n * CKB, treasuryScript, "01")];
+    const result = buildPaymentSkeleton({
+      treasuryConfig: cfg,
+      treasuryScript,
+      recipients: [
+        { lock: payeeA, capacity: 75n * CKB }, // salary
+        { lock: payeeA, capacity: 75n * CKB }, // bonus, separate cell
+        { lock: payeeB, capacity: 75n * CKB },
+      ],
+      availableCells: cells,
+      network: "testnet",
+      feeRateShannonsPerByte: 1000n,
+    });
+
+    expect(result.tx.outputs.length).toBe(4); // 3 outputs (2 to A, 1 to B) + change
+    expect(result.tx.outputs[0]?.lock.args).toBe(payeeA.args);
+    expect(result.tx.outputs[1]?.lock.args).toBe(payeeA.args);
+    expect(result.tx.outputs[2]?.lock.args).toBe(payeeB.args);
+  });
+
+  it("rejects the batch if any single recipient is below min capacity (won't partially fail later)", () => {
+    const cells = [makeCell(500n * CKB, treasuryScript, "01")];
+    expect(() =>
+      buildPaymentSkeleton({
+        treasuryConfig: cfg,
+        treasuryScript,
+        recipients: [
+          { lock: payeeA, capacity: 70n * CKB }, // OK
+          { lock: payeeB, capacity: 30n * CKB }, // below 61 CKB min
+          { lock: payeeC, capacity: 70n * CKB }, // OK
+        ],
+        availableCells: cells,
+        network: "testnet",
+        feeRateShannonsPerByte: 1000n,
+      }),
+    ).toThrow(/min capacity/i);
+  });
+});

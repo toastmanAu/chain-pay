@@ -111,6 +111,18 @@ export function buildPaymentSkeleton(input: PaymentSkeletonInput): PaymentSkelet
     );
   }
 
+  // Pad witnesses to match inputs.length. The on-chain multisig script
+  // iterates `ckb_load_witness(i, GROUP_INPUT)` and `break`s on
+  // CKB_INDEX_OUT_OF_BOUND — so if witnesses.length < inputs.length, the
+  // chain stops hashing earlier than our local `treasurySighashDigest`
+  // does (which falls back to "0x" for missing slots). The two digests
+  // then diverge by the length-prefix bytes of every missing witness,
+  // sigs verify locally but fail on-chain with -52 (ERROR_VERIFICATION).
+  // Padding with empty witnesses keeps both digest formulas in sync.
+  while (tx.witnesses.length < tx.inputs.length) {
+    tx.witnesses.push(hexFrom("0x"));
+  }
+
   // Try with change first, then drop if change < minCapacity.
   const minChange = minCapacityForLock(input.treasuryScript);
   appendChangeOutput(tx, input.treasuryScript, 0n); // placeholder so size is right
