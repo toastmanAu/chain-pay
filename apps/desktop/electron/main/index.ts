@@ -12,12 +12,18 @@ const scriptSrc = isDev
   ? "script-src 'self' 'wasm-unsafe-eval' 'unsafe-inline' blob:"
   : "script-src 'self' 'wasm-unsafe-eval' blob:";
 
+// connect-src needs `http:` because ChainPay points at user-configured local /
+// LAN CKB nodes (e.g. http://192.168.68.134:8114 in dev, or a self-hosted
+// full-node on the same machine). A desktop wallet's threat model differs
+// from a browser-served page — there's no XSS surface that could exfil to an
+// attacker-controlled HTTP endpoint. `https:` / `wss:` / `ws:` stay allowed
+// for public testnet/mainnet RPCs.
 const CSP = [
   "default-src 'self'",
   scriptSrc,
   "worker-src 'self' blob:",
   "style-src 'self' 'unsafe-inline'",
-  "connect-src 'self' https: wss: ws: blob:",
+  "connect-src 'self' http: https: wss: ws: blob:",
   "img-src 'self' data: https:",
   "font-src 'self' data:",
 ].join("; ");
