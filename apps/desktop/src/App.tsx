@@ -13,6 +13,59 @@ import { Settings } from "./features/settings/Settings";
 import { useSyncStore } from "./stores/sync";
 import { useNetworkConfigStore } from "./stores/network-config";
 import { lightClient } from "./lib/light-client/client";
+import { createCommTransport } from "./lib/comm";
+import { useCommIdentityStore } from "./stores/comm-identity";
+import { usePeerBookStore } from "./stores/peer-book";
+import { useTreasuryStore } from "./stores/treasury";
+
+function hexToBytes(hex: string): Uint8Array {
+  const s = hex.startsWith("0x") ? hex.slice(2) : hex;
+  const out = new Uint8Array(s.length / 2);
+  for (let i = 0; i < out.length; i++) {
+    out[i] = parseInt(s.slice(i * 2, i * 2 + 2), 16);
+  }
+  return out;
+}
+
+/**
+ * Boot effect: auto-starts the CommTransport when an identity with a published
+ * profile exists, and wires the peer-book's refusal-invariant getter to live
+ * treasury state. Re-evaluates on every comm-identity store change.
+ */
+function useCommTransportBoot(): void {
+  useEffect(() => {
+    // Wire peer-book's knownSignersGetter to live treasury state.
+    usePeerBookStore.setState({
+      knownSignersGetter: () => {
+        const treasuries = useTreasuryStore.getState().treasuries;
+        return treasuries.flatMap((t) =>
+          "pubkeyHashes" in t.multisig
+            ? t.multisig.pubkeyHashes.map((h) => ({
+                treasuryId: t.id,
+                pubkeyHash: hexToBytes(h),
+              }))
+            : [],
+        );
+      },
+    });
+
+    function maybeStart(): void {
+      const transport = createCommTransport();
+      const id = useCommIdentityStore.getState().identity;
+      if (transport && id?.profileTxHash) {
+        void transport.start();
+      }
+    }
+
+    maybeStart();
+    const unsub = useCommIdentityStore.subscribe(maybeStart);
+    return () => {
+      unsub();
+      const transport = createCommTransport();
+      void transport?.stop();
+    };
+  }, []);
+}
 
 export function App() {
   const startCkb = useSyncStore((s) => s.startCkb);
@@ -31,6 +84,8 @@ export function App() {
     // every watched lock under the new network.
     void startCkb("testnet");
   }, [startCkb]);
+
+  useCommTransportBoot();
 
   return (
     <AppShell>
