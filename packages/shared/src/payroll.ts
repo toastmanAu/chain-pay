@@ -73,6 +73,14 @@ export interface PayrollBatchLine {
   feeAllocated: Money;
 }
 
+/**
+ * Chain-agnostic opaque string carrying a serialised transfer packet.
+ * CKB adapter: JSON produced by encodeTransferPacket (transfer-packet.ts).
+ * EVM adapter: JSON of a Safe-protocol SafeTx skeleton (Phase 3+).
+ * Travels encrypted over the CommTransport channel.
+ */
+export type TransferPacket = string & { readonly __brand: "TransferPacket" };
+
 export interface AccountingJournalPreview {
   batchId: string;
   entries: JournalEntry[];
