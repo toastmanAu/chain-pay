@@ -45,3 +45,6 @@ release/
 *.exe
 *.AppImage
 *.deb
+
+# Local worktrees (subagent-driven development)
+.worktrees/
