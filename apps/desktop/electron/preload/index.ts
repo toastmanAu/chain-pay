@@ -16,12 +16,14 @@ const chainpayApi = {
       mlDsaPub: string;
       mlKemPub: string;
       address: string;
+      addrHash: string;
       createdAt: number;
     } | null> => ipcRenderer.invoke("commIdentity:publicInfo"),
     generate: (): Promise<{
       mlDsaPub: string;
       mlKemPub: string;
       address: string;
+      addrHash: string;
       createdAt: number;
     }> => ipcRenderer.invoke("commIdentity:generate"),
     delete: (): Promise<void> => ipcRenderer.invoke("commIdentity:delete"),
