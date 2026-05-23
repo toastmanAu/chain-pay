@@ -6,6 +6,8 @@ import {
 } from "@nervosnetwork/ckb-light-client-js";
 import {
   Cell,
+  ClientPublicMainnet,
+  ClientPublicTestnet,
   hexFrom,
   numFrom,
   OutPoint,
@@ -45,6 +47,22 @@ export class LightClientHost {
   private snapshotListeners = new Set<SnapshotListener>();
   private errorListeners = new Set<ErrorListener>();
   private lastSnapshot: SyncSnapshot | null = null;
+  /**
+   * Optional full-node JSON-RPC URL. When non-empty, transactions are
+   * broadcast through it instead of the embedded light client's relay
+   * protocol — which is unreliable on public testnet because most peers
+   * reject tx relay from light clients (anti-spam). Set this to a CKB node
+   * you control (e.g. `http://192.168.68.134:8114`).
+   */
+  private broadcastRpcUrl = "";
+
+  setBroadcastRpcUrl(url: string): void {
+    this.broadcastRpcUrl = url.trim();
+  }
+
+  getBroadcastRpcUrl(): string {
+    return this.broadcastRpcUrl;
+  }
 
   async start(network: CkbNetwork): Promise<void> {
     if (this.client) {
@@ -171,10 +189,22 @@ export class LightClientHost {
     );
   }
 
-  /** Broadcast a fully-signed transaction. Returns the txHash. */
+  /**
+   * Broadcast a fully-signed transaction. Returns the txHash.
+   *
+   * If `broadcastRpcUrl` is configured, routes through a full-node JSON-RPC
+   * client (CCC's `ClientPublic{Testnet,Mainnet}`). Otherwise falls back to
+   * the embedded light client's relay protocol — works for reads but is
+   * unreliable for tx submission on public testnet (peers drop LC-relayed
+   * txs as anti-spam).
+   */
   async broadcastTransaction(tx: Transaction): Promise<Hex> {
-    // CCC's `Transaction` is structurally a TransactionLike at runtime; the
-    // strict-optional typing diff means TS refuses the direct assignment.
+    if (this.broadcastRpcUrl) {
+      const ClientCtor = this.network === "mainnet" ? ClientPublicMainnet : ClientPublicTestnet;
+      const fullNodeClient = new ClientCtor({ url: this.broadcastRpcUrl });
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      return fullNodeClient.sendTransaction(tx as any);
+    }
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     return this.requireClient().sendTransaction(tx as any);
   }
