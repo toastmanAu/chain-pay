@@ -83,7 +83,11 @@ export class CEMPTransactionBuilder {
     }
 
     /**
-     * Discovery: Fetch the recipient's ML-KEM public key from their Profile Cell.
+     * Discovery: Fetch the recipient's Profile Cell.
+     * Returns { mlDsaPubKey, mlKemPubKey, metadata } on hit, null on miss.
+     * Profile molecule (per serializeProfile in index.js):
+     *   total(4) | off_dsa(4)=16 | off_kem(4) | off_meta(4)
+     *   | dsa_len(4) + dsa | kem_len(4) + kem | meta_len(4) + meta
      */
     async fetchRecipientProfile(recipientLock) {
         const typeIdCodeHash = "0x00000000000000000000000000000000000000000000000000545950455f4944";
@@ -97,12 +101,20 @@ export class CEMPTransactionBuilder {
             if (cell.cellOutput.type && cell.cellOutput.type.codeHash === typeIdCodeHash) {
                 const data = ccc.bytesFrom(cell.outputData);
                 const view = new DataView(data.buffer, data.byteOffset, data.byteLength);
+                const off_dsa = view.getUint32(4, true);
                 const off_kem = view.getUint32(8, true);
+                const off_meta = view.getUint32(12, true);
+                const dsaLen = view.getUint32(off_dsa, true);
                 const kemLen = view.getUint32(off_kem, true);
-                return data.slice(off_kem + 4, off_kem + 4 + kemLen);
+                const metaLen = view.getUint32(off_meta, true);
+                return {
+                    mlDsaPubKey: data.slice(off_dsa + 4, off_dsa + 4 + dsaLen),
+                    mlKemPubKey: data.slice(off_kem + 4, off_kem + 4 + kemLen),
+                    metadata: data.slice(off_meta + 4, off_meta + 4 + metaLen),
+                };
             }
         }
-        throw new Error("Recipient profile not found on-chain.");
+        return null;
     }
 
     /**
@@ -142,7 +154,11 @@ export class CEMPTransactionBuilder {
         
         // 1. Discover Recipient's Public Key
         if (!recipientMLKEMPubKey) {
-            recipientMLKEMPubKey = await this.fetchRecipientProfile(recipientLock);
+            const profile = await this.fetchRecipientProfile(recipientLock);
+            if (!profile) {
+                throw new Error("Recipient profile not found on-chain.");
+            }
+            recipientMLKEMPubKey = profile.mlKemPubKey;
         }
 
         // 2. Encrypt Message
