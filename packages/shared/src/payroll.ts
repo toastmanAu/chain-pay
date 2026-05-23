@@ -28,6 +28,31 @@ export interface PayrollBatch extends Identified, Timestamped {
   state: PayrollBatchState;
   /** Pending tx id once the batch produces a single multisig tx. */
   pendingTxId?: string;
+  /**
+   * Frozen skeleton — hex of the CCC Transaction's serialized bytes at build
+   * time. Required so PayPanel can resume from step 5/6 across navigation +
+   * window reloads without re-running buildPaymentSkeleton (which would
+   * re-fetch FX and shift output capacities → break already-collected sigs).
+   */
+  txBytes?: string;
+  /** Sighash digest computed once at build — what co-signers sign against. */
+  sighashDigest?: string;
+  /** Summary fields cached so we can re-encode the transfer packet on resume. */
+  totals?: PayrollBatchTotals;
+  /** Partial signatures collected so far. Cleared on successful broadcast. */
+  partialSigs?: PartialSigEntry[];
+}
+
+export interface PayrollBatchTotals {
+  totalIn: bigint;
+  totalOut: bigint;
+  fee: bigint;
+  change: bigint;
+}
+
+export interface PartialSigEntry {
+  slotIndex: number;
+  signature: string;
 }
 
 export type PayrollBatchState =
