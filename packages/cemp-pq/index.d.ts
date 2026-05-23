@@ -50,9 +50,7 @@ export interface ProfileFetchResult {
 
 export class CEMPTransactionBuilder {
   constructor(client: ccc.Client);
-  // NOTE: runtime returns bare Uint8Array (KEM pubkey bytes) and throws if not found.
-  // The .d.ts ProfileFetchResult shape is aspirational for 2.7b enrichment.
-  fetchRecipientProfile(recipientLock: ccc.Script): Promise<Uint8Array>;
+  fetchRecipientProfile(recipientLock: ccc.Script): Promise<ProfileFetchResult | null>;
   buildCreateProfileTx(
     signer: MLDSASigner,
     mlDSAPubKey: Uint8Array,
