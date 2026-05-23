@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useNetworkConfigStore } from "@/stores/network-config";
 import { lightClient } from "@/lib/light-client/client";
+import { CommChannelSection } from "./CommChannelSection";
 
 export function Settings() {
   const broadcastRpcUrl = useNetworkConfigStore((s) => s.broadcastRpcUrl);
@@ -91,6 +92,7 @@ export function Settings() {
         <Card title="Signer transports" body="ckb-cli keystore (CKB). JoyID, Ledger, MetaMask, WalletConnect — Phase 3+" />
         <Card title="Frappe backend" body="Not connected · Phase 4" />
       </div>
+      <CommChannelSection />
     </div>
   );
 }
