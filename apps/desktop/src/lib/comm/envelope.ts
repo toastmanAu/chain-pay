@@ -56,7 +56,8 @@ export function decodeEnvelope<T = unknown>(bytes: Uint8Array): DecodedEnvelope<
     throw new EnvelopeMalformedError(`unsupported envelope version ${version}`);
   }
 
-  const kindByte = bytes[1];
+  // bytes.length >= ENVELOPE_HEADER_LEN (22) is guaranteed above, so index 1 exists.
+  const kindByte = bytes[1] as number;
   const kind = BYTE_TO_KIND[kindByte];
   if (!kind) {
     throw new EnvelopeMalformedError(`unknown envelope kind byte 0x${kindByte.toString(16)}`);
