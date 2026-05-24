@@ -41,6 +41,21 @@ export interface PayrollBatch extends Identified, Timestamped {
   totals?: PayrollBatchTotals;
   /** Partial signatures collected so far. Cleared on successful broadcast. */
   partialSigs?: PartialSigEntry[];
+  /**
+   * Per-slot send status for the operator's comm-channel dispatch (2.7b-2).
+   * Keyed by multisig slotIndex. Absent when comm send hasn't been attempted.
+   */
+  commSendStatus?: Record<number, CommSendSlotStatus>;
+}
+
+export interface CommSendSlotStatus {
+  status: "idle" | "sending" | "sent" | "acked" | "error";
+  /** Tx hash of the operator's notification cell on the signer's lock. */
+  txHash?: string;
+  /** Human-readable failure reason for status === "error". */
+  error?: string;
+  /** Epoch ms of the last status change. */
+  updatedAt: number;
 }
 
 export interface PayrollBatchTotals {

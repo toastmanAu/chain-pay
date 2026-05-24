@@ -213,3 +213,175 @@ describe("payroll-batches store", () => {
     expect(second.usePayrollBatchesStore.getState().selectedDraftId).toBeNull();
   });
 });
+
+// ── 2.7b-2: drainIncomingSigsInto + recordCommSendStatus + auto-transition ───
+
+describe("payroll-batches store — comm-channel auto-match", () => {
+  const DIGEST = "0x" + "ab".repeat(32);
+  // Two real secp keys so we can produce recoverable sigs.
+  const KEY_A = "0x" + "11".repeat(32);
+  const KEY_B = "0x" + "22".repeat(32);
+  const KEY_C = "0x" + "33".repeat(32);
+
+  async function setup() {
+    const batches = await import("./payroll-batches");
+    const incoming = await import("./incoming-sigs");
+    const signer = await import("@/lib/signers/ckb-secp256k1");
+    return { batches, incoming, signer };
+  }
+
+  function calculatedBatch(): PayrollBatch {
+    return {
+      ...sampleBatch,
+      id: "comm-1",
+      state: "calculated",
+      sighashDigest: DIGEST,
+      partialSigs: [],
+    };
+  }
+
+  it("drainIncomingSigsInto pulls a valid buffered sig and stamps signerPubkeyHash + sourceCommTx", async () => {
+    const { batches, incoming, signer } = await setup();
+    const hashA = signer.pubkeyHashFromPrivateKey(KEY_A);
+    const sigA = signer.signDigest(DIGEST, KEY_A);
+
+    batches.usePayrollBatchesStore.getState().addBatch(calculatedBatch());
+    incoming.useIncomingSigsStore.getState().enqueue({
+      sighashDigest: DIGEST,
+      slotIndex: 0,
+      signature: sigA,
+      senderAddrHash: "0x" + "aa".repeat(20),
+      receivedAt: 1700000000000,
+      sourceCommTx: "0xc0c0",
+    });
+
+    const result = batches.usePayrollBatchesStore.getState().drainIncomingSigsInto(
+      "comm-1",
+      { m: 2, pubkeyHashes: [hashA, signer.pubkeyHashFromPrivateKey(KEY_B)] },
+    );
+
+    expect(result).toEqual({ merged: 1, rejected: 0 });
+    const got = batches.usePayrollBatchesStore.getState().findById("comm-1");
+    expect(got?.partialSigs).toHaveLength(1);
+    expect(got?.partialSigs?.[0]?.slotIndex).toBe(0);
+    expect(got?.partialSigs?.[0]?.signerPubkeyHash).toBe(hashA);
+    expect(got?.partialSigs?.[0]?.sourceCommTx).toBe("0xc0c0");
+    expect(incoming.useIncomingSigsStore.getState().bySighash[DIGEST]).toBeUndefined();
+  });
+
+  it("drainIncomingSigsInto dedups by slotIndex — first valid wins", async () => {
+    const { batches, incoming, signer } = await setup();
+    const hashA = signer.pubkeyHashFromPrivateKey(KEY_A);
+    const hashB = signer.pubkeyHashFromPrivateKey(KEY_B);
+    const sigA = signer.signDigest(DIGEST, KEY_A);
+    const sigB = signer.signDigest(DIGEST, KEY_B);
+
+    batches.usePayrollBatchesStore.getState().addBatch({
+      ...calculatedBatch(),
+      partialSigs: [
+        {
+          slotIndex: 0,
+          signature: sigA,
+          signerPubkeyHash: hashA,
+        },
+      ],
+    });
+    // Second sig for slot 0 (from a different signer) — should be rejected as dup.
+    incoming.useIncomingSigsStore.getState().enqueue({
+      sighashDigest: DIGEST,
+      slotIndex: 0,
+      signature: sigB,
+      senderAddrHash: "0x" + "bb".repeat(20),
+      receivedAt: 1700000000000,
+    });
+
+    const result = batches.usePayrollBatchesStore.getState().drainIncomingSigsInto(
+      "comm-1",
+      { m: 2, pubkeyHashes: [hashA, hashB] },
+    );
+    expect(result.rejected).toBe(1);
+    expect(batches.usePayrollBatchesStore.getState().findById("comm-1")?.partialSigs).toHaveLength(
+      1,
+    );
+  });
+
+  it("drainIncomingSigsInto rejects a sig that recovers to the wrong slot hash", async () => {
+    const { batches, incoming, signer } = await setup();
+    const hashA = signer.pubkeyHashFromPrivateKey(KEY_A);
+    const hashB = signer.pubkeyHashFromPrivateKey(KEY_B);
+    const hashC = signer.pubkeyHashFromPrivateKey(KEY_C);
+    const sigC = signer.signDigest(DIGEST, KEY_C);
+
+    batches.usePayrollBatchesStore.getState().addBatch(calculatedBatch());
+    // KEY_C signed, but pubkeyHashes only knows A and B — recovered hash won't match either.
+    incoming.useIncomingSigsStore.getState().enqueue({
+      sighashDigest: DIGEST,
+      slotIndex: 0,
+      signature: sigC,
+      senderAddrHash: "0x" + "cc".repeat(20),
+      receivedAt: 1700000000000,
+    });
+    void hashC;
+
+    const result = batches.usePayrollBatchesStore.getState().drainIncomingSigsInto(
+      "comm-1",
+      { m: 2, pubkeyHashes: [hashA, hashB] },
+    );
+    expect(result).toEqual({ merged: 0, rejected: 1 });
+    expect(batches.usePayrollBatchesStore.getState().findById("comm-1")?.partialSigs).toEqual([]);
+  });
+
+  it("drainIncomingSigsInto on a missing batch returns zero merges and zero rejects", async () => {
+    const { batches } = await setup();
+    const result = batches.usePayrollBatchesStore.getState().drainIncomingSigsInto(
+      "does-not-exist",
+      { m: 2, pubkeyHashes: [`0x${"00".repeat(20)}`] },
+    );
+    expect(result).toEqual({ merged: 0, rejected: 0 });
+  });
+
+  it("drainIncomingSigsInto auto-transitions calculated → approved when M sigs collected", async () => {
+    const { batches, incoming, signer } = await setup();
+    const hashA = signer.pubkeyHashFromPrivateKey(KEY_A);
+    const hashB = signer.pubkeyHashFromPrivateKey(KEY_B);
+    const sigA = signer.signDigest(DIGEST, KEY_A);
+    const sigB = signer.signDigest(DIGEST, KEY_B);
+
+    batches.usePayrollBatchesStore.getState().addBatch(calculatedBatch());
+    incoming.useIncomingSigsStore.getState().enqueue({
+      sighashDigest: DIGEST,
+      slotIndex: 0,
+      signature: sigA,
+      senderAddrHash: "0x" + "aa".repeat(20),
+      receivedAt: 1700000000000,
+    });
+    incoming.useIncomingSigsStore.getState().enqueue({
+      sighashDigest: DIGEST,
+      slotIndex: 1,
+      signature: sigB,
+      senderAddrHash: "0x" + "bb".repeat(20),
+      receivedAt: 1700000000000,
+    });
+
+    batches.usePayrollBatchesStore.getState().drainIncomingSigsInto("comm-1", {
+      m: 2,
+      pubkeyHashes: [hashA, hashB],
+    });
+
+    const got = batches.usePayrollBatchesStore.getState().findById("comm-1");
+    expect(got?.partialSigs).toHaveLength(2);
+    expect(got?.state).toBe("approved");
+  });
+
+  it("recordCommSendStatus writes a per-slot entry under commSendStatus", async () => {
+    const { batches } = await setup();
+    batches.usePayrollBatchesStore.getState().addBatch(calculatedBatch());
+    batches.usePayrollBatchesStore
+      .getState()
+      .recordCommSendStatus("comm-1", 0, "sent", { txHash: "0xdeadbeef" });
+    const got = batches.usePayrollBatchesStore.getState().findById("comm-1");
+    expect(got?.commSendStatus?.[0]?.status).toBe("sent");
+    expect(got?.commSendStatus?.[0]?.txHash).toBe("0xdeadbeef");
+    expect(typeof got?.commSendStatus?.[0]?.updatedAt).toBe("number");
+  });
+});
