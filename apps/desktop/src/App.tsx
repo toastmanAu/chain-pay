@@ -158,6 +158,12 @@ export function App() {
 
   useCommTransportBoot();
 
+  // One-shot cleanup at app start: drop any expired incoming-packets entries
+  // that survived from a previous session.
+  useEffect(() => {
+    useIncomingPacketsStore.getState().pruneExpired();
+  }, []);
+
   // Resolvers MUST be memoized — useCommSendRetry's useEffect deps array includes them.
   const packetForBatch = useCallback((batchId: string): OutgoingPacket | null => {
     const batch = usePayrollBatchesStore.getState().findById(batchId);
@@ -166,10 +172,11 @@ export function App() {
       .getState()
       .treasuries.find((t) => t.id === batch.treasuryId);
     if (!treasury || !("pubkeyHashes" in treasury.multisig)) return null;
+    const createdAtSec = Math.floor(new Date(batch.createdAt).getTime() / 1000);
     return {
       txHash: batch.sighashDigest,
       treasuryAddress: treasury.multisig.address,
-      expiresAt: Math.floor(Date.now() / 1000) + 86_400,
+      expiresAt: createdAtSec + 86_400,
       packet: batch.commPacket as TransferPacket,
     };
   }, []);
