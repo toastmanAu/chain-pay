@@ -92,3 +92,58 @@ describe("peer-book store", () => {
     expect(usePeerBookStore.getState().peers).toHaveLength(2);
   });
 });
+
+// ── 2.7b-2: associatedSignerHash field + mapping actions ────────────────────
+
+const SIGNER_HASH_A = `0x${"a1".repeat(20)}` as const;
+const SIGNER_HASH_B = `0x${"b2".repeat(20)}` as const;
+const PEER_B: Peer = {
+  nickname: "Bob",
+  address: "ckt1qbob",
+  pairedAt: 1747900000_000,
+};
+
+describe("peer-book store — associatedSignerHash", () => {
+  beforeEach(resetStore);
+
+  it("addPeer with associatedSignerHash persists the field", () => {
+    const peer: Peer = { ...PEER_A, associatedSignerHash: SIGNER_HASH_A };
+    usePeerBookStore.getState().addPeer(peer, new Uint8Array(20));
+    expect(usePeerBookStore.getState().peers[0]!.associatedSignerHash).toBe(SIGNER_HASH_A);
+  });
+
+  it("addPeer rejects a duplicate associatedSignerHash", () => {
+    const first: Peer = { ...PEER_A, associatedSignerHash: SIGNER_HASH_A };
+    const second: Peer = { ...PEER_B, associatedSignerHash: SIGNER_HASH_A };
+    usePeerBookStore.getState().addPeer(first, new Uint8Array(20));
+    expect(() => usePeerBookStore.getState().addPeer(second, new Uint8Array(20))).toThrow(
+      /associatedSignerHash.*already mapped/i,
+    );
+    expect(usePeerBookStore.getState().peers).toHaveLength(1);
+  });
+
+  it("setAssociatedSignerHash sets the field on an existing peer", () => {
+    usePeerBookStore.getState().addPeer(PEER_A, new Uint8Array(20));
+    usePeerBookStore.getState().setAssociatedSignerHash("ckt1qalice", SIGNER_HASH_A);
+    expect(usePeerBookStore.getState().findPeer("ckt1qalice")!.associatedSignerHash).toBe(
+      SIGNER_HASH_A,
+    );
+  });
+
+  it("setAssociatedSignerHash with undefined clears the field", () => {
+    const peer: Peer = { ...PEER_A, associatedSignerHash: SIGNER_HASH_A };
+    usePeerBookStore.getState().addPeer(peer, new Uint8Array(20));
+    usePeerBookStore.getState().setAssociatedSignerHash("ckt1qalice", undefined);
+    expect(usePeerBookStore.getState().findPeer("ckt1qalice")!.associatedSignerHash).toBeUndefined();
+  });
+
+  it("findByAssociatedSignerHash returns the peer that owns the hash", () => {
+    const peer: Peer = { ...PEER_A, associatedSignerHash: SIGNER_HASH_A };
+    usePeerBookStore.getState().addPeer(peer, new Uint8Array(20));
+    usePeerBookStore.getState().addPeer(PEER_B, new Uint8Array(20));
+    expect(usePeerBookStore.getState().findByAssociatedSignerHash(SIGNER_HASH_A)?.address).toBe(
+      "ckt1qalice",
+    );
+    expect(usePeerBookStore.getState().findByAssociatedSignerHash(SIGNER_HASH_B)).toBeUndefined();
+  });
+});

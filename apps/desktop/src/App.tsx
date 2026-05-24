@@ -17,6 +17,8 @@ import { createCommTransport } from "./lib/comm";
 import { useCommIdentityStore } from "./stores/comm-identity";
 import { usePeerBookStore } from "./stores/peer-book";
 import { useTreasuryStore } from "./stores/treasury";
+import { useIncomingSigsStore } from "./stores/incoming-sigs";
+import { usePayrollBatchesStore } from "./stores/payroll-batches";
 
 function hexToBytes(hex: string): Uint8Array {
   const s = hex.startsWith("0x") ? hex.slice(2) : hex;
@@ -59,8 +61,37 @@ function useCommTransportBoot(): void {
 
     maybeStart();
     const unsub = useCommIdentityStore.subscribe(maybeStart);
+
+    // Subscribe to incoming signatures (2.7b-2). Each envelope is enqueued
+    // into incoming-sigs and — if a matching batch exists — immediately
+    // drained into its partialSigs. The treasury lookup happens lazily inside
+    // the handler so multisig config changes are picked up without re-binding.
+    const transport = createCommTransport();
+    const offSig = transport?.onIncomingSignature((senderHash, body) => {
+      useIncomingSigsStore.getState().enqueue({
+        sighashDigest: body.txHash,
+        slotIndex: body.slotIndex,
+        signature: body.signature,
+        senderAddrHash: senderHash,
+        receivedAt: Date.now(),
+      });
+      const batch = usePayrollBatchesStore
+        .getState()
+        .batches.find((b) => b.sighashDigest === body.txHash);
+      if (!batch) return; // sits in buffer; PayPanel drain-on-mount will pick it up.
+      const treasury = useTreasuryStore
+        .getState()
+        .treasuries.find((t) => t.id === batch.treasuryId);
+      if (!treasury || !("pubkeyHashes" in treasury.multisig)) return;
+      usePayrollBatchesStore.getState().drainIncomingSigsInto(batch.id, {
+        m: treasury.multisig.m,
+        pubkeyHashes: treasury.multisig.pubkeyHashes,
+      });
+    });
+
     return () => {
       unsub();
+      offSig?.();
       const transport = createCommTransport();
       void transport?.stop();
     };

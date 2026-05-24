@@ -1,7 +1,21 @@
 import { create } from "zustand";
 import { createJSONStorage, persist, type StateStorage } from "zustand/middleware";
-import type { PayrollBatch, PayrollBatchState } from "@chain-pay/shared";
-import { assertCanTransition } from "@/lib/payroll/state-machine";
+import type {
+  CommSendSlotStatus,
+  PartialSigEntry,
+  PayrollBatch,
+  PayrollBatchState,
+} from "@chain-pay/shared";
+import { assertCanTransition, canTransition } from "@/lib/payroll/state-machine";
+import { recoverPubkeyHashFromSignature } from "@/lib/signers/ckb-secp256k1";
+import { useIncomingSigsStore } from "./incoming-sigs";
+
+export interface MultisigDrainCfg {
+  /** Threshold — auto-transitions to `approved` when partialSigs reaches this. */
+  m: number;
+  /** Canonical slot → pubkey hash mapping for sig validation. */
+  pubkeyHashes: readonly `0x${string}`[];
+}
 
 interface PayrollBatchesStore {
   batches: PayrollBatch[];
@@ -19,6 +33,23 @@ interface PayrollBatchesStore {
   removeBatch: (id: string) => void;
   findById: (id: string) => PayrollBatch | undefined;
   selectDraft: (id: string | null) => void;
+  /**
+   * Pull all buffered incoming sigs whose sighashDigest matches this batch's,
+   * validate each against the given multisig config, and merge the valid ones
+   * into partialSigs. Auto-transitions calculated → approved when partialSigs
+   * reaches M. Invalid entries are dropped silently (NOT re-buffered).
+   */
+  drainIncomingSigsInto: (
+    batchId: string,
+    multisig: MultisigDrainCfg,
+  ) => { merged: number; rejected: number };
+  /** Record per-slot comm-send status (idle/sending/sent/acked/error) on a batch. */
+  recordCommSendStatus: (
+    batchId: string,
+    slotIndex: number,
+    status: CommSendSlotStatus["status"],
+    detail?: { txHash?: string; error?: string },
+  ) => void;
 }
 
 // PayrollBatch holds bigints inside `lines[i].fiat.minor`, `lines[i].crypto.value`,
@@ -73,6 +104,78 @@ export const usePayrollBatchesStore = create<PayrollBatchesStore>()(
       },
       removeBatch: (id) => set((s) => ({ batches: s.batches.filter((b) => b.id !== id) })),
       findById: (id) => get().batches.find((b) => b.id === id),
+      drainIncomingSigsInto: (batchId, multisig) => {
+        const batch = get().batches.find((b) => b.id === batchId);
+        if (!batch || !batch.sighashDigest) return { merged: 0, rejected: 0 };
+
+        const existingSlots = new Set((batch.partialSigs ?? []).map((p) => p.slotIndex));
+        const buffered = useIncomingSigsStore.getState().drain(batch.sighashDigest);
+
+        const accepted: PartialSigEntry[] = [];
+        let rejected = 0;
+        for (const entry of buffered) {
+          if (existingSlots.has(entry.slotIndex)) {
+            rejected++;
+            continue;
+          }
+          const expected = multisig.pubkeyHashes[entry.slotIndex];
+          if (!expected) {
+            rejected++;
+            continue;
+          }
+          const recovered = recoverPubkeyHashFromSignature(batch.sighashDigest, entry.signature);
+          if (!recovered || recovered !== expected) {
+            rejected++;
+            continue;
+          }
+          accepted.push({
+            slotIndex: entry.slotIndex,
+            signature: entry.signature,
+            signerPubkeyHash: expected,
+            ...(entry.sourceCommTx !== undefined ? { sourceCommTx: entry.sourceCommTx } : {}),
+          });
+          existingSlots.add(entry.slotIndex);
+        }
+
+        if (accepted.length === 0) return { merged: 0, rejected };
+
+        const mergedSigs = [...(batch.partialSigs ?? []), ...accepted];
+        const shouldPromote =
+          mergedSigs.length === multisig.m && canTransition(batch.state, "approved");
+
+        set((s) => ({
+          batches: s.batches.map((b) =>
+            b.id === batchId
+              ? {
+                  ...b,
+                  partialSigs: mergedSigs,
+                  ...(shouldPromote ? { state: "approved" as PayrollBatchState } : {}),
+                  updatedAt: new Date().toISOString(),
+                }
+              : b,
+          ),
+        }));
+
+        return { merged: accepted.length, rejected };
+      },
+      recordCommSendStatus: (batchId, slotIndex, status, detail) => {
+        set((s) => ({
+          batches: s.batches.map((b) => {
+            if (b.id !== batchId) return b;
+            const slot: CommSendSlotStatus = {
+              status,
+              updatedAt: Date.now(),
+              ...(detail?.txHash !== undefined ? { txHash: detail.txHash } : {}),
+              ...(detail?.error !== undefined ? { error: detail.error } : {}),
+            };
+            return {
+              ...b,
+              commSendStatus: { ...(b.commSendStatus ?? {}), [slotIndex]: slot },
+              updatedAt: new Date().toISOString(),
+            };
+          }),
+        }));
+      },
     }),
     {
       name: "chain-pay:payroll-batches",

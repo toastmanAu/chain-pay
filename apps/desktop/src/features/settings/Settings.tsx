@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useNetworkConfigStore } from "@/stores/network-config";
 import { lightClient } from "@/lib/light-client/client";
 import { CommChannelSection } from "./CommChannelSection";
+import { PeerBookSection } from "./PeerBookSection";
 
 export function Settings() {
   const broadcastRpcUrl = useNetworkConfigStore((s) => s.broadcastRpcUrl);
@@ -93,6 +94,7 @@ export function Settings() {
         <Card title="Frappe backend" body="Not connected · Phase 4" />
       </div>
       <CommChannelSection />
+      <PeerBookSection />
     </div>
   );
 }

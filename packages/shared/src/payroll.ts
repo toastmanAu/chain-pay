@@ -41,6 +41,21 @@ export interface PayrollBatch extends Identified, Timestamped {
   totals?: PayrollBatchTotals;
   /** Partial signatures collected so far. Cleared on successful broadcast. */
   partialSigs?: PartialSigEntry[];
+  /**
+   * Per-slot send status for the operator's comm-channel dispatch (2.7b-2).
+   * Keyed by multisig slotIndex. Absent when comm send hasn't been attempted.
+   */
+  commSendStatus?: Record<number, CommSendSlotStatus>;
+}
+
+export interface CommSendSlotStatus {
+  status: "idle" | "sending" | "sent" | "acked" | "error";
+  /** Tx hash of the operator's notification cell on the signer's lock. */
+  txHash?: string;
+  /** Human-readable failure reason for status === "error". */
+  error?: string;
+  /** Epoch ms of the last status change. */
+  updatedAt: number;
 }
 
 export interface PayrollBatchTotals {
@@ -53,6 +68,14 @@ export interface PayrollBatchTotals {
 export interface PartialSigEntry {
   slotIndex: number;
   signature: string;
+  /** The multisig signer pubkey hash this signature verified against.
+   *  Populated by the comm-channel auto-match path; the paste flow may
+   *  leave it undefined. Audit-only — the canonical mapping of slot to
+   *  signer lives on the treasury config. */
+  signerPubkeyHash?: `0x${string}`;
+  /** If the signature arrived via the comm channel, the tx hash of the
+   *  signer's notification cell. Audit trail; undefined for pasted sigs. */
+  sourceCommTx?: string;
 }
 
 export type PayrollBatchState =

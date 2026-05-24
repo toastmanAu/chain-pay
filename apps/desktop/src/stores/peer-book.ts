@@ -8,6 +8,13 @@ export interface Peer {
   address: string;
   cachedProfile?: PeerProfile;
   pairedAt: number;
+  /**
+   * Optional: the multisig signer pubkey hash this peer relays for. When set,
+   * PayPanel routes signature requests to this peer for that slot. Each hash
+   * is unique across the peer book — setting a hash already mapped to another
+   * peer throws.
+   */
+  associatedSignerHash?: `0x${string}`;
 }
 
 interface PeerBookStore {
@@ -22,6 +29,17 @@ interface PeerBookStore {
   renamePeer: (address: string, nickname: string) => void;
   setCachedProfile: (address: string, profile: PeerProfile) => void;
   findPeer: (address: string) => Peer | undefined;
+  setAssociatedSignerHash: (address: string, hash: `0x${string}` | undefined) => void;
+  findByAssociatedSignerHash: (hash: `0x${string}`) => Peer | undefined;
+}
+
+function assertSignerHashFree(peers: readonly Peer[], hash: `0x${string}`): void {
+  const owner = peers.find((p) => p.associatedSignerHash === hash);
+  if (owner) {
+    throw new Error(
+      `associatedSignerHash ${hash} is already mapped to peer "${owner.nickname}" (${owner.address})`,
+    );
+  }
 }
 
 const storageImpl: StateStorage = {
@@ -37,6 +55,9 @@ export const usePeerBookStore = create<PeerBookStore>()(
       knownSignersGetter: () => [],
       addPeer: (peer, candidateHash) => {
         assertNotMultisigSigner(candidateHash, get().knownSignersGetter);
+        if (peer.associatedSignerHash !== undefined) {
+          assertSignerHashFree(get().peers, peer.associatedSignerHash);
+        }
         set((s) => ({ peers: [...s.peers, peer] }));
       },
       removePeer: (address) =>
@@ -50,6 +71,28 @@ export const usePeerBookStore = create<PeerBookStore>()(
           peers: s.peers.map((p) => (p.address === address ? { ...p, cachedProfile: profile } : p)),
         })),
       findPeer: (address) => get().peers.find((p) => p.address === address),
+      setAssociatedSignerHash: (address, hash) => {
+        if (hash !== undefined) {
+          // Collision check ignores the peer being updated; setting your own hash
+          // to itself is a no-op rather than a throw.
+          const others = get().peers.filter((p) => p.address !== address);
+          assertSignerHashFree(others, hash);
+        }
+        set((s) => ({
+          peers: s.peers.map((p) => {
+            if (p.address !== address) return p;
+            if (hash === undefined) {
+              // Strip the field rather than setting it to undefined — keeps
+              // the Peer shape clean under exactOptionalPropertyTypes.
+              const { associatedSignerHash: _omit, ...rest } = p;
+              return rest;
+            }
+            return { ...p, associatedSignerHash: hash };
+          }),
+        }));
+      },
+      findByAssociatedSignerHash: (hash) =>
+        get().peers.find((p) => p.associatedSignerHash === hash),
     }),
     {
       name: "chain-pay:peer-book",
