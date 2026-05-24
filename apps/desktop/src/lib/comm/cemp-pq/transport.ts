@@ -125,6 +125,13 @@ export class CempPqCommTransport implements CommTransport {
     return this.sendEnvelope(peer, "ack", body);
   }
 
+  /**
+   * All outbound envelope kinds (packet/signature/ack) share the same IPC path:
+   * encode → ipc.sendMessage → broadcast. The main-process sendMessage handler
+   * is envelope-kind-agnostic (treats envelopeBytes as opaque ciphertext);
+   * kind discrimination lives only in encodeEnvelope/decodeEnvelope. Adding a
+   * dedicated sendAck IPC would duplicate transport plumbing for no benefit.
+   */
   private async sendEnvelope(peer: PeerProfile, kind: "packet" | "signature" | "ack", payload: unknown): Promise<string> {
     const senderAddrHash = await this.deps.getOwnAddrHash();
     const envelope = encodeEnvelope({ kind, senderAddrHash, payload });

@@ -214,6 +214,15 @@ export async function publishProfile(
  * corrupt binary data. Instead we call CEMPPQ.encrypt directly and build the
  * transaction manually, mirroring what buildSendMessageTx does internally.
  *
+ * Envelope-kind contract (Phase 2.7b-3):
+ *   This handler is intentionally envelope-kind-agnostic — it treats
+ *   `envelopeBytes` as opaque ciphertext payload. Kind discrimination
+ *   (packet 0x01 / signature 0x02 / ack 0x03) happens entirely in the
+ *   renderer via encodeEnvelope/decodeEnvelope (src/lib/comm/envelope.ts).
+ *   Adding a dedicated sendAck IPC would duplicate transport plumbing for
+ *   no encryption-layer benefit; CempPqCommTransport.sendAck routes through
+ *   this same path.
+ *
  * Returns a SignedTxBundle; caller broadcasts.
  */
 export async function sendMessage(
@@ -323,6 +332,12 @@ export async function sendMessage(
  * Fetches the cell live (bypasses CCC cell cache — avoids the "outputData=0x"
  * cache-hit trap documented in the CKB transactions rule for CKBFS cells).
  * Decrypts using CEMPPQ.decrypt which handles the TLV wire format internally.
+ *
+ * Envelope-kind contract (Phase 2.7b-3):
+ *   Mirrors sendMessage — returns opaque plaintext bytes with no kind
+ *   discrimination. The renderer's watcher (src/lib/comm/cemp-pq/watcher.ts)
+ *   calls decodeEnvelope on the result and routes by kind byte (0x01 packet
+ *   / 0x02 signature / 0x03 ack) to the appropriate handler set.
  *
  * Returns the decrypted payload as a 0x-prefixed hex string.
  */
