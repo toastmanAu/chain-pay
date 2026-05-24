@@ -56,6 +56,9 @@ export interface CommSendSlotStatus {
   error?: string;
   /** Epoch ms of the last status change. */
   updatedAt: number;
+  /** Number of auto-retries completed for this slot (0..3). Reset to 0 on
+   *  manual Retry. Used by useCommSendRetry to decide next-delay + stop. */
+  retryCount?: number;
 }
 
 export interface PayrollBatchTotals {

@@ -40,6 +40,15 @@ export interface IncomingSignatureHandler {
   (from: string, body: OutgoingSignature): void;
 }
 
+export interface OutgoingAck {
+  /** Matches OutgoingPacket.txHash / batch.sighashDigest. */
+  txHash: string;
+}
+
+export interface IncomingAckHandler {
+  (from: string, body: OutgoingAck): void;
+}
+
 export type Unsubscribe = () => void;
 
 export interface CommTransport {
@@ -52,9 +61,11 @@ export interface CommTransport {
 
   sendPacket(peer: PeerProfile, body: OutgoingPacket): Promise<string>;
   sendSignature(peer: PeerProfile, body: OutgoingSignature): Promise<string>;
+  sendAck(peer: PeerProfile, body: OutgoingAck): Promise<string>;
 
   onIncomingPacket(handler: IncomingPacketHandler): Unsubscribe;
   onIncomingSignature(handler: IncomingSignatureHandler): Unsubscribe;
+  onIncomingAck(handler: IncomingAckHandler): Unsubscribe;
 }
 
 /** The 1-byte tag preceding the envelope kind in the encrypted payload. */

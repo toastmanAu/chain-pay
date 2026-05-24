@@ -18,8 +18,10 @@ const mockTransport = {
   })),
   sendPacket: vi.fn().mockResolvedValue(`0x${"01".repeat(32)}`),
   sendSignature: vi.fn(),
+  sendAck: vi.fn(),
   onIncomingPacket: vi.fn(),
   onIncomingSignature: vi.fn(),
+  onIncomingAck: vi.fn(),
 } satisfies CommTransport;
 
 vi.mock("@/lib/comm", async () => {

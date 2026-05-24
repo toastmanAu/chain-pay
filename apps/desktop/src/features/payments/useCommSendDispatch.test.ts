@@ -13,8 +13,10 @@ const mockTransport = {
   resolveProfile: vi.fn(),
   sendPacket: vi.fn(),
   sendSignature: vi.fn(),
+  sendAck: vi.fn(),
   onIncomingPacket: vi.fn(),
   onIncomingSignature: vi.fn(),
+  onIncomingAck: vi.fn(),
 } satisfies CommTransport;
 
 let transportFactoryReturns: CommTransport | null = mockTransport;
