@@ -66,6 +66,22 @@ describe("CempPqCommTransport", () => {
     expect(Buffer.from(envelopeHex.slice(2), "hex")[1]).toBe(0x02);
   });
 
+  it("sendAck: uses ack kind byte (0x03) and routes through the same sendMessage IPC", async () => {
+    const deps = makeDeps();
+    const t = new CempPqCommTransport(deps);
+    const txHash = await t.sendAck(PEER, { txHash: "0xbatch" });
+    // Same IPC path as sendPacket/sendSignature — main process is kind-agnostic.
+    expect(deps.ipc.sendMessage).toHaveBeenCalledTimes(1);
+    const ackSendCall = (deps.ipc.sendMessage as ReturnType<typeof vi.fn>).mock.calls[0] as [string, string];
+    const [recipient, envelopeHex] = ackSendCall;
+    expect(recipient).toBe(PEER.address);
+    const bytes = Buffer.from(envelopeHex.slice(2), "hex");
+    expect(bytes[0]).toBe(0x01); // version
+    expect(bytes[1]).toBe(0x03); // ack kind
+    expect(deps.broadcastTransaction).toHaveBeenCalledWith("0xtxbytes");
+    expect(txHash).toBe("0xs");
+  });
+
   it("publishProfile: forwards to ipc and broadcasts", async () => {
     const deps = makeDeps();
     const t = new CempPqCommTransport(deps);

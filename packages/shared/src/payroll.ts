@@ -39,6 +39,10 @@ export interface PayrollBatch extends Identified, Timestamped {
   sighashDigest?: string;
   /** Summary fields cached so we can re-encode the transfer packet on resume. */
   totals?: PayrollBatchTotals;
+  /** Cleartext TransferPacket string, persisted at build time so the retry
+   *  scheduler can rebroadcast even after PayPanel unmounts. Same string the
+   *  signer would have pasted; not sensitive (already encrypted per-peer on chain). */
+  commPacket?: string;
   /** Partial signatures collected so far. Cleared on successful broadcast. */
   partialSigs?: PartialSigEntry[];
   /**
@@ -56,6 +60,9 @@ export interface CommSendSlotStatus {
   error?: string;
   /** Epoch ms of the last status change. */
   updatedAt: number;
+  /** Number of auto-retries completed for this slot (0..3). Reset to 0 on
+   *  manual Retry. Used by useCommSendRetry to decide next-delay + stop. */
+  retryCount?: number;
 }
 
 export interface PayrollBatchTotals {

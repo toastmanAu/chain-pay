@@ -275,6 +275,7 @@ export function PayPanel() {
             fee: result.fee,
             change: result.change,
           },
+          commPacket: json,
           partialSigs: [],
         };
         batchStore.addBatch(batch);

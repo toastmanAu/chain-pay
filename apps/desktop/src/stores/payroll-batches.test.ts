@@ -384,4 +384,19 @@ describe("payroll-batches store — comm-channel auto-match", () => {
     expect(got?.commSendStatus?.[0]?.txHash).toBe("0xdeadbeef");
     expect(typeof got?.commSendStatus?.[0]?.updatedAt).toBe("number");
   });
+
+  it("recordCommSendStatus patches the existing slot — txHash from a prior call is preserved across a retryCount-only update", async () => {
+    const { batches } = await setup();
+    batches.usePayrollBatchesStore.getState().addBatch(calculatedBatch());
+    batches.usePayrollBatchesStore
+      .getState()
+      .recordCommSendStatus("comm-1", 0, "sent", { txHash: "0xinitial" });
+    batches.usePayrollBatchesStore
+      .getState()
+      .recordCommSendStatus("comm-1", 0, "sent", { retryCount: 1 });
+    const got = batches.usePayrollBatchesStore.getState().findById("comm-1");
+    expect(got?.commSendStatus?.[0]?.txHash).toBe("0xinitial");
+    expect(got?.commSendStatus?.[0]?.retryCount).toBe(1);
+    expect(got?.commSendStatus?.[0]?.status).toBe("sent");
+  });
 });

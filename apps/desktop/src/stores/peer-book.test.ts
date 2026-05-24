@@ -7,7 +7,9 @@ function resetStore(): void {
   globalThis.localStorage?.removeItem("chain-pay:peer-book");
 }
 
-const PEER_A: Peer = {
+const ZERO_ADDR_HASH = `0x${"00".repeat(20)}` as const;
+
+const PEER_A: Omit<Peer, "addrHash"> = {
   nickname: "Alice",
   address: "ckt1qalice",
   pairedAt: 1747900000_000,
@@ -24,7 +26,7 @@ describe("peer-book store", () => {
 
   it("addPeer appends", () => {
     usePeerBookStore.getState().addPeer(PEER_A, new Uint8Array(20));
-    expect(usePeerBookStore.getState().peers).toEqual([PEER_A]);
+    expect(usePeerBookStore.getState().peers).toEqual([{ ...PEER_A, addrHash: ZERO_ADDR_HASH }]);
   });
 
   it("addPeer throws RefusalInvariantError when peer hash matches a treasury signer", () => {
@@ -52,7 +54,10 @@ describe("peer-book store", () => {
 
   it("findPeer returns by address", () => {
     usePeerBookStore.getState().addPeer(PEER_A, new Uint8Array(20));
-    expect(usePeerBookStore.getState().findPeer("ckt1qalice")).toEqual(PEER_A);
+    expect(usePeerBookStore.getState().findPeer("ckt1qalice")).toEqual({
+      ...PEER_A,
+      addrHash: ZERO_ADDR_HASH,
+    });
     expect(usePeerBookStore.getState().findPeer("ckt1qzzz")).toBeUndefined();
   });
 
@@ -83,7 +88,7 @@ describe("peer-book store", () => {
     usePeerBookStore.getState().addPeer(PEER_A, new Uint8Array(20));
     usePeerBookStore.getState().removePeer("ckt1qbob");
     const peer = usePeerBookStore.getState().findPeer("ckt1qalice");
-    expect(peer).toEqual(PEER_A);
+    expect(peer).toEqual({ ...PEER_A, addrHash: ZERO_ADDR_HASH });
   });
 
   it("addPeer duplicates same address are appended (caller dedupes)", () => {
@@ -97,7 +102,7 @@ describe("peer-book store", () => {
 
 const SIGNER_HASH_A = `0x${"a1".repeat(20)}` as const;
 const SIGNER_HASH_B = `0x${"b2".repeat(20)}` as const;
-const PEER_B: Peer = {
+const PEER_B: Omit<Peer, "addrHash"> = {
   nickname: "Bob",
   address: "ckt1qbob",
   pairedAt: 1747900000_000,
@@ -107,14 +112,14 @@ describe("peer-book store — associatedSignerHash", () => {
   beforeEach(resetStore);
 
   it("addPeer with associatedSignerHash persists the field", () => {
-    const peer: Peer = { ...PEER_A, associatedSignerHash: SIGNER_HASH_A };
+    const peer: Omit<Peer, "addrHash"> = { ...PEER_A, associatedSignerHash: SIGNER_HASH_A };
     usePeerBookStore.getState().addPeer(peer, new Uint8Array(20));
     expect(usePeerBookStore.getState().peers[0]!.associatedSignerHash).toBe(SIGNER_HASH_A);
   });
 
   it("addPeer rejects a duplicate associatedSignerHash", () => {
-    const first: Peer = { ...PEER_A, associatedSignerHash: SIGNER_HASH_A };
-    const second: Peer = { ...PEER_B, associatedSignerHash: SIGNER_HASH_A };
+    const first: Omit<Peer, "addrHash"> = { ...PEER_A, associatedSignerHash: SIGNER_HASH_A };
+    const second: Omit<Peer, "addrHash"> = { ...PEER_B, associatedSignerHash: SIGNER_HASH_A };
     usePeerBookStore.getState().addPeer(first, new Uint8Array(20));
     expect(() => usePeerBookStore.getState().addPeer(second, new Uint8Array(20))).toThrow(
       /associatedSignerHash.*already mapped/i,
@@ -131,19 +136,39 @@ describe("peer-book store — associatedSignerHash", () => {
   });
 
   it("setAssociatedSignerHash with undefined clears the field", () => {
-    const peer: Peer = { ...PEER_A, associatedSignerHash: SIGNER_HASH_A };
+    const peer: Omit<Peer, "addrHash"> = { ...PEER_A, associatedSignerHash: SIGNER_HASH_A };
     usePeerBookStore.getState().addPeer(peer, new Uint8Array(20));
     usePeerBookStore.getState().setAssociatedSignerHash("ckt1qalice", undefined);
     expect(usePeerBookStore.getState().findPeer("ckt1qalice")!.associatedSignerHash).toBeUndefined();
   });
 
   it("findByAssociatedSignerHash returns the peer that owns the hash", () => {
-    const peer: Peer = { ...PEER_A, associatedSignerHash: SIGNER_HASH_A };
+    const peer: Omit<Peer, "addrHash"> = { ...PEER_A, associatedSignerHash: SIGNER_HASH_A };
     usePeerBookStore.getState().addPeer(peer, new Uint8Array(20));
     usePeerBookStore.getState().addPeer(PEER_B, new Uint8Array(20));
     expect(usePeerBookStore.getState().findByAssociatedSignerHash(SIGNER_HASH_A)?.address).toBe(
       "ckt1qalice",
     );
     expect(usePeerBookStore.getState().findByAssociatedSignerHash(SIGNER_HASH_B)).toBeUndefined();
+  });
+
+  it("addPeer stamps addrHash on the persisted peer", () => {
+    const expected = new Uint8Array(20).fill(0x07);
+    usePeerBookStore.getState().addPeer(PEER_A, expected);
+    const stored = usePeerBookStore.getState().peers[0]!;
+    expect(stored.addrHash).toBe(`0x${"07".repeat(20)}`);
+  });
+
+  it("findByAddrHash returns the peer whose addrHash matches", () => {
+    const hashA = new Uint8Array(20).fill(0x07);
+    const hashB = new Uint8Array(20).fill(0x08);
+    usePeerBookStore.getState().addPeer(PEER_A, hashA);
+    usePeerBookStore.getState().addPeer(
+      { nickname: "Bob", address: "ckt1qbob", pairedAt: 1747900000_000 },
+      hashB,
+    );
+    const found = usePeerBookStore.getState().findByAddrHash(`0x${"07".repeat(20)}`);
+    expect(found?.address).toBe(PEER_A.address);
+    expect(usePeerBookStore.getState().findByAddrHash(`0x${"09".repeat(20)}`)).toBeUndefined();
   });
 });

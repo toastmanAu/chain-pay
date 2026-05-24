@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useCallback, useEffect } from "react";
 import { Routes, Route, Navigate } from "react-router-dom";
 import { AppShell } from "./components/layout/AppShell";
 import { Dashboard } from "./features/dashboard/Dashboard";
@@ -18,7 +18,13 @@ import { useCommIdentityStore } from "./stores/comm-identity";
 import { usePeerBookStore } from "./stores/peer-book";
 import { useTreasuryStore } from "./stores/treasury";
 import { useIncomingSigsStore } from "./stores/incoming-sigs";
+import { useIncomingPacketsStore } from "./stores/incoming-packets";
 import { usePayrollBatchesStore } from "./stores/payroll-batches";
+import { useCommSendRetry } from "./features/payments/useCommSendRetry";
+import { isExpired } from "./lib/comm/expires-at";
+import type { OutgoingPacket } from "./lib/comm/types";
+import type { TransferPacket } from "@chain-pay/shared";
+import type { MultisigRouting } from "./features/payments/useCommSendDispatch";
 
 function hexToBytes(hex: string): Uint8Array {
   const s = hex.startsWith("0x") ? hex.slice(2) : hex;
@@ -89,9 +95,43 @@ function useCommTransportBoot(): void {
       });
     });
 
+    // Packet receive — enqueue into incoming-packets (after watcher's expiresAt check).
+    const offPacket = transport?.onIncomingPacket((senderHash, body) => {
+      // Defensive: even though the watcher drops expired packets, double-check here.
+      if (isExpired(body.expiresAt)) return;
+      useIncomingPacketsStore.getState().enqueue({
+        sighashDigest: body.txHash,
+        packet: body,
+        senderAddrHash: senderHash,
+        receivedAt: Date.now(),
+      });
+    });
+
+    // Ack receive — resolve sender → peer → slot, flip status to "acked".
+    const offAck = transport?.onIncomingAck((senderHash, body) => {
+      const peer = usePeerBookStore.getState().findByAddrHash(senderHash as `0x${string}`);
+      if (!peer) return;
+      const batch = usePayrollBatchesStore
+        .getState()
+        .batches.find((b) => b.sighashDigest === body.txHash);
+      if (!batch) return;
+      const treasury = useTreasuryStore
+        .getState()
+        .treasuries.find((t) => t.id === batch.treasuryId);
+      if (!treasury || !("pubkeyHashes" in treasury.multisig)) return;
+      if (peer.associatedSignerHash === undefined) return;
+      const slotIndex = treasury.multisig.pubkeyHashes.indexOf(peer.associatedSignerHash);
+      if (slotIndex < 0) return;
+      usePayrollBatchesStore
+        .getState()
+        .recordCommSendStatus(batch.id, slotIndex, "acked");
+    });
+
     return () => {
       unsub();
       offSig?.();
+      offPacket?.();
+      offAck?.();
       const transport = createCommTransport();
       void transport?.stop();
     };
@@ -117,6 +157,41 @@ export function App() {
   }, [startCkb]);
 
   useCommTransportBoot();
+
+  // One-shot cleanup at app start: drop any expired incoming-packets entries
+  // that survived from a previous session.
+  useEffect(() => {
+    useIncomingPacketsStore.getState().pruneExpired();
+  }, []);
+
+  // Resolvers MUST be memoized — useCommSendRetry's useEffect deps array includes them.
+  const packetForBatch = useCallback((batchId: string): OutgoingPacket | null => {
+    const batch = usePayrollBatchesStore.getState().findById(batchId);
+    if (!batch || !batch.sighashDigest || !batch.commPacket) return null;
+    const treasury = useTreasuryStore
+      .getState()
+      .treasuries.find((t) => t.id === batch.treasuryId);
+    if (!treasury || !("pubkeyHashes" in treasury.multisig)) return null;
+    const createdAtSec = Math.floor(new Date(batch.createdAt).getTime() / 1000);
+    return {
+      txHash: batch.sighashDigest,
+      treasuryAddress: treasury.multisig.address,
+      expiresAt: createdAtSec + 86_400,
+      packet: batch.commPacket as TransferPacket,
+    };
+  }, []);
+
+  const multisigForBatch = useCallback((batchId: string): MultisigRouting | null => {
+    const batch = usePayrollBatchesStore.getState().findById(batchId);
+    if (!batch) return null;
+    const treasury = useTreasuryStore
+      .getState()
+      .treasuries.find((t) => t.id === batch.treasuryId);
+    if (!treasury || !("pubkeyHashes" in treasury.multisig)) return null;
+    return { pubkeyHashes: treasury.multisig.pubkeyHashes };
+  }, []);
+
+  useCommSendRetry({ packetForBatch, multisigForBatch });
 
   return (
     <AppShell>

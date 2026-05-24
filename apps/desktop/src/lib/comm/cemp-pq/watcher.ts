@@ -1,8 +1,11 @@
 import { decodeEnvelope } from "../envelope";
+import { isExpired } from "../expires-at";
 import type {
   CommEnvelopeKind,
+  IncomingAckHandler,
   IncomingPacketHandler,
   IncomingSignatureHandler,
+  OutgoingAck,
   OutgoingPacket,
   OutgoingSignature,
   Unsubscribe,
@@ -24,6 +27,18 @@ export interface WatcherDeps {
   listCellsForLock(script: ScriptLike): Promise<CellLike[]>;
   decryptIncoming(outPoint: { txHash: string; index: number }): Promise<string>;
   parseMessagePointer(outputDataHex: string): { txHash: string; index: number };
+  /**
+   * Auto-ack emitter. Called when a non-expired packet is dispatched.
+   *
+   * Keyed by `senderAddrHash` (0x-prefixed 20-byte hex) — the transport
+   * resolves this to a PeerProfile internally (via peer-book / on-chain
+   * lookup) before emitting the ack envelope. Errors are caught and logged
+   * by the watcher; they must never block packet dispatch.
+   *
+   * Optional so legacy / non-transport-backed watchers (e.g. in tests for
+   * older behavior) keep compiling. When absent, auto-ack is skipped.
+   */
+  sendAck?(senderAddrHashHex: string, body: OutgoingAck): Promise<unknown>;
   pollIntervalMs?: number;
 }
 
@@ -34,6 +49,7 @@ export interface Watcher {
   isRunning(): boolean;
   onIncomingPacket(h: IncomingPacketHandler): Unsubscribe;
   onIncomingSignature(h: IncomingSignatureHandler): Unsubscribe;
+  onIncomingAck(h: IncomingAckHandler): Unsubscribe;
 }
 
 const DEFAULT_POLL_MS = 5000;
@@ -42,7 +58,15 @@ export function createWatcher(deps: WatcherDeps): Watcher {
   const processed = new Set<string>();
   const packetHandlers = new Set<IncomingPacketHandler>();
   const signatureHandlers = new Set<IncomingSignatureHandler>();
+  const ackHandlers = new Set<IncomingAckHandler>();
   let timer: ReturnType<typeof setInterval> | null = null;
+
+  if (!deps.sendAck && process.env["NODE_ENV"] !== "test") {
+    // eslint-disable-next-line no-console
+    console.warn(
+      "[comm] watcher: sendAck dep not wired — auto-ack will be skipped for incoming packets",
+    );
+  }
 
   function cellKey(outPoint: { txHash: string; index: number }): string {
     return `${outPoint.txHash}:${outPoint.index}`;
@@ -73,11 +97,29 @@ export function createWatcher(deps: WatcherDeps): Watcher {
 
   function dispatch(kind: CommEnvelopeKind, senderHashHex: string, payload: unknown): void {
     if (kind === "packet") {
-      for (const h of packetHandlers) h(senderHashHex, payload as OutgoingPacket);
+      const body = payload as OutgoingPacket;
+      // Expired packets are silently dropped: operator's deadline is intent.
+      // No handler dispatch, no auto-ack.
+      if (isExpired(body.expiresAt)) return;
+      for (const h of packetHandlers) h(senderHashHex, body);
+      // Auto-ack: fire-and-forget. Failures must not block packet dispatch.
+      if (deps.sendAck) {
+        void deps.sendAck(senderHashHex, { txHash: body.txHash }).catch(
+          (err: unknown) => {
+            // eslint-disable-next-line no-console
+            console.warn(
+              "[comm] auto-ack emission failed",
+              { senderHashHex, txHash: body.txHash },
+              err,
+            );
+          },
+        );
+      }
     } else if (kind === "signature") {
       for (const h of signatureHandlers) h(senderHashHex, payload as OutgoingSignature);
+    } else if (kind === "ack") {
+      for (const h of ackHandlers) h(senderHashHex, payload as OutgoingAck);
     }
-    // ack handling lands in 2.7b
   }
 
   return {
@@ -101,6 +143,10 @@ export function createWatcher(deps: WatcherDeps): Watcher {
     onIncomingSignature(h) {
       signatureHandlers.add(h);
       return () => signatureHandlers.delete(h);
+    },
+    onIncomingAck(h) {
+      ackHandlers.add(h);
+      return () => ackHandlers.delete(h);
     },
   };
 }

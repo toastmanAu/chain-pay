@@ -1,5 +1,7 @@
 import { useState } from "react";
 import { useClipboardStore, type ClipboardBin } from "@/stores/clipboard";
+import { useCommIdentityStore } from "@/stores/comm-identity";
+import { useDebugSettingsStore } from "@/stores/debug-settings";
 import { labelFor, truncate } from "./labelFor";
 
 /**
@@ -11,7 +13,12 @@ import { labelFor, truncate } from "./labelFor";
  */
 export function ClipboardBar() {
   const bins = useClipboardStore((s) => s.bins);
+  const identity = useCommIdentityStore((s) => s.identity);
+  const showClipboard = useDebugSettingsStore((s) => s.showClipboard);
   const [expanded, setExpanded] = useState<Set<number>>(new Set());
+
+  const commActive = identity?.profileTxHash != null;
+  if (commActive && !showClipboard) return null;
 
   const allExpanded = expanded.size === bins.length;
   const toggleAll = () =>

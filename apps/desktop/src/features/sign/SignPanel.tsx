@@ -11,6 +11,11 @@ import {
   compressedPubkeyFromPrivateKey,
 } from "@/lib/signers/ckb-secp256k1";
 import { decryptCkbCliKeystore } from "@/lib/signers/ckb-cli-keystore";
+import { SignInbox } from "./SignInbox";
+import {
+  useIncomingPacketsStore,
+  type IncomingPacketEntry,
+} from "@/stores/incoming-packets";
 
 const SHANNONS_PER_CKB = 100_000_000n;
 
@@ -38,6 +43,15 @@ export function SignPanel() {
   }, [packetJson]);
 
   const packetError = packetJson.trim() && !packet ? safeDecodeError(packetJson) : null;
+
+  const handleClaim = (entry: IncomingPacketEntry) => {
+    // entry.packet.packet is the same TransferPacket JSON string the paste
+    // textarea accepts — replay it through the same state path.
+    setPacketJson(entry.packet.packet);
+    setError(null);
+    setResult(null);
+    useIncomingPacketsStore.getState().dismiss(entry.sighashDigest);
+  };
 
   const handleSign = async () => {
     if (!packet) return;
@@ -79,6 +93,8 @@ export function SignPanel() {
           password and key never leave this app.
         </p>
       </header>
+
+      <SignInbox onClaim={handleClaim} />
 
       <section className="space-y-2">
         <label className="text-sm font-medium">1. Transfer packet (JSON)</label>

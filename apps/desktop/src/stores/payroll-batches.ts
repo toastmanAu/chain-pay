@@ -48,7 +48,7 @@ interface PayrollBatchesStore {
     batchId: string,
     slotIndex: number,
     status: CommSendSlotStatus["status"],
-    detail?: { txHash?: string; error?: string },
+    detail?: { txHash?: string; error?: string; retryCount?: number },
   ) => void;
 }
 
@@ -162,11 +162,14 @@ export const usePayrollBatchesStore = create<PayrollBatchesStore>()(
         set((s) => ({
           batches: s.batches.map((b) => {
             if (b.id !== batchId) return b;
+            const existing = b.commSendStatus?.[slotIndex] ?? {};
             const slot: CommSendSlotStatus = {
+              ...existing,
               status,
               updatedAt: Date.now(),
               ...(detail?.txHash !== undefined ? { txHash: detail.txHash } : {}),
               ...(detail?.error !== undefined ? { error: detail.error } : {}),
+              ...(detail?.retryCount !== undefined ? { retryCount: detail.retryCount } : {}),
             };
             return {
               ...b,

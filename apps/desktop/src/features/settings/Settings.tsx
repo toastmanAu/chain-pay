@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { useNetworkConfigStore } from "@/stores/network-config";
+import { useDebugSettingsStore } from "@/stores/debug-settings";
 import { lightClient } from "@/lib/light-client/client";
 import { CommChannelSection } from "./CommChannelSection";
 import { PeerBookSection } from "./PeerBookSection";
@@ -7,6 +8,8 @@ import { PeerBookSection } from "./PeerBookSection";
 export function Settings() {
   const broadcastRpcUrl = useNetworkConfigStore((s) => s.broadcastRpcUrl);
   const setBroadcastRpcUrl = useNetworkConfigStore((s) => s.setBroadcastRpcUrl);
+  const showClipboard = useDebugSettingsStore((s) => s.showClipboard);
+  const setShowClipboard = useDebugSettingsStore((s) => s.setShowClipboard);
   const [draft, setDraft] = useState(broadcastRpcUrl);
 
   useEffect(() => {
@@ -95,6 +98,23 @@ export function Settings() {
       </div>
       <CommChannelSection />
       <PeerBookSection />
+
+      <section className="space-y-3 rounded-lg border border-surface-hi bg-surface p-5" aria-label="Debug">
+        <header>
+          <div className="text-xs uppercase tracking-wide text-fg-muted">Debug</div>
+          <p className="mt-1 text-sm text-fg-muted">
+            Tools for debugging, generally not needed in normal operation.
+          </p>
+        </header>
+        <label className="flex items-center gap-2 text-sm">
+          <input
+            type="checkbox"
+            checked={showClipboard}
+            onChange={(e) => setShowClipboard(e.target.checked)}
+          />
+          Show clipboard bottom-bar (overrides auto-hide when comm is configured)
+        </label>
+      </section>
     </div>
   );
 }
