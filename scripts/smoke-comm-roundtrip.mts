@@ -110,16 +110,38 @@ function decodeEnvelope(bytes: Uint8Array): DecodedEnvelope {
 }
 
 // ── Fixture payloads ─────────────────────────────────────────────────────────
+//
+// Phase 2.7b-2 update: txHash is now a realistic 32-byte sighashDigest so the
+// fixture matches what an operator-side PayrollBatch.sighashDigest looks like.
+// Override via SMOKE_BATCH_SIGHASH=0x… to match a specific in-flight batch
+// while manually verifying the auto-match path against a running app.
+//
+// To verify Phase 2.7b-2's auto-match end-to-end manually:
+//   1. Start ChainPay on Role A (operator) with a funded comm wallet.
+//   2. Create a PayrollBatch whose sighashDigest equals FIXTURE_BATCH_SIGHASH
+//      (or set SMOKE_BATCH_SIGHASH on this script to match the live batch).
+//   3. Add Role B as a peer in Settings → Peer book, associated with the
+//      multisig slot 0 signer hash.
+//   4. Run this smoke as Role B with PEER_A_ADDRESS=<operator address>.
+//   5. Watch operator's PayPanel: CommSendSection pill for slot 0 should
+//      transition idle → sending → sent on A's send, and partialSigs should
+//      auto-populate when B's reply arrives.
+//
+// The smoke can't observe the React-side auto-match — that's a manual UI
+// verification step in the Phase 2.7b-2 acceptance checklist.
+
+const FIXTURE_BATCH_SIGHASH =
+  process.env["SMOKE_BATCH_SIGHASH"] ?? `0x${"ab".repeat(32)}`;
 
 const FIXTURE_PACKET = {
-  txHash: "0xfixtureBatchPacket",
+  txHash: FIXTURE_BATCH_SIGHASH,
   treasuryAddress: "ckt1qfixturetreasury",
   expiresAt: 9999999999,
   packet: { kind: "transfer", payments: [] as unknown[] },
 };
 
 const FIXTURE_SIGNATURE = {
-  txHash: "0xfixtureBatchPacket",
+  txHash: FIXTURE_BATCH_SIGHASH,
   slotIndex: 0,
   signature: "0x" + "ab".repeat(65),
 };
