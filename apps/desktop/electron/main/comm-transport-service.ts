@@ -33,6 +33,7 @@ import {
   CEMPTransactionBuilder,
   MLDSASigner,
   ML_DSA_TESTNET,
+  serializeMessagePointer,
 } from "cemp-pq";
 import { ml_dsa65 } from "@noble/post-quantum/ml-dsa";
 import { ml_kem768 } from "@noble/post-quantum/ml-kem";
@@ -244,6 +245,17 @@ export async function sendMessage(
     const encryptedData = await CEMPPQ.encrypt(envelopeBytes, profile.mlKemPubKey);
 
     // Build tx manually, matching buildSendMessageTx's output structure.
+    //
+    // Notification cell carries a 52-byte MessagePointer (molecule: 4B total +
+    // 2x4B offsets + 32B tx_hash + 4B index) so the receiver can locate the
+    // Message Cell from the notification alone. The pointer's tx_hash field
+    // depends on tx.hash(), so we must size the cell for the final 52 bytes
+    // *before* completeFeeBy (which fixes capacity to fit current data length),
+    // then overwrite the placeholder with the real pointer after fee
+    // completion. Same-length overwrite keeps the cell valid.
+    const POINTER_LEN = 52;
+    const pointerPlaceholder = new Uint8Array(POINTER_LEN);
+
     const tx = ccc.Transaction.from({
       outputs: [
         // Output 0: Message Cell (owned by sender — spendable to reclaim capacity).
@@ -259,7 +271,7 @@ export async function sendMessage(
           type: null,
         },
       ],
-      outputsData: [ccc.hexFrom(encryptedData), "0x"],
+      outputsData: [ccc.hexFrom(encryptedData), ccc.hexFrom(pointerPlaceholder)],
     });
 
     tx.addCellDeps({
@@ -276,6 +288,24 @@ export async function sendMessage(
     // The cast is safe — at runtime MLDSASigner is a proper CCC Signer.
     await tx.completeInputsByCapacity(signer as unknown as ccc.Signer);
     await tx.completeFeeBy(signer as unknown as ccc.Signer, 1200n);
+
+    // Now that inputs/outputs/data are finalised, compute the tx hash and write
+    // the real MessagePointer over the placeholder. tx.hash() excludes the
+    // witness (which signOnlyTransaction fills in), so the hash is stable
+    // through signing.
+    // serializeMessagePointer.serializeBytes treats its first argument as
+    // array-like and writes it byte-by-byte, so we must pass the 32-byte
+    // decoded hash rather than the 66-char hex string (which would serialise
+    // its ASCII characters and corrupt the on-chain pointer).
+    const messageTxHashBytes = ccc.bytesFrom(tx.hash());
+    const messagePointer = serializeMessagePointer(messageTxHashBytes, 0);
+    if (messagePointer.length !== POINTER_LEN) {
+      throw new Error(
+        `serializeMessagePointer produced ${messagePointer.length} bytes, ` +
+          `expected ${POINTER_LEN} — placeholder size out of sync.`,
+      );
+    }
+    tx.outputsData[1] = ccc.hexFrom(messagePointer);
 
     const signed = await signer.signOnlyTransaction(tx);
     const txBytes = signed.toBytes();

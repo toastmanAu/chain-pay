@@ -164,6 +164,19 @@ export class CEMPTransactionBuilder {
         // 2. Encrypt Message
         const encryptedData = await CEMPPQ.encrypt(new TextEncoder().encode(message), recipientMLKEMPubKey);
 
+        // Phase 2.7b-1 fix (smoke iteration 2): the notification cell must be sized
+        // for the MessagePointer before completeFeeBy runs, otherwise the cell capacity
+        // gets pinned to the empty-data minimum (~77 CKB) and any post-completion
+        // attempt to write the 52-byte pointer leaves the cell under-capacity. The
+        // late mutation then gets silently dropped before serialization, and the
+        // notification ships with empty data — invisible to receivers.
+        //
+        // Fix: pre-fill outputsData[1] with a 52-byte zero placeholder so
+        // completeFeeBy sizes the cell to fit (~129 CKB). After fee completion we
+        // overwrite the placeholder with the real pointer; the data length is
+        // unchanged so the cell stays valid.
+        const POINTER_PLACEHOLDER = new Uint8Array(52);
+
         const tx = ccc.Transaction.from({
             outputs: [
                 // Output 1: Message Cell (Owned by Sender)
@@ -181,7 +194,7 @@ export class CEMPTransactionBuilder {
             ],
             outputsData: [
                 ccc.hexFrom(encryptedData),
-                "0x" // Pointer will be filled after Tx calculation if needed, or just protocol ID
+                ccc.hexFrom(POINTER_PLACEHOLDER), // 52-byte placeholder — overwritten with real pointer after fee completion
             ]
         });
 
@@ -198,11 +211,18 @@ export class CEMPTransactionBuilder {
         await tx.completeInputsByCapacity(senderSigner);
         await tx.completeFeeBy(senderSigner, feeRate);
 
-        // Phase 2.7b-1: write MessagePointer into the notification cell so receivers
-        // can locate the corresponding Message Cell. CCC tx.hash() excludes the
-        // witness, so it is stable here before signOnlyTransaction fills it in.
+        // Overwrite the placeholder with the real pointer. Same byte length →
+        // cell capacity stays valid; tx hash is stable through signing because
+        // signOnlyTransaction only fills the witness, which is excluded from
+        // tx.hash() per CCC's hashing rule.
         const messageTxHash = tx.hash();
         const messagePointer = serializeMessagePointer(messageTxHash, 0);
+        if (messagePointer.length !== POINTER_PLACEHOLDER.length) {
+            throw new Error(
+                `serializeMessagePointer produced ${messagePointer.length} bytes, ` +
+                `expected ${POINTER_PLACEHOLDER.length} — placeholder size out of sync.`,
+            );
+        }
         tx.outputsData[1] = ccc.hexFrom(messagePointer);
 
         return tx;

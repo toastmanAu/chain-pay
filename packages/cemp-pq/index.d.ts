@@ -26,7 +26,7 @@ export function serializeEncryptedMessage(
   ciphertext: Uint8Array,
 ): Uint8Array;
 
-export function serializeMessagePointer(txHash: string, index: number): Uint8Array;
+export function serializeMessagePointer(txHash: Uint8Array, index: number): Uint8Array;
 
 export function ckbBlake2b(data: Uint8Array): Uint8Array;
 
