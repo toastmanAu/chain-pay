@@ -8,6 +8,8 @@ export interface PlainIdentity {
   mlDsaPub: Uint8Array;
   mlKemPub: Uint8Array;
   address: string;
+  /** 20-byte hash from the ck-mldsa-lock address args. */
+  addrHash: Uint8Array;
   createdAt: number;
 }
 
@@ -15,6 +17,8 @@ export interface PublicIdentity {
   mlDsaPub: string;
   mlKemPub: string;
   address: string;
+  /** 0x-prefixed 20-byte hex of address args. */
+  addrHash: string;
   createdAt: number;
 }
 
@@ -60,6 +64,7 @@ interface StoredShape {
   mlDsaPub: string;
   mlKemPub: string;
   address: string;
+  addrHash: string;
   createdAt: number;
 }
 
@@ -77,6 +82,7 @@ export async function loadCommIdentity(): Promise<PublicIdentity | null> {
     mlDsaPub: json.mlDsaPub,
     mlKemPub: json.mlKemPub,
     address: json.address,
+    addrHash: json.addrHash,
     createdAt: json.createdAt,
   };
 }
@@ -100,6 +106,7 @@ export async function saveCommIdentity(identity: PlainIdentity): Promise<void> {
     mlDsaPub: toHex(identity.mlDsaPub),
     mlKemPub: toHex(identity.mlKemPub),
     address: identity.address,
+    addrHash: toHex(identity.addrHash),
     createdAt: identity.createdAt,
   };
   const encrypted = getSafeStorage().encrypt(JSON.stringify(shape));

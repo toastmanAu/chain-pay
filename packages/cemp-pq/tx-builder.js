@@ -83,7 +83,11 @@ export class CEMPTransactionBuilder {
     }
 
     /**
-     * Discovery: Fetch the recipient's ML-KEM public key from their Profile Cell.
+     * Discovery: Fetch the recipient's Profile Cell.
+     * Returns { mlDsaPubKey, mlKemPubKey, metadata } on hit, null on miss.
+     * Profile molecule (per serializeProfile in index.js):
+     *   total(4) | off_dsa(4)=16 | off_kem(4) | off_meta(4)
+     *   | dsa_len(4) + dsa | kem_len(4) + kem | meta_len(4) + meta
      */
     async fetchRecipientProfile(recipientLock) {
         const typeIdCodeHash = "0x00000000000000000000000000000000000000000000000000545950455f4944";
@@ -97,12 +101,20 @@ export class CEMPTransactionBuilder {
             if (cell.cellOutput.type && cell.cellOutput.type.codeHash === typeIdCodeHash) {
                 const data = ccc.bytesFrom(cell.outputData);
                 const view = new DataView(data.buffer, data.byteOffset, data.byteLength);
+                const off_dsa = view.getUint32(4, true);
                 const off_kem = view.getUint32(8, true);
+                const off_meta = view.getUint32(12, true);
+                const dsaLen = view.getUint32(off_dsa, true);
                 const kemLen = view.getUint32(off_kem, true);
-                return data.slice(off_kem + 4, off_kem + 4 + kemLen);
+                const metaLen = view.getUint32(off_meta, true);
+                return {
+                    mlDsaPubKey: data.slice(off_dsa + 4, off_dsa + 4 + dsaLen),
+                    mlKemPubKey: data.slice(off_kem + 4, off_kem + 4 + kemLen),
+                    metadata: data.slice(off_meta + 4, off_meta + 4 + metaLen),
+                };
             }
         }
-        throw new Error("Recipient profile not found on-chain.");
+        return null;
     }
 
     /**
@@ -142,11 +154,28 @@ export class CEMPTransactionBuilder {
         
         // 1. Discover Recipient's Public Key
         if (!recipientMLKEMPubKey) {
-            recipientMLKEMPubKey = await this.fetchRecipientProfile(recipientLock);
+            const profile = await this.fetchRecipientProfile(recipientLock);
+            if (!profile) {
+                throw new Error("Recipient profile not found on-chain.");
+            }
+            recipientMLKEMPubKey = profile.mlKemPubKey;
         }
 
         // 2. Encrypt Message
         const encryptedData = await CEMPPQ.encrypt(new TextEncoder().encode(message), recipientMLKEMPubKey);
+
+        // Phase 2.7b-1 fix (smoke iteration 2): the notification cell must be sized
+        // for the MessagePointer before completeFeeBy runs, otherwise the cell capacity
+        // gets pinned to the empty-data minimum (~77 CKB) and any post-completion
+        // attempt to write the 52-byte pointer leaves the cell under-capacity. The
+        // late mutation then gets silently dropped before serialization, and the
+        // notification ships with empty data — invisible to receivers.
+        //
+        // Fix: pre-fill outputsData[1] with a 52-byte zero placeholder so
+        // completeFeeBy sizes the cell to fit (~129 CKB). After fee completion we
+        // overwrite the placeholder with the real pointer; the data length is
+        // unchanged so the cell stays valid.
+        const POINTER_PLACEHOLDER = new Uint8Array(52);
 
         const tx = ccc.Transaction.from({
             outputs: [
@@ -165,7 +194,7 @@ export class CEMPTransactionBuilder {
             ],
             outputsData: [
                 ccc.hexFrom(encryptedData),
-                "0x" // Pointer will be filled after Tx calculation if needed, or just protocol ID
+                ccc.hexFrom(POINTER_PLACEHOLDER), // 52-byte placeholder — overwritten with real pointer after fee completion
             ]
         });
 
@@ -181,6 +210,20 @@ export class CEMPTransactionBuilder {
         // Complete the transaction (find inputs, calculate fees, etc.)
         await tx.completeInputsByCapacity(senderSigner);
         await tx.completeFeeBy(senderSigner, feeRate);
+
+        // Overwrite the placeholder with the real pointer. Same byte length →
+        // cell capacity stays valid; tx hash is stable through signing because
+        // signOnlyTransaction only fills the witness, which is excluded from
+        // tx.hash() per CCC's hashing rule.
+        const messageTxHash = tx.hash();
+        const messagePointer = serializeMessagePointer(messageTxHash, 0);
+        if (messagePointer.length !== POINTER_PLACEHOLDER.length) {
+            throw new Error(
+                `serializeMessagePointer produced ${messagePointer.length} bytes, ` +
+                `expected ${POINTER_PLACEHOLDER.length} — placeholder size out of sync.`,
+            );
+        }
+        tx.outputsData[1] = ccc.hexFrom(messagePointer);
 
         return tx;
     }

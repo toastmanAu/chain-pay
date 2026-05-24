@@ -33,6 +33,7 @@ import {
   CEMPTransactionBuilder,
   MLDSASigner,
   ML_DSA_TESTNET,
+  serializeMessagePointer,
 } from "cemp-pq";
 import { ml_dsa65 } from "@noble/post-quantum/ml-dsa";
 import { ml_kem768 } from "@noble/post-quantum/ml-kem";
@@ -90,14 +91,22 @@ function fromHex(hex: string): Uint8Array {
 }
 
 /**
- * Derive the CKB testnet address for a given 32-byte ML-DSA seed.
+ * Derive the CKB testnet address + 20-byte addrHash for a given 32-byte ML-DSA seed.
  * We instantiate a throw-away MLDSASigner (which computes the lock internally)
  * rather than replicating the hashCkb/args derivation here.
  */
-async function addressFromDsaSeed(seed: Uint8Array): Promise<string> {
+async function deriveIdentityLock(seed: Uint8Array): Promise<{ address: string; addrHash: Uint8Array }> {
   const signer = new MLDSASigner(getClient(), seed);
   const addrObj = await signer.getRecommendedAddressObj();
-  return addrObj.toString();
+  const argsHex = addrObj.script.args.startsWith("0x")
+    ? addrObj.script.args.slice(2)
+    : addrObj.script.args;
+  // First 20 bytes of args = the canonical comm-identity hash used for the refusal invariant.
+  const addrHash = new Uint8Array(20);
+  for (let i = 0; i < 20; i++) {
+    addrHash[i] = parseInt(argsHex.slice(i * 2, i * 2 + 2), 16);
+  }
+  return { address: addrObj.toString(), addrHash };
 }
 
 // ── Public API ────────────────────────────────────────────────────────────────
@@ -114,7 +123,7 @@ export async function generateIdentity(): Promise<PublicIdentity> {
   const dsa = ml_dsa65.keygen(dsaSeed);
   const kemSeed = crypto.getRandomValues(new Uint8Array(64));
   const kem = ml_kem768.keygen(kemSeed);
-  const address = await addressFromDsaSeed(dsaSeed);
+  const { address, addrHash } = await deriveIdentityLock(dsaSeed);
 
   const plain: PlainIdentity = {
     mlDsaSec: dsaSeed, // store the 32-byte seed; MLDSASigner will expand on use
@@ -122,6 +131,7 @@ export async function generateIdentity(): Promise<PublicIdentity> {
     mlDsaPub: dsa.publicKey,
     mlKemPub: kem.publicKey,
     address,
+    addrHash,
     createdAt: Date.now(),
   };
   await saveCommIdentity(plain);
@@ -134,6 +144,7 @@ export async function generateIdentity(): Promise<PublicIdentity> {
     mlDsaPub: toHex(dsa.publicKey),
     mlKemPub: toHex(kem.publicKey),
     address,
+    addrHash: toHex(addrHash),
     createdAt: plain.createdAt,
   };
 }
@@ -223,14 +234,28 @@ export async function sendMessage(
     const signer = new MLDSASigner(getClient(), secrets.mlDsaSec);
     const { script: senderLock } = await signer.getRecommendedAddressObj();
 
-    // Fetch recipient's ML-KEM public key from their Profile Cell.
+    // Fetch recipient's profile (ML-KEM public key + ML-DSA pubkey + metadata).
     const builder = new CEMPTransactionBuilder(getClient());
-    const kemPubKey = await builder.fetchRecipientProfile(recipientLock);
+    const profile = await builder.fetchRecipientProfile(recipientLock);
+    if (!profile) {
+      throw new Error(`profile not found for recipient ${recipientAddress}`);
+    }
 
     // Encrypt envelope bytes directly (not via buildSendMessageTx which expects a string).
-    const encryptedData = await CEMPPQ.encrypt(envelopeBytes, kemPubKey);
+    const encryptedData = await CEMPPQ.encrypt(envelopeBytes, profile.mlKemPubKey);
 
     // Build tx manually, matching buildSendMessageTx's output structure.
+    //
+    // Notification cell carries a 52-byte MessagePointer (molecule: 4B total +
+    // 2x4B offsets + 32B tx_hash + 4B index) so the receiver can locate the
+    // Message Cell from the notification alone. The pointer's tx_hash field
+    // depends on tx.hash(), so we must size the cell for the final 52 bytes
+    // *before* completeFeeBy (which fixes capacity to fit current data length),
+    // then overwrite the placeholder with the real pointer after fee
+    // completion. Same-length overwrite keeps the cell valid.
+    const POINTER_LEN = 52;
+    const pointerPlaceholder = new Uint8Array(POINTER_LEN);
+
     const tx = ccc.Transaction.from({
       outputs: [
         // Output 0: Message Cell (owned by sender — spendable to reclaim capacity).
@@ -246,7 +271,7 @@ export async function sendMessage(
           type: null,
         },
       ],
-      outputsData: [ccc.hexFrom(encryptedData), "0x"],
+      outputsData: [ccc.hexFrom(encryptedData), ccc.hexFrom(pointerPlaceholder)],
     });
 
     tx.addCellDeps({
@@ -263,6 +288,24 @@ export async function sendMessage(
     // The cast is safe — at runtime MLDSASigner is a proper CCC Signer.
     await tx.completeInputsByCapacity(signer as unknown as ccc.Signer);
     await tx.completeFeeBy(signer as unknown as ccc.Signer, 1200n);
+
+    // Now that inputs/outputs/data are finalised, compute the tx hash and write
+    // the real MessagePointer over the placeholder. tx.hash() excludes the
+    // witness (which signOnlyTransaction fills in), so the hash is stable
+    // through signing.
+    // serializeMessagePointer.serializeBytes treats its first argument as
+    // array-like and writes it byte-by-byte, so we must pass the 32-byte
+    // decoded hash rather than the 66-char hex string (which would serialise
+    // its ASCII characters and corrupt the on-chain pointer).
+    const messageTxHashBytes = ccc.bytesFrom(tx.hash());
+    const messagePointer = serializeMessagePointer(messageTxHashBytes, 0);
+    if (messagePointer.length !== POINTER_LEN) {
+      throw new Error(
+        `serializeMessagePointer produced ${messagePointer.length} bytes, ` +
+          `expected ${POINTER_LEN} — placeholder size out of sync.`,
+      );
+    }
+    tx.outputsData[1] = ccc.hexFrom(messagePointer);
 
     const signed = await signer.signOnlyTransaction(tx);
     const txBytes = signed.toBytes();
@@ -310,12 +353,10 @@ export async function decryptIncoming(messageOutPoint: {
 }
 
 /**
- * Resolve a remote participant's Profile Cell to obtain their ML-KEM public key.
+ * Resolve a remote participant's Profile Cell.
  *
- * Phase 2.7a: returns only the ML-KEM public key extracted by CEMP-PQ's
- * fetchRecipientProfile. The mlDsaPubKey and metadata fields are empty
- * placeholders — full enrichment is deferred to Phase 2.7b which will parse
- * the profile molecule directly.
+ * Returns the full profile (ML-DSA pubkey, ML-KEM pubkey, UTF-8 metadata).
+ * Throws if the profile cell is not found.
  */
 export async function resolveProfile(
   address: string,
@@ -324,22 +365,15 @@ export async function resolveProfile(
   const lock = addrObj.script;
   const builder = new CEMPTransactionBuilder(getClient());
 
-  let kemPubKey: Uint8Array;
-  try {
-    // Runtime returns bare Uint8Array (KEM pubkey bytes) and throws if not found.
-    // The .d.ts ProfileFetchResult shape is aspirational — actual JS returns Uint8Array.
-    kemPubKey = await builder.fetchRecipientProfile(lock);
-  } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err);
-    throw new Error(`profile not found for ${address}: ${msg}`);
+  const profile = await builder.fetchRecipientProfile(lock);
+  if (!profile) {
+    throw new Error(`profile not found for ${address}`);
   }
 
   return {
     address,
-    // TODO(2.7b): fetch ML-DSA pubkey by parsing the profile molecule directly.
-    mlDsaPubKey: "",
-    mlKemPubKey: toHex(kemPubKey),
-    // TODO(2.7b): decode metadata field from profile molecule.
-    metadata: "",
+    mlDsaPubKey: toHex(profile.mlDsaPubKey),
+    mlKemPubKey: toHex(profile.mlKemPubKey),
+    metadata: new TextDecoder().decode(profile.metadata),
   };
 }

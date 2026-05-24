@@ -193,10 +193,16 @@ async function ensureProfilePublished(address: string): Promise<void> {
  * type script and empty output data.  The encrypted message lives in the *Message
  * Cell* — we need to find it via the Message OutPoint.
  *
- * In this first cut the notification cell carries NO on-chain pointer to the
- * message cell — the CEMP-PQ protocol sends the encrypted blob directly in the
- * notification cell's output data (as built by sendMessage in comm-transport-service.ts).
- * We try to decrypt every non-empty cell we find on the recipient's lock.
+ * The CEMP-PQ protocol splits a message across two outputs in the same tx:
+ *   - outputs[0] = Message Cell  (locked to sender, holds the encrypted blob)
+ *   - outputs[1] = Notification Cell  (locked to recipient, holds a 52-byte
+ *                                     MessagePointer molecule)
+ * We watch the recipient's lock for non-empty cells (the notifications),
+ * then dereference each one to its message cell. Since sender and notification
+ * are always in the same tx today, we use the notification's own OutPoint.txHash
+ * and read outputs[0] for the encrypted blob — the pointer's embedded tx_hash
+ * field can't be self-referential (writing it would change the tx hash), so the
+ * receive-side convention is "same-tx, message at index 0."
  */
 async function pollIncoming(
   ownAddress: string,
@@ -210,7 +216,7 @@ async function pollIncoming(
   let tick = 0;
 
   while (Date.now() < deadline) {
-    const resp = await client.getCells(
+    const resp = await client.findCellsPaged(
       { script: ownLock, scriptType: "lock", scriptSearchMode: "exact" },
       "asc",
       50n,
@@ -223,11 +229,12 @@ async function pollIncoming(
       const data = c.outputData;
       if (!data || data === "0x" || data.length < 4) continue;
 
-      // Try to decrypt the cell data as a CEMP-PQ encrypted message.
+      // Notification cells carry a 52-byte MessagePointer. Dereference to the
+      // message cell at outputs[0] of the same tx (same-tx convention).
       try {
         const decryptedHex = await decryptIncoming({
           txHash: c.outPoint.txHash,
-          index: Number(c.outPoint.index),
+          index: 0,
         });
         const bytes = Uint8Array.from(Buffer.from(decryptedHex.slice(2), "hex"));
         const decoded = decodeEnvelope(bytes);

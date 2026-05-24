@@ -16,6 +16,7 @@ const FIXTURE = {
   mlDsaPub: new Uint8Array(1952).fill(0xb1),
   mlKemPub: new Uint8Array(1184).fill(0xb2),
   address: "ckt1qmldsa-test",
+  addrHash: new Uint8Array(20).fill(0xb3),
   createdAt: 1747900000_000,
 };
 

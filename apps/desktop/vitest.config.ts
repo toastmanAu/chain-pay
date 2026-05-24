@@ -9,7 +9,9 @@ export default defineConfig({
     },
   },
   test: {
-    include: ["src/**/*.test.ts", "electron/**/*.test.ts"],
+    include: ["src/**/*.test.{ts,tsx}", "electron/**/*.test.ts"],
     environment: "node",
+    // React component tests opt into jsdom via `// @vitest-environment jsdom`
+    // at the top of the test file. Node default keeps non-DOM tests fast.
   },
 });

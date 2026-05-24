@@ -8,7 +8,7 @@ import type { CommTransport, PeerProfile, OutgoingPacket, OutgoingSignature } fr
 
 export type { CommTransport, PeerProfile, OutgoingPacket, OutgoingSignature };
 
-let cached: CommTransport | null = null;
+let cached: { transport: CempPqCommTransport; identityAddress: string } | null = null;
 
 function getCccClient(): Client {
   const network = useSyncStore.getState().ckb.network;
@@ -60,12 +60,20 @@ function parseMessagePointer(outputDataHex: string): { txHash: string; index: nu
 }
 
 export function createCommTransport(): CommTransport | null {
-  if (cached) return cached;
-
   const identity = useCommIdentityStore.getState().identity;
-  if (!identity) return null;
+  if (!identity) {
+    if (cached) {
+      void cached.transport.stop();
+      cached = null;
+    }
+    return null;
+  }
+  if (cached && cached.identityAddress === identity.address) {
+    return cached.transport;
+  }
+  if (cached) void cached.transport.stop();
 
-  cached = new CempPqCommTransport({
+  const transport = new CempPqCommTransport({
     getOwnLock: async () => {
       const client = getCccClient();
       const addr = await Address.fromString(identity.address, client);
@@ -150,10 +158,17 @@ export function createCommTransport(): CommTransport | null {
     parseMessagePointer,
   });
 
-  return cached;
+  cached = { transport, identityAddress: identity.address };
+  return transport;
 }
 
-/** Test-only: reset the cached singleton so the next call re-reads the store. */
-export function _resetCommTransportForTests(): void {
-  cached = null;
+/**
+ * Stop and clear the cached singleton. Called by the comm-identity store's
+ * actions (or App.tsx boot) when the identity changes. Safe to call at any time.
+ */
+export function resetCommTransport(): void {
+  if (cached) {
+    void cached.transport.stop();
+    cached = null;
+  }
 }

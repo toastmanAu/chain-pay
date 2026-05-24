@@ -29,3 +29,15 @@ export class CellGoneError extends CommError {
     super(`Message Cell at ${outPoint.txHash}:${outPoint.index} has been consumed`);
   }
 }
+
+export class IdentityGenerationError extends CommError {}
+
+export class ProfilePublishError extends CommError {
+  constructor(
+    public readonly txHash: string | null,
+    message: string,
+    options?: { cause?: unknown },
+  ) {
+    super(message, options);
+  }
+}
