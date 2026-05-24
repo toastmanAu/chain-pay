@@ -184,4 +184,119 @@ describe("watcher", () => {
     expect(handler2).toHaveBeenCalledTimes(1);
     await w.stop();
   });
+
+  it("kind=packet with expired expiresAt is dropped — no onIncomingPacket call, no ack", async () => {
+    const expiredAt = Math.floor(Date.now() / 1000) - 60;
+    const envelopeBytes = encodeEnvelope({
+      kind: "packet",
+      senderAddrHash: SENDER_HASH,
+      payload: {
+        txHash: "0xabc",
+        treasuryAddress: "ckt1qx",
+        expiresAt: expiredAt,
+        packet: {} as never,
+      },
+    });
+    const sendAck = vi.fn().mockResolvedValue(undefined);
+    const deps = makeDeps({
+      listCellsForLock: vi.fn().mockResolvedValueOnce([
+        { outPoint: { txHash: "0xn1", index: 0 }, outputData: "0xff" },
+      ]),
+      decryptIncoming: vi.fn().mockResolvedValue("0x" + Buffer.from(envelopeBytes).toString("hex")),
+      sendAck,
+    });
+    const onPacket = vi.fn();
+    const onAck = vi.fn();
+    const w = createWatcher(deps);
+    w.onIncomingPacket(onPacket);
+    w.onIncomingAck(onAck);
+    await w.start();
+    expect(onPacket).not.toHaveBeenCalled();
+    expect(sendAck).not.toHaveBeenCalled();
+    expect(onAck).not.toHaveBeenCalled();
+    await w.stop();
+  });
+
+  it("kind=packet with valid expiresAt fires onIncomingPacket and emits an auto-ack", async () => {
+    const validAt = Math.floor(Date.now() / 1000) + 3600;
+    const envelopeBytes = encodeEnvelope({
+      kind: "packet",
+      senderAddrHash: SENDER_HASH,
+      payload: {
+        txHash: "0xdef",
+        treasuryAddress: "ckt1qx",
+        expiresAt: validAt,
+        packet: {} as never,
+      },
+    });
+    const sendAck = vi.fn().mockResolvedValue(undefined);
+    const deps = makeDeps({
+      listCellsForLock: vi.fn().mockResolvedValueOnce([
+        { outPoint: { txHash: "0xn1", index: 0 }, outputData: "0xff" },
+      ]),
+      decryptIncoming: vi.fn().mockResolvedValue("0x" + Buffer.from(envelopeBytes).toString("hex")),
+      sendAck,
+    });
+    const onPacket = vi.fn();
+    const w = createWatcher(deps);
+    w.onIncomingPacket(onPacket);
+    await w.start();
+    expect(onPacket).toHaveBeenCalledTimes(1);
+    // Wait a microtask for the fire-and-forget ack to settle.
+    await Promise.resolve();
+    expect(sendAck).toHaveBeenCalledTimes(1);
+    expect(sendAck).toHaveBeenCalledWith(expect.any(String), { txHash: "0xdef" });
+    await w.stop();
+  });
+
+  it("auto-ack failure does not block onIncomingPacket dispatch", async () => {
+    const validAt = Math.floor(Date.now() / 1000) + 3600;
+    const envelopeBytes = encodeEnvelope({
+      kind: "packet",
+      senderAddrHash: SENDER_HASH,
+      payload: {
+        txHash: "0xdef",
+        treasuryAddress: "ckt1qx",
+        expiresAt: validAt,
+        packet: {} as never,
+      },
+    });
+    const sendAck = vi.fn().mockRejectedValueOnce(new Error("ipc broke"));
+    const deps = makeDeps({
+      listCellsForLock: vi.fn().mockResolvedValueOnce([
+        { outPoint: { txHash: "0xn1", index: 0 }, outputData: "0xff" },
+      ]),
+      decryptIncoming: vi.fn().mockResolvedValue("0x" + Buffer.from(envelopeBytes).toString("hex")),
+      sendAck,
+    });
+    const onPacket = vi.fn();
+    const w = createWatcher(deps);
+    w.onIncomingPacket(onPacket);
+    await w.start();
+    expect(onPacket).toHaveBeenCalledTimes(1);
+    // Let the rejected sendAck promise settle through its .catch handler.
+    await Promise.resolve();
+    await w.stop();
+  });
+
+  it("kind=ack envelope routes to onIncomingAck handlers", async () => {
+    const envelopeBytes = encodeEnvelope({
+      kind: "ack",
+      senderAddrHash: SENDER_HASH,
+      payload: { txHash: "0xabc" },
+    });
+    const deps = makeDeps({
+      listCellsForLock: vi.fn().mockResolvedValueOnce([
+        { outPoint: { txHash: "0xn1", index: 0 }, outputData: "0xff" },
+      ]),
+      decryptIncoming: vi.fn().mockResolvedValue("0x" + Buffer.from(envelopeBytes).toString("hex")),
+    });
+    const onAck = vi.fn();
+    const w = createWatcher(deps);
+    w.onIncomingAck(onAck);
+    await w.start();
+    expect(onAck).toHaveBeenCalledTimes(1);
+    expect(onAck).toHaveBeenCalledWith(expect.any(String), { txHash: "0xabc" });
+    await w.stop();
+  });
 });
