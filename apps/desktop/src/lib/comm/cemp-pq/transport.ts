@@ -1,14 +1,17 @@
 import { encodeEnvelope } from "../envelope";
 import type {
   CommTransport,
+  IncomingAckHandler,
   IncomingPacketHandler,
   IncomingSignatureHandler,
+  OutgoingAck,
   OutgoingPacket,
   OutgoingSignature,
   PeerProfile,
   Unsubscribe,
 } from "../types";
 import { ProfileNotFoundError } from "../errors";
+import { usePeerBookStore } from "../../../stores/peer-book";
 import { createWatcher, type Watcher } from "./watcher";
 
 interface ScriptLike {
@@ -55,6 +58,20 @@ export class CempPqCommTransport implements CommTransport {
       listCellsForLock: this.deps.listCellsForLock,
       decryptIncoming: this.deps.ipc.decryptIncoming,
       parseMessagePointer: this.deps.parseMessagePointer,
+      sendAck: async (senderAddrHashHex, body) => {
+        // The watcher hands us the raw addrHash from the incoming envelope.
+        // To send the ack we need a PeerProfile (address + ML-KEM key).
+        // Resolution order:
+        //   1. peer-book lookup by addrHash (fast, no chain hit)
+        //   2. cached profile if present, else on-chain resolveProfile(address)
+        // If no peer mapping exists, the sender is a stranger — skip the ack.
+        const peer = usePeerBookStore
+          .getState()
+          .findByAddrHash(senderAddrHashHex as `0x${string}`);
+        if (!peer) return;
+        const profile = peer.cachedProfile ?? (await this.resolveProfile(peer.address));
+        await this.sendAck(profile, body);
+      },
     });
     await this.watcher.start();
   }
@@ -104,7 +121,11 @@ export class CempPqCommTransport implements CommTransport {
     return this.sendEnvelope(peer, "signature", body);
   }
 
-  private async sendEnvelope(peer: PeerProfile, kind: "packet" | "signature", payload: unknown): Promise<string> {
+  async sendAck(peer: PeerProfile, body: OutgoingAck): Promise<string> {
+    return this.sendEnvelope(peer, "ack", body);
+  }
+
+  private async sendEnvelope(peer: PeerProfile, kind: "packet" | "signature" | "ack", payload: unknown): Promise<string> {
     const senderAddrHash = await this.deps.getOwnAddrHash();
     const envelope = encodeEnvelope({ kind, senderAddrHash, payload });
     const envelopeHex = "0x" + Buffer.from(envelope).toString("hex");
@@ -121,6 +142,11 @@ export class CempPqCommTransport implements CommTransport {
   onIncomingSignature(h: IncomingSignatureHandler): Unsubscribe {
     if (!this.watcher) throw new Error("transport not started");
     return this.watcher.onIncomingSignature(h);
+  }
+
+  onIncomingAck(h: IncomingAckHandler): Unsubscribe {
+    if (!this.watcher) throw new Error("transport not started");
+    return this.watcher.onIncomingAck(h);
   }
 }
 
