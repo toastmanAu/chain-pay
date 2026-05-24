@@ -189,6 +189,7 @@ describe("treasury store — refusal invariant against comm identity", () => {
         mlDsaPub: "0x00",
         mlKemPub: "0x00",
         address: "ckt1qzzzzz",
+        addrHash: COMM_HASH_HEX,
         createdAt: 0,
         fundedAt: null,
         profileTxHash: null,
