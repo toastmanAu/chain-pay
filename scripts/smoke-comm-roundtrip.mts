@@ -73,6 +73,7 @@ import {
 const ENVELOPE_VERSION = 0x01;
 const KIND_PACKET = 0x01;
 const KIND_SIGNATURE = 0x02;
+const KIND_ACK = 0x03;
 
 function encodeEnvelope(
   kindByte: number,
@@ -90,7 +91,7 @@ function encodeEnvelope(
 }
 
 interface DecodedEnvelope {
-  kind: "packet" | "signature" | "unknown";
+  kind: "packet" | "signature" | "ack" | "unknown";
   senderHash: Uint8Array;
   payload: unknown;
 }
@@ -103,6 +104,7 @@ function decodeEnvelope(bytes: Uint8Array): DecodedEnvelope {
   const kind: DecodedEnvelope["kind"] =
     kindByte === KIND_PACKET ? "packet"
     : kindByte === KIND_SIGNATURE ? "signature"
+    : kindByte === KIND_ACK ? "ack"
     : "unknown";
   const senderHash = bytes.slice(2, 22);
   const payload: unknown = JSON.parse(new TextDecoder().decode(bytes.slice(22)));
@@ -280,6 +282,54 @@ async function pollIncoming(
   throw new Error(`timeout after ${maxWaitSec}s waiting for ${expectedKind} envelope`);
 }
 
+/**
+ * Poll for an ack envelope on `ownAddress` that references `expectedTxHash`.
+ *
+ * Role A uses this after broadcasting a packet to wait for B's auto-ack before
+ * sending the signature reply. Same dereference convention as pollIncoming:
+ * notifications at any output index, message cell at outputs[0] of the same tx.
+ */
+async function waitForAckOn(
+  ownAddress: string,
+  expectedTxHash: string,
+  maxWaitSec = 60,
+): Promise<void> {
+  const client = makeClient();
+  const ownLock = (await ccc.Address.fromString(ownAddress, client)).script;
+  const deadline = Date.now() + maxWaitSec * 1000;
+  const seen = new Set<string>();
+  while (Date.now() < deadline) {
+    const resp = await client.findCellsPaged(
+      { script: ownLock, scriptType: "lock", scriptSearchMode: "exact" },
+      "asc",
+      50n,
+    );
+    for (const c of resp.cells) {
+      const key = `${c.outPoint.txHash}:${c.outPoint.index}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      if (!c.outputData || c.outputData === "0x") continue;
+      try {
+        const decryptedHex = await decryptIncoming({
+          txHash: c.outPoint.txHash,
+          index: 0,
+        });
+        const bytes = Uint8Array.from(Buffer.from(decryptedHex.slice(2), "hex"));
+        const decoded = decodeEnvelope(bytes);
+        const body = decoded.payload as { txHash?: string };
+        if (decoded.kind === "ack" && body.txHash === expectedTxHash) {
+          console.log(`[smoke] ack received for ${expectedTxHash}`);
+          return;
+        }
+      } catch {
+        // skip
+      }
+    }
+    await sleep(5_000);
+  }
+  throw new Error(`timeout waiting for ack on ${expectedTxHash}`);
+}
+
 async function broadcastTx(bundle: { txHash: string; txBytes: string }): Promise<void> {
   const client = makeClient();
   const txBytes = Uint8Array.from(Buffer.from(bundle.txBytes.slice(2), "hex"));
@@ -309,6 +359,13 @@ async function runRoleA(peerBAddress: string): Promise<void> {
   const bundle = await sendMessage(peerBAddress, envelope);
   await broadcastTx(bundle);
   console.log(`[smoke] packet sent: ${bundle.txHash}`);
+
+  if (process.env["SMOKE_SKIP_ACK"] !== "1") {
+    console.log("[smoke] waiting for ack from B...");
+    await waitForAckOn(address, bundle.txHash);
+  } else {
+    console.log("[smoke] skipping ack wait (SMOKE_SKIP_ACK=1)");
+  }
 
   console.log("[smoke] waiting for FIXTURE_SIGNATURE reply from B...");
   const sig = await pollIncoming(address, "signature") as typeof FIXTURE_SIGNATURE;
