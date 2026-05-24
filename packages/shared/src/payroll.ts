@@ -53,6 +53,14 @@ export interface PayrollBatchTotals {
 export interface PartialSigEntry {
   slotIndex: number;
   signature: string;
+  /** The multisig signer pubkey hash this signature verified against.
+   *  Populated by the comm-channel auto-match path; the paste flow may
+   *  leave it undefined. Audit-only — the canonical mapping of slot to
+   *  signer lives on the treasury config. */
+  signerPubkeyHash?: `0x${string}`;
+  /** If the signature arrived via the comm channel, the tx hash of the
+   *  signer's notification cell. Audit trail; undefined for pasted sigs. */
+  sourceCommTx?: string;
 }
 
 export type PayrollBatchState =
