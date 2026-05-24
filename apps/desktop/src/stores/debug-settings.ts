@@ -23,6 +23,7 @@ export const useDebugSettingsStore = create<DebugSettingsStore>()(
       name: "chain-pay:debug-settings",
       storage: createJSONStorage(() => storageImpl),
       version: 1,
+      partialize: (state) => ({ showClipboard: state.showClipboard }),
     },
   ),
 );

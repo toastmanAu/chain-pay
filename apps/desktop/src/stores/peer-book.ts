@@ -127,9 +127,7 @@ export const usePeerBookStore = create<PeerBookStore>()(
           for (const p of state.peers) {
             try {
               const hashBytes = await peerHashFromAddress(p.address);
-              const addrHash = ("0x" + Array.from(hashBytes)
-                .map((b) => b.toString(16).padStart(2, "0"))
-                .join("")) as `0x${string}`;
+              const addrHash = bytesToHex20(hashBytes);
               peers.push({
                 nickname: p.nickname ?? "(migrated)",
                 address: p.address,
@@ -140,8 +138,13 @@ export const usePeerBookStore = create<PeerBookStore>()(
                   : {}),
                 addrHash,
               });
-            } catch {
-              // Drop unmigrateable peers.
+            } catch (err) {
+              // eslint-disable-next-line no-console
+              console.warn(
+                "[peer-book] dropped peer during v1→v2 migration:",
+                p.address,
+                err,
+              );
             }
           }
           return { peers };

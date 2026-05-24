@@ -1,5 +1,6 @@
 import { encodeEnvelope } from "../envelope";
 import type {
+  CommEnvelopeKind,
   CommTransport,
   IncomingAckHandler,
   IncomingPacketHandler,
@@ -132,7 +133,7 @@ export class CempPqCommTransport implements CommTransport {
    * kind discrimination lives only in encodeEnvelope/decodeEnvelope. Adding a
    * dedicated sendAck IPC would duplicate transport plumbing for no benefit.
    */
-  private async sendEnvelope(peer: PeerProfile, kind: "packet" | "signature" | "ack", payload: unknown): Promise<string> {
+  private async sendEnvelope(peer: PeerProfile, kind: CommEnvelopeKind, payload: unknown): Promise<string> {
     const senderAddrHash = await this.deps.getOwnAddrHash();
     const envelope = encodeEnvelope({ kind, senderAddrHash, payload });
     const envelopeHex = "0x" + Buffer.from(envelope).toString("hex");
