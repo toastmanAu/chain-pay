@@ -10,11 +10,12 @@ interface ImportMeta {
   readonly env: ImportMetaEnv;
 }
 
-import type { PlatformApi } from "../electron/preload/index";
+import type { ChainpayApi, PlatformApi } from "../electron/preload/index";
 
 declare global {
   interface Window {
     platform: PlatformApi;
+    chainpay: ChainpayApi;
   }
 }
 

@@ -1,5 +1,15 @@
-import { app, BrowserWindow, session, shell } from "electron";
+import { app, BrowserWindow, ipcMain, session, shell } from "electron";
 import { join } from "node:path";
+import {
+  exists as commExists,
+  publicInfo as commPublicInfo,
+  generateIdentity,
+  deleteIdentity,
+  publishProfile,
+  sendMessage,
+  decryptIncoming,
+  resolveProfile,
+} from "./comm-transport-service";
 
 const isDev = !app.isPackaged;
 
@@ -83,6 +93,29 @@ async function createWindow(): Promise<void> {
 app.whenReady().then(async () => {
   applyResponseHeaders();
   await createWindow();
+
+  // comm-identity handlers
+  ipcMain.handle("commIdentity:exists", () => commExists());
+  ipcMain.handle("commIdentity:publicInfo", () => commPublicInfo());
+  ipcMain.handle("commIdentity:generate", () => generateIdentity());
+  ipcMain.handle("commIdentity:delete", () => deleteIdentity());
+
+  // comm-transport handlers
+  ipcMain.handle("commTransport:publishProfile", (_e, metadata) => publishProfile(metadata));
+  ipcMain.handle(
+    "commTransport:sendMessage",
+    (_e, recipientAddress: string, envelopeBytesHex: string) => {
+      const envelopeBytes = Uint8Array.from(Buffer.from(envelopeBytesHex.slice(2), "hex"));
+      return sendMessage(recipientAddress, envelopeBytes);
+    },
+  );
+  ipcMain.handle(
+    "commTransport:decryptIncoming",
+    (_e, messageOutPoint: { txHash: string; index: number }) => decryptIncoming(messageOutPoint),
+  );
+  ipcMain.handle("commTransport:resolveProfile", (_e, address: string) =>
+    resolveProfile(address),
+  );
 
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) void createWindow();

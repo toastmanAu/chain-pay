@@ -1,6 +1,8 @@
 import { create } from "zustand";
 import { createJSONStorage, persist, type StateStorage } from "zustand/middleware";
 import type { MultisigConfig, Treasury } from "@chain-pay/shared";
+import { assertNotMultisigSigner } from "../lib/comm/refusal-invariant";
+import { getOwnIdentityHash } from "../lib/comm/own-identity-hash";
 
 interface TreasuryStore {
   treasuries: Treasury[];
@@ -37,11 +39,34 @@ const jsonStorage = createJSONStorage(() => treasuryStorage, {
   reviver: bigintReviver,
 });
 
+function hexToBytes(hex: string): Uint8Array {
+  const s = hex.startsWith("0x") ? hex.slice(2) : hex;
+  const out = new Uint8Array(s.length / 2);
+  for (let i = 0; i < out.length; i++) {
+    out[i] = parseInt(s.slice(i * 2, i * 2 + 2), 16);
+  }
+  return out;
+}
+
 export const useTreasuryStore = create<TreasuryStore>()(
   persist(
     (set, get) => ({
       treasuries: [],
-      addTreasury: (t) => set((s) => ({ treasuries: [...s.treasuries, t] })),
+      addTreasury: (t) => {
+        // Refusal invariant: refuse to add a treasury whose signer hash matches
+        // the current comm-identity hash. Defense-in-depth alongside the
+        // peer-book check.
+        const commHash = getOwnIdentityHash();
+        if (commHash && "pubkeyHashes" in t.multisig) {
+          for (const hashHex of t.multisig.pubkeyHashes) {
+            const signerBytes = hexToBytes(hashHex);
+            assertNotMultisigSigner(signerBytes, () => [
+              { treasuryId: "__comm_identity__", pubkeyHash: commHash },
+            ]);
+          }
+        }
+        set((s) => ({ treasuries: [...s.treasuries, t] }));
+      },
       removeTreasury: (id) =>
         set((s) => ({ treasuries: s.treasuries.filter((t) => t.id !== id) })),
       findByMultisig: (cfg) =>
