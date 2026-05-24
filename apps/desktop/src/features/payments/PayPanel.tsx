@@ -43,6 +43,10 @@ import type {
 } from "@chain-pay/shared";
 import { usePayeesStore } from "@/stores/payees";
 import { usePayrollBatchesStore } from "@/stores/payroll-batches";
+import { useIncomingSigsStore } from "@/stores/incoming-sigs";
+import type { TransferPacket } from "@chain-pay/shared";
+import type { OutgoingPacket } from "@/lib/comm/types";
+import { CommSendSection } from "./CommSendSection";
 import {
   fetchCkbPrices,
   fiatToCkbShannons,
@@ -101,6 +105,22 @@ export function PayPanel() {
 
   const treasury = ckbTreasuries.find((t) => t.id === treasuryId);
   const multisig = treasury?.multisig as CkbMultisig | undefined;
+
+  // 2.7b-2 drain-on-mount: if signatures arrived via comm while this PayPanel
+  // wasn't observable, they're buffered in incoming-sigs. Drain into the
+  // active batch when its sighashDigest becomes known.
+  const activeBatch = activeBatchId
+    ? batchStore.batches.find((b) => b.id === activeBatchId)
+    : null;
+  useEffect(() => {
+    if (!activeBatch?.sighashDigest || !multisig) return;
+    const buffered = useIncomingSigsStore.getState().peek(activeBatch.sighashDigest);
+    if (buffered.length === 0) return;
+    batchStore.drainIncomingSigsInto(activeBatch.id, {
+      m: multisig.m,
+      pubkeyHashes: multisig.pubkeyHashes,
+    });
+  }, [activeBatch?.id, activeBatch?.sighashDigest, multisig, batchStore]);
   const cfg = useMemo<CkbMultisigConfig | null>(() => {
     if (!multisig) return null;
     return {
@@ -504,6 +524,26 @@ export function PayPanel() {
           setSigs={updateSigs}
           onBroadcast={handleBroadcast}
           busy={busy}
+        />
+      ) : null}
+
+      {(phase === "packet-ready" || phase === "broadcast-ready") &&
+      activeBatchId &&
+      activeBatch?.sighashDigest &&
+      multisig &&
+      packetJson ? (
+        <CommSendSection
+          batchId={activeBatchId}
+          packet={
+            {
+              txHash: activeBatch.sighashDigest,
+              treasuryAddress: multisig.address,
+              // Spec: 24 h advisory expiry; receiver enforcement is 2.7b-3.
+              expiresAt: Math.floor(Date.now() / 1000) + 86_400,
+              packet: packetJson as TransferPacket,
+            } satisfies OutgoingPacket
+          }
+          multisig={{ pubkeyHashes: multisig.pubkeyHashes }}
         />
       ) : null}
 
