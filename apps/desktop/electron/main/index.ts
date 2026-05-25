@@ -9,7 +9,10 @@ import {
   sendMessage,
   decryptIncoming,
   resolveProfile,
+  setCurrentNetwork,
 } from "./comm-transport-service";
+import { loadNetworkState, saveNetworkState } from "./network-state-store";
+import type { CkbNetwork } from "@/lib/light-client/network-configs";
 
 const isDev = !app.isPackaged;
 
@@ -92,7 +95,25 @@ async function createWindow(): Promise<void> {
 
 app.whenReady().then(async () => {
   applyResponseHeaders();
+
+  // Load persisted network selection BEFORE creating the window or any
+  // comm-transport call. setCurrentNetwork pins the module-level network
+  // used by comm-transport for getClient(), MLDSASigner, and tx-builder.
+  const bootNetwork = loadNetworkState();
+  setCurrentNetwork(bootNetwork);
+
   await createWindow();
+
+  // network handlers
+  ipcMain.handle("network:get", (): CkbNetwork => loadNetworkState());
+  ipcMain.handle("network:set", (_e, network: CkbNetwork): void => {
+    saveNetworkState(network);
+    // Don't update setCurrentNetwork here — renderer is committing to a
+    // restart, so the in-memory client cache stays consistent until quit.
+  });
+  ipcMain.handle("lcStorage:clear", async (): Promise<void> => {
+    await session.defaultSession.clearStorageData({ storages: ["indexdb"] });
+  });
 
   // comm-identity handlers
   ipcMain.handle("commIdentity:exists", () => commExists());
