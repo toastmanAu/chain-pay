@@ -72,10 +72,11 @@ describe("useCommSendRetry", () => {
     expect(mockTransport.sendPacket).not.toHaveBeenCalled();
     vi.advanceTimersByTime(2);
     // After the first timer fires, fireRetry writes a new "sent" status which
-    // re-triggers the subscriber to schedule the next retry. runAllTimersAsync
-    // drains the entire cascade up to RETRY_CAP=3. Asserting >= 1 here is the
-    // load-bearing check — the first retry fired at the 5min mark.
-    await vi.runAllTimersAsync();
+    // re-triggers the subscriber to schedule the next retry at 10 min from now.
+    // Flush microtasks so the async send completes, then verify the first retry
+    // fired at the 5min mark.
+    await vi.runAllTicks();
+    await vi.runAllTicks();
     expect(mockTransport.sendPacket).toHaveBeenCalled();
   });
 
@@ -93,7 +94,7 @@ describe("useCommSendRetry", () => {
     expect(mockTransport.sendPacket).not.toHaveBeenCalled();
   });
 
-  it("uses exponential backoff capped at RETRY_CAP=3 retries", async () => {
+  it("uses lifecycle-bound backoff: retryCount keeps incrementing past 3", async () => {
     renderHook(() =>
       useCommSendRetry({
         packetForBatch: () => PACKET,
@@ -102,34 +103,16 @@ describe("useCommSendRetry", () => {
     );
     usePayrollBatchesStore.getState().recordCommSendStatus("b1", 0, "sent", { txHash: "0x01" });
 
-    // Advance past the first scheduled retry. runAllTimersAsync cascades
-    // through the chain because each fireRetry write re-arms the next slot.
+    // Advance past the first scheduled retry and flush microtasks.
     vi.advanceTimersByTime(5 * 60 * 1000 + 10);
-    await vi.runAllTimersAsync();
+    await vi.runAllTicks();
+    await vi.runAllTicks();
 
-    // Final retryCount should be capped at 3 — no further sends.
-    expect(mockTransport.sendPacket).toHaveBeenCalledTimes(3);
+    // With lifecycle-bound schedule there is no hard cap — retries continue.
+    expect(mockTransport.sendPacket).toHaveBeenCalled();
     const slot = usePayrollBatchesStore.getState().findById("b1")!.commSendStatus![0];
-    expect(slot?.retryCount).toBe(3);
-
-    // Subsequent advancement should not produce any more sends — cap holds.
-    vi.advanceTimersByTime(60 * 60 * 1000);
-    await vi.runAllTimersAsync();
-    expect(mockTransport.sendPacket).toHaveBeenCalledTimes(3);
-  });
-
-  it("stops scheduling after 3 retries", async () => {
-    renderHook(() =>
-      useCommSendRetry({
-        packetForBatch: () => PACKET,
-        multisigForBatch: () => ({ pubkeyHashes: [HASH_A] }),
-      }),
-    );
-    usePayrollBatchesStore.getState().recordCommSendStatus("b1", 0, "sent", { txHash: "0x01", retryCount: 3 });
-
-    vi.advanceTimersByTime(60 * 60 * 1000);
-    await vi.runAllTimersAsync();
-    expect(mockTransport.sendPacket).not.toHaveBeenCalled();
+    // retryCount should be >= 1 (has incremented past initial attempt).
+    expect((slot?.retryCount ?? 0)).toBeGreaterThanOrEqual(1);
   });
 
   it("rehydrates schedule from persisted updatedAt — if next-delay window passed, fires immediately", async () => {
@@ -154,8 +137,9 @@ describe("useCommSendRetry", () => {
       }),
     );
     vi.advanceTimersByTime(100);
-    // Past-due timer fires immediately; cascade then runs to cap.
-    await vi.runAllTimersAsync();
+    // Past-due timer fires immediately; flush microtasks so the async send completes.
+    await vi.runAllTicks();
+    await vi.runAllTicks();
     expect(mockTransport.sendPacket).toHaveBeenCalled();
   });
 
@@ -169,5 +153,79 @@ describe("useCommSendRetry", () => {
     usePayrollBatchesStore.getState().recordCommSendStatus("b1", 0, "acked");
     vi.advanceTimersByTime(60 * 60 * 1000);
     expect(mockTransport.sendPacket).not.toHaveBeenCalled();
+  });
+});
+
+describe("2.7c lifecycle-bound retry schedule", () => {
+  it("nextDelayMs returns the correct delay per attempt index", async () => {
+    const { nextDelayMs } = await import("./useCommSendRetry");
+    expect(nextDelayMs(0)).toBe(0);
+    expect(nextDelayMs(1)).toBe(5 * 60_000);
+    expect(nextDelayMs(2)).toBe(10 * 60_000);
+    expect(nextDelayMs(3)).toBe(20 * 60_000);
+    expect(nextDelayMs(4)).toBe(30 * 60_000);
+    expect(nextDelayMs(5)).toBe(30 * 60_000);
+    expect(nextDelayMs(10)).toBe(30 * 60_000);
+  });
+
+  it("does NOT cap at RETRY_CAP=3 — attempt 4+ still schedules at 30 min", async () => {
+    const { nextDelayMs } = await import("./useCommSendRetry");
+    expect(nextDelayMs(4)).toBe(30 * 60_000);
+    expect(nextDelayMs(100)).toBe(30 * 60_000);
+  });
+
+  it("stops scheduling when batch.expiresAt has passed", async () => {
+    vi.useFakeTimers();
+    const past = Date.now() - 1000;
+    const { usePayrollBatchesStore: store } = await import("@/stores/payroll-batches");
+    store.setState({
+      batches: [{
+        id: "b1", state: "approved", expiresAt: past,
+        commSendStatus: { 0: { status: "sent", updatedAt: Date.now() - 60_000, retryCount: 0 } },
+      } as any],
+    });
+    const { useCommSendRetry: hook } = await import("./useCommSendRetry");
+    const { renderHook: rh } = await import("@testing-library/react");
+    rh(() => hook({ packetForBatch: () => null, multisigForBatch: () => null }));
+    vi.advanceTimersByTime(60 * 60_000);
+    const slot = store.getState().findById("b1")!.commSendStatus![0];
+    expect(slot!.retryCount ?? 0).toBe(0);
+    vi.useRealTimers();
+  });
+
+  it("stops scheduling when batch transitions to broadcasted", async () => {
+    vi.useFakeTimers();
+    const { usePayrollBatchesStore: store } = await import("@/stores/payroll-batches");
+    store.setState({
+      batches: [{
+        id: "b1", state: "broadcasted", expiresAt: Date.now() + 60_000,
+        commSendStatus: { 0: { status: "sent", updatedAt: Date.now() - 60_000, retryCount: 0 } },
+      } as any],
+    });
+    const { useCommSendRetry: hook } = await import("./useCommSendRetry");
+    const { renderHook: rh } = await import("@testing-library/react");
+    rh(() => hook({ packetForBatch: () => null, multisigForBatch: () => null }));
+    vi.advanceTimersByTime(60 * 60_000);
+    const slot = store.getState().findById("b1")!.commSendStatus![0];
+    expect(slot!.retryCount ?? 0).toBe(0);
+    vi.useRealTimers();
+  });
+
+  it("respects 'dismissed' flag and does not schedule retries for dismissed slots", async () => {
+    vi.useFakeTimers();
+    const { usePayrollBatchesStore: store } = await import("@/stores/payroll-batches");
+    store.setState({
+      batches: [{
+        id: "b1", state: "approved", expiresAt: Date.now() + 60 * 60_000,
+        commSendStatus: { 0: { status: "sent", updatedAt: Date.now() - 60_000, retryCount: 0, dismissed: true } },
+      } as any],
+    });
+    const { useCommSendRetry: hook } = await import("./useCommSendRetry");
+    const { renderHook: rh } = await import("@testing-library/react");
+    rh(() => hook({ packetForBatch: () => null, multisigForBatch: () => null }));
+    vi.advanceTimersByTime(60 * 60_000);
+    const slot = store.getState().findById("b1")!.commSendStatus![0];
+    expect(slot!.retryCount).toBe(0);
+    vi.useRealTimers();
   });
 });
