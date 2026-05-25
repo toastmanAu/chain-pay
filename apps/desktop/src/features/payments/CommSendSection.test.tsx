@@ -106,19 +106,20 @@ describe("CommSendSection", () => {
     await waitFor(() => expect(mockTransport.sendPacket).toHaveBeenCalledTimes(2));
   });
 
-  it("error rows surface a Retry button that re-dispatches only that slot", async () => {
+  it("error rows surface a Retry now button that calls store.retryNow", async () => {
     mockTransport.sendPacket.mockRejectedValueOnce(new Error("ipc broke"));
     usePeerBookStore.getState().addPeer(
       { nickname: "Alice", address: "ckt1qalice", pairedAt: 0, associatedSignerHash: HASH_A },
       new Uint8Array(20),
     );
+    const spy = vi.spyOn(usePayrollBatchesStore.getState(), "retryNow");
     render(<CommSendSection batchId="b1" packet={PACKET} multisig={{ pubkeyHashes: [HASH_A] }} />);
 
     fireEvent.click(screen.getByRole("button", { name: /send packet to mapped signers/i }));
-    await waitFor(() => expect(screen.getByRole("button", { name: /retry/i })).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByRole("button", { name: /retry now/i })).toBeInTheDocument());
 
-    fireEvent.click(screen.getByRole("button", { name: /retry/i }));
-    await waitFor(() => expect(mockTransport.sendPacket).toHaveBeenCalledTimes(2));
+    fireEvent.click(screen.getByRole("button", { name: /retry now/i }));
+    expect(spy).toHaveBeenCalledWith("b1", 0);
   });
 
   it("renders a disabledReason banner when disabled prop is set", () => {
@@ -169,6 +170,91 @@ describe("CommSendSection", () => {
     it("resets network to testnet after mainnet fallback test", async () => {
       const { useNetworkConfigStore } = await import("@/stores/network-config");
       useNetworkConfigStore.setState({ network: "testnet" });
+    });
+  });
+
+  describe("2.7c Retry now + dismiss", () => {
+    it("clicking Retry now calls store.retryNow with (batchId, slotIndex)", async () => {
+      const { useNetworkConfigStore } = await import("@/stores/network-config");
+      useNetworkConfigStore.setState({ network: "testnet" });
+      const spy = vi.spyOn(usePayrollBatchesStore.getState(), "retryNow");
+      usePayrollBatchesStore.setState({
+        batches: [
+          {
+            ...baseBatch,
+            id: "b1",
+            state: "approved",
+            commSendStatus: { 0: { status: "sent" as const, updatedAt: Date.now(), retryCount: 2 } },
+          },
+        ],
+      });
+      render(
+        <CommSendSection
+          batchId="b1"
+          packet={PACKET}
+          multisig={{
+            pubkeyHashes: [HASH_A, HASH_B],
+          }}
+        />,
+      );
+      const retryButtons = screen.getAllByRole("button", { name: /retry now/i });
+      fireEvent.click(retryButtons[0]);
+      expect(spy).toHaveBeenCalledWith("b1", 0);
+    });
+
+    it("clicking dismiss × calls store.dismissRetry with (batchId, slotIndex)", async () => {
+      const { useNetworkConfigStore } = await import("@/stores/network-config");
+      useNetworkConfigStore.setState({ network: "testnet" });
+      const spy = vi.spyOn(usePayrollBatchesStore.getState(), "dismissRetry");
+      usePayrollBatchesStore.setState({
+        batches: [
+          {
+            ...baseBatch,
+            id: "b1",
+            state: "approved",
+            commSendStatus: { 0: { status: "sent" as const, updatedAt: Date.now(), retryCount: 2 } },
+          },
+        ],
+      });
+      render(
+        <CommSendSection
+          batchId="b1"
+          packet={PACKET}
+          multisig={{
+            pubkeyHashes: [HASH_A, HASH_B],
+          }}
+        />,
+      );
+      const dismissButtons = screen.getAllByRole("button", { name: /dismiss/i });
+      fireEvent.click(dismissButtons[0]);
+      expect(spy).toHaveBeenCalledWith("b1", 0);
+    });
+
+    it("dismiss button is NOT rendered for acked status", async () => {
+      const { useNetworkConfigStore } = await import("@/stores/network-config");
+      useNetworkConfigStore.setState({ network: "testnet" });
+      usePayrollBatchesStore.setState({
+        batches: [
+          {
+            ...baseBatch,
+            id: "b1",
+            state: "approved",
+            commSendStatus: { 0: { status: "acked" as const, updatedAt: Date.now(), retryCount: 0 } },
+          },
+        ],
+      });
+      render(
+        <CommSendSection
+          batchId="b1"
+          packet={PACKET}
+          multisig={{
+            pubkeyHashes: [HASH_A],
+          }}
+        />,
+      );
+      // For acked slot, no retry/dismiss buttons
+      expect(screen.queryByRole("button", { name: /retry now/i })).not.toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: /dismiss/i })).not.toBeInTheDocument();
     });
   });
 });

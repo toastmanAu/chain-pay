@@ -117,14 +117,26 @@ export function CommSendSection({
                 >
                   {glyph} {status?.status ?? (peer ? "idle" : "unmapped")}
                 </span>
-                {status?.status === "error" && peer && (
-                  <button
-                    type="button"
-                    onClick={() => void retry(batchId, slotIndex, packet, multisig)}
-                    className="rounded bg-accent px-2 py-0.5 text-xs text-accent-fg"
-                  >
-                    retry
-                  </button>
+                {(status?.status === "sent" || status?.status === "error") && (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => usePayrollBatchesStore.getState().retryNow(batchId, slotIndex)}
+                      className="text-xs px-1.5 py-0.5 rounded border border-neutral-600 hover:bg-neutral-800"
+                      title="Reset retry schedule and re-send now"
+                    >
+                      Retry now
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => usePayrollBatchesStore.getState().dismissRetry(batchId, slotIndex)}
+                      className="text-xs px-1 text-neutral-500 hover:text-neutral-300"
+                      aria-label="Dismiss retry"
+                      title="Stop retrying this signer"
+                    >
+                      ×
+                    </button>
+                  </>
                 )}
               </span>
             </li>
