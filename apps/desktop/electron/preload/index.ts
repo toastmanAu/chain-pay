@@ -54,6 +54,15 @@ const chainpayApi = {
       metadata: string;
     }> => ipcRenderer.invoke("commTransport:resolveProfile", address),
   },
+  network: {
+    get: (): Promise<"testnet" | "mainnet"> =>
+      ipcRenderer.invoke("network:get"),
+    set: (network: "testnet" | "mainnet"): Promise<void> =>
+      ipcRenderer.invoke("network:set", network),
+  },
+  lcStorage: {
+    clear: (): Promise<void> => ipcRenderer.invoke("lcStorage:clear"),
+  },
 };
 
 contextBridge.exposeInMainWorld("chainpay", chainpayApi);
