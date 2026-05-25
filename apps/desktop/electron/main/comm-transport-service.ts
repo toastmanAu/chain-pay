@@ -32,8 +32,8 @@ import {
   CEMPPQ,
   CEMPTransactionBuilder,
   MLDSASigner,
-  ML_DSA_TESTNET,
   ML_DSA_MAINNET,
+  getMlDsaConstants,
   serializeMessagePointer,
 } from "cemp-pq";
 import { ml_dsa65 } from "@noble/post-quantum/ml-dsa";
@@ -307,6 +307,10 @@ export async function sendMessage(
   envelopeBytes: Uint8Array,
   network: CkbNetwork = currentNetwork,
 ): Promise<SignedTxBundle> {
+  if (network === "mainnet" && ML_DSA_MAINNET.CODE_HASH === null) {
+    throw new Error("CEMP-PQ contract not deployed on mainnet");
+  }
+
   const pub = await loadCommIdentity();
   if (!pub) throw new Error("no comm identity — call generateIdentity() first");
 
@@ -361,13 +365,11 @@ export async function sendMessage(
       outputsData: [ccc.hexFrom(encryptedData), ccc.hexFrom(pointerPlaceholder)],
     });
 
-    if (ML_DSA_TESTNET.TX_HASH === null || ML_DSA_TESTNET.INDEX === null) {
-      throw new Error("ML_DSA_TESTNET constants not initialised");
-    }
+    const mlDsaConsts = getMlDsaConstants(network);
     tx.addCellDeps({
       outPoint: {
-        txHash: ML_DSA_TESTNET.TX_HASH,
-        index: ML_DSA_TESTNET.INDEX,
+        txHash: mlDsaConsts.TX_HASH,
+        index: mlDsaConsts.INDEX,
       },
       depType: "code",
     });

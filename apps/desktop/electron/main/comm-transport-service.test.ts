@@ -60,6 +60,16 @@ describe("2.7c network awareness", () => {
     mod.setCurrentNetwork("testnet");
     expect(mod.getCurrentNetwork()).toBe("testnet");
   });
+
+  it("sendMessage throws 'not deployed on mainnet' when network is mainnet", async () => {
+    process.env.SMOKE_PASSPHRASE = "test-only-passphrase";
+    vi.resetModules();
+    const mod = await import("./comm-transport-service");
+    // The guard fires before any chain interaction or identity lookup.
+    await expect(
+      mod.sendMessage("ckb1q-mainnet-address-shape", new Uint8Array([1, 2, 3]), "mainnet")
+    ).rejects.toThrow(/CEMP-PQ contract not deployed on mainnet/);
+  });
 });
 
 describe("comm-transport-service", () => {

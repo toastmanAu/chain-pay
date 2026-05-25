@@ -101,7 +101,10 @@ app.whenReady().then(async () => {
   ipcMain.handle("commIdentity:delete", () => deleteIdentity());
 
   // comm-transport handlers
-  ipcMain.handle("commTransport:publishProfile", (_e, metadata) => publishProfile(metadata));
+  // Renderer currently sends the bare metadata object (legacy shape from Phase 2.7a/b).
+  // Wrap into {metadata} so publishProfile receives the correct args shape.
+  // Task 5/6 will later update the renderer to pass {metadata, network} explicitly.
+  ipcMain.handle("commTransport:publishProfile", (_e, metadata) => publishProfile({ metadata }));
   ipcMain.handle(
     "commTransport:sendMessage",
     (_e, recipientAddress: string, envelopeBytesHex: string) => {
