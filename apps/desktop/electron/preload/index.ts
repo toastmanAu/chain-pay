@@ -16,6 +16,8 @@ const chainpayApi = {
       mlDsaPub: string;
       mlKemPub: string;
       address: string;
+      addresses: { testnet: string; mainnet: string | null };
+      publishedOn: ("testnet" | "mainnet")[];
       addrHash: string;
       createdAt: number;
     } | null> => ipcRenderer.invoke("commIdentity:publicInfo"),

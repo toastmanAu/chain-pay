@@ -259,11 +259,11 @@ export const usePayrollBatchesStore = create<PayrollBatchesStore>()(
       },
       cancelAutoBroadcast: (batchId) => {
         set((s) => ({
-          batches: s.batches.map((b) =>
-            b.id === batchId && b.state === "broadcast_countdown"
-              ? { ...b, state: "approved" as PayrollBatchState, broadcastInFlight: undefined }
-              : b,
-          ),
+          batches: s.batches.map((b) => {
+            if (b.id !== batchId || b.state !== "broadcast_countdown") return b;
+            const { broadcastInFlight: _bif, ...rest } = b;
+            return { ...rest, state: "approved" as PayrollBatchState };
+          }),
         }));
       },
       markBroadcastInitiating: (batchId) => {
@@ -281,12 +281,8 @@ export const usePayrollBatchesStore = create<PayrollBatchesStore>()(
           batches: s.batches.map((b) => {
             if (b.id !== batchId) return b;
             if (!canTransition(b.state, "broadcast_failed")) return b;
-            return {
-              ...b,
-              state: "broadcast_failed" as PayrollBatchState,
-              broadcastError: error,
-              broadcastInFlight: undefined,
-            };
+            const { broadcastInFlight: _bif, ...rest } = b;
+            return { ...rest, state: "broadcast_failed" as PayrollBatchState, broadcastError: error };
           }),
         }));
       },
@@ -295,7 +291,8 @@ export const usePayrollBatchesStore = create<PayrollBatchesStore>()(
           batches: s.batches.map((b) => {
             if (b.id !== batchId) return b;
             if (!canTransition(b.state, "approved")) return b;
-            return { ...b, state: "approved" as PayrollBatchState, broadcastError: undefined };
+            const { broadcastError: _be, ...rest } = b;
+            return { ...rest, state: "approved" as PayrollBatchState };
           }),
         }));
       },

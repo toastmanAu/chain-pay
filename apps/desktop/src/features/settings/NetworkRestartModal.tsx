@@ -12,7 +12,7 @@ export function NetworkRestartModal({
   toNetwork,
   onCancel,
   onConfirm,
-}: NetworkRestartModalProps): JSX.Element {
+}: NetworkRestartModalProps) {
   return (
     <div
       role="dialog"

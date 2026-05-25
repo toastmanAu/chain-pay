@@ -18,7 +18,7 @@ export function nextDelayMs(attempt: number): number {
 
 const TERMINAL_BATCH_STATES = new Set([
   "broadcasted", "confirmed", "failed", "cancelled",
-  "broadcast_failed", "broadcast_initiating",
+  "broadcast_failed",
 ]);
 
 interface UseCommSendRetryParams {

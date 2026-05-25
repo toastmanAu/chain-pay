@@ -366,6 +366,9 @@ export async function sendMessage(
     });
 
     const mlDsaConsts = getMlDsaConstants(network);
+    if (mlDsaConsts.TX_HASH === null || mlDsaConsts.INDEX === null) {
+      throw new Error("CEMP-PQ constants not initialised");
+    }
     tx.addCellDeps({
       outPoint: {
         txHash: mlDsaConsts.TX_HASH,
