@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useNetworkConfigStore } from "@/stores/network-config";
 import { useDebugSettingsStore } from "@/stores/debug-settings";
 import { lightClient } from "@/lib/light-client/client";
+import { NetworkSection } from "./NetworkSection";
 import { CommChannelSection } from "./CommChannelSection";
 import { PeerBookSection } from "./PeerBookSection";
 
@@ -27,6 +28,8 @@ export function Settings() {
   return (
     <div className="space-y-6">
       <h1 className="text-2xl font-semibold">Settings</h1>
+
+      <NetworkSection />
 
       <section className="space-y-3 rounded-lg border border-surface-hi bg-surface p-5">
         <header>
