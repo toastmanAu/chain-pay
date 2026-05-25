@@ -33,6 +33,7 @@ import {
 } from "@/lib/chains/ckb/merge-signatures";
 import { CopyButton } from "@/components/clipboard/CopyButton";
 import { PasteButton } from "@/components/clipboard/PasteButton";
+import { AutoBroadcastCountdown } from "./AutoBroadcastCountdown";
 import { PayeePicker } from "./PayeePicker";
 import type {
   FxQuote,
@@ -43,6 +44,7 @@ import type {
 } from "@chain-pay/shared";
 import { usePayeesStore } from "@/stores/payees";
 import { usePayrollBatchesStore } from "@/stores/payroll-batches";
+import { useNetworkConfigStore } from "@/stores/network-config";
 import { useIncomingSigsStore } from "@/stores/incoming-sigs";
 import type { TransferPacket } from "@chain-pay/shared";
 import type { OutgoingPacket } from "@/lib/comm/types";
@@ -546,6 +548,68 @@ export function PayPanel() {
           }
           multisig={{ pubkeyHashes: multisig.pubkeyHashes }}
         />
+      ) : null}
+
+      {/* Auto-broadcast toggle — visible when batch is approved (sigs being collected). */}
+      {activeBatch && activeBatch.state === "approved" ? (
+        <label className="flex items-center gap-2 text-sm">
+          <input
+            type="checkbox"
+            checked={activeBatch.autoBroadcast === true}
+            onChange={(e) => batchStore.setAutoBroadcast(activeBatch.id, e.target.checked)}
+          />
+          <span>Auto-broadcast when M sigs collected</span>
+        </label>
+      ) : null}
+
+      {/* Auto-broadcast countdown — fires when store transitions to broadcast_countdown. */}
+      {activeBatch && activeBatch.state === "broadcast_countdown" ? (
+        <AutoBroadcastCountdown
+          onElapsed={async () => {
+            batchStore.markBroadcastInitiating(activeBatch.id);
+            const broadcastRpcUrl = useNetworkConfigStore.getState().broadcastRpcUrl;
+            if (!broadcastRpcUrl) {
+              batchStore.markBroadcastFailed(
+                activeBatch.id,
+                "Configure broadcast RPC URL in Settings",
+              );
+              return;
+            }
+            if (!skeleton) {
+              batchStore.markBroadcastFailed(activeBatch.id, "No transaction skeleton available");
+              return;
+            }
+            try {
+              const txHash = await lightClient().broadcastTransaction(skeleton.tx);
+              setBroadcastedTxHash(txHash);
+              setPhase("broadcasted");
+              batchStore.transition(activeBatch.id, "broadcasted");
+              batchStore.updateBatch(activeBatch.id, {
+                pendingTxId: txHash,
+                partialSigs: [],
+              });
+            } catch (err) {
+              const msg = err instanceof Error ? err.message : String(err);
+              batchStore.markBroadcastFailed(activeBatch.id, msg);
+            }
+          }}
+          onCancel={() => batchStore.cancelAutoBroadcast(activeBatch.id)}
+        />
+      ) : null}
+
+      {/* Retry button — visible when auto-broadcast failed. */}
+      {activeBatch && activeBatch.state === "broadcast_failed" ? (
+        <div className="rounded border border-red-800 bg-red-950/40 p-3 text-sm">
+          <strong className="block">Broadcast failed</strong>
+          <p className="text-xs text-neutral-400 mb-2">{activeBatch.broadcastError}</p>
+          <button
+            type="button"
+            onClick={() => batchStore.retryAutoBroadcast(activeBatch.id)}
+            className="px-3 py-1 rounded bg-amber-600 hover:bg-amber-500 text-sm"
+          >
+            Retry broadcast
+          </button>
+        </div>
       ) : null}
 
       {phase === "broadcasted" && broadcastedTxHash ? (
