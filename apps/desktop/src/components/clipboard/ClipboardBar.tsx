@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useClipboardStore, type ClipboardBin } from "@/stores/clipboard";
 import { useCommIdentityStore } from "@/stores/comm-identity";
 import { useDebugSettingsStore } from "@/stores/debug-settings";
+import { useNetworkConfigStore } from "@/stores/network-config";
 import { labelFor, truncate } from "./labelFor";
 
 /**
@@ -15,10 +16,15 @@ export function ClipboardBar() {
   const bins = useClipboardStore((s) => s.bins);
   const identity = useCommIdentityStore((s) => s.identity);
   const showClipboard = useDebugSettingsStore((s) => s.showClipboard);
+  const network = useNetworkConfigStore((s) => s.network);
   const [expanded, setExpanded] = useState<Set<number>>(new Set());
 
   const commActive = identity?.profileTxHash != null;
-  if (commActive && !showClipboard) return null;
+  // comm is unavailable on mainnet, so the bar is always shown
+  // on mainnet. on testnet, hide when comm is active unless debug override.
+  const commAvailable = network === "testnet" && commActive;
+  const shouldHide = commAvailable && !showClipboard;
+  if (shouldHide) return null;
 
   const allExpanded = expanded.size === bins.length;
   const toggleAll = () =>
