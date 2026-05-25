@@ -3,6 +3,7 @@ import type { CommSendSlotStatus } from "@chain-pay/shared";
 import type { OutgoingPacket } from "@/lib/comm/types";
 import { usePayrollBatchesStore } from "@/stores/payroll-batches";
 import { usePeerBookStore } from "@/stores/peer-book";
+import { useNetworkConfigStore } from "@/stores/network-config";
 import { useCommSendDispatch, type MultisigRouting } from "./useCommSendDispatch";
 
 interface CommSendSectionProps {
@@ -41,6 +42,17 @@ export function CommSendSection({
   disabled,
   disabledReason,
 }: CommSendSectionProps) {
+  const network = useNetworkConfigStore((s) => s.network);
+
+  // On mainnet, replace with a simple fallback message.
+  if (network === "mainnet") {
+    return (
+      <p className="text-xs text-neutral-500 italic">
+        Comm channel unavailable; use clipboard.
+      </p>
+    );
+  }
+
   const { sendAll, retry } = useCommSendDispatch();
   // Subscribe to the batch's commSendStatus directly so pills re-render on writes.
   const batch = usePayrollBatchesStore((s) => s.batches.find((b) => b.id === batchId));

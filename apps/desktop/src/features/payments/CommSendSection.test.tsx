@@ -147,4 +147,28 @@ describe("CommSendSection", () => {
     render(<CommSendSection batchId="b1" packet={PACKET} multisig={{ pubkeyHashes: [HASH_A] }} />);
     expect(screen.getByTestId("pill-0")).toHaveTextContent(/sent/);
   });
+
+  describe("mainnet fallback", () => {
+    it("replaces comm-send UI with a fallback note when network === 'mainnet'", async () => {
+      const { useNetworkConfigStore } = await import("@/stores/network-config");
+      useNetworkConfigStore.setState({ network: "mainnet" });
+      render(
+        <CommSendSection
+          batchId="b1"
+          packet={PACKET}
+          multisig={{
+            pubkeyHashes: [HASH_A, HASH_B],
+          }}
+        />,
+      );
+      expect(screen.getByText(/comm channel unavailable; use clipboard/i)).toBeInTheDocument();
+      // No pills rendered
+      expect(screen.queryAllByTestId(/pill-\d+/)).toHaveLength(0);
+    });
+
+    it("resets network to testnet after mainnet fallback test", async () => {
+      const { useNetworkConfigStore } = await import("@/stores/network-config");
+      useNetworkConfigStore.setState({ network: "testnet" });
+    });
+  });
 });
