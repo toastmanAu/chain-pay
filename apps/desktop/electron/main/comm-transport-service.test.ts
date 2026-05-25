@@ -6,7 +6,7 @@
 // internals may evolve to need RPC.
 //
 // Run with: ALLOW_NETWORK_TESTS=1 npx vitest run electron/main/comm-transport-service.test.ts
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, vi } from "vitest";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -28,6 +28,38 @@ beforeEach(async () => {
   resetSafeStorageForTests();
   await fs.rm(identityFile, { force: true });
   _setIdentityFileForTests(identityFile);
+});
+
+describe("2.7c network awareness", () => {
+  it("setCurrentNetwork('mainnet') makes mainnet publishProfile throw 'not deployed'", async () => {
+    process.env.SMOKE_PASSPHRASE = "test-only-passphrase";
+    vi.resetModules();
+    const mod = await import("./comm-transport-service");
+    mod.setCurrentNetwork("mainnet");
+    await expect(
+      mod.publishProfile({ network: "mainnet", metadata: {} })
+    ).rejects.toThrow(/CEMP-PQ contract not deployed on mainnet/);
+  });
+
+  it("publishProfile defaults to currentNetwork when args.network omitted", async () => {
+    process.env.SMOKE_PASSPHRASE = "test-only-passphrase";
+    vi.resetModules();
+    const mod = await import("./comm-transport-service");
+    mod.setCurrentNetwork("mainnet");
+    // Pass only metadata (no network key) — should inherit currentNetwork = "mainnet"
+    await expect(
+      mod.publishProfile({ metadata: {} })
+    ).rejects.toThrow(/CEMP-PQ contract not deployed on mainnet/);
+  });
+
+  it("getCurrentNetwork reflects the last setCurrentNetwork call", async () => {
+    vi.resetModules();
+    const mod = await import("./comm-transport-service");
+    mod.setCurrentNetwork("mainnet");
+    expect(mod.getCurrentNetwork()).toBe("mainnet");
+    mod.setCurrentNetwork("testnet");
+    expect(mod.getCurrentNetwork()).toBe("testnet");
+  });
 });
 
 describe("comm-transport-service", () => {
