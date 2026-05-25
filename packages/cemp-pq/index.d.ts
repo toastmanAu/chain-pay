@@ -4,12 +4,17 @@
 import type { ccc } from "@ckb-ccc/core";
 
 // Flat property names match the runtime object in index.js.
-export const ML_DSA_TESTNET: {
-  CODE_HASH: string;
-  HASH_TYPE: "data" | "type" | "data1" | "data2";
-  TX_HASH: string;
-  INDEX: number;
-};
+export interface MlDsaLockConstants {
+  CODE_HASH: string | null;
+  HASH_TYPE: string | null;
+  TX_HASH: string | null;
+  INDEX: number | null;
+}
+
+export const ML_DSA_TESTNET: MlDsaLockConstants;
+export const ML_DSA_MAINNET: MlDsaLockConstants;
+
+export function getMlDsaConstants(network: "testnet" | "mainnet"): MlDsaLockConstants;
 
 export const CEMP_PQ_PROFILE_CODE_HASH: string;
 export const CEMP_PQ_PROFILE_HASH_TYPE: "data" | "type" | "data1" | "data2";

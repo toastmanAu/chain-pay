@@ -47,3 +47,26 @@ test("serializeMessagePointer with non-zero index produces distinct output", () 
   const ptr1 = serializeMessagePointer(txHash, 1);
   assert.notDeepEqual(Array.from(ptr0), Array.from(ptr1));
 });
+
+import { ML_DSA_TESTNET, ML_DSA_MAINNET, getMlDsaConstants } from "./index.js";
+
+test("getMlDsaConstants returns testnet constants for testnet", () => {
+  const testnetConsts = getMlDsaConstants("testnet");
+  assert.deepEqual(testnetConsts, ML_DSA_TESTNET);
+  assert.match(ML_DSA_TESTNET.CODE_HASH, /^0x[0-9a-f]{64}$/);
+});
+
+test("getMlDsaConstants throws on mainnet while contract is undeployed", () => {
+  assert.throws(
+    () => getMlDsaConstants("mainnet"),
+    /not deployed on mainnet/
+  );
+  assert.equal(ML_DSA_MAINNET.CODE_HASH, null);
+});
+
+test("getMlDsaConstants throws on unknown network", () => {
+  assert.throws(
+    () => getMlDsaConstants("sepolia"),
+    /Unknown CKB network/
+  );
+});

@@ -18,6 +18,34 @@ export const ML_DSA_TESTNET = {
     INDEX: 0,
 };
 
+/**
+ * Placeholder for the mainnet CEMP-PQ contract deployment. All four fields are
+ * null until the upstream `~/ecms/cemp-pq/` project deploys the lock script on
+ * CKB mainnet. Code consuming this should check `CODE_HASH === null` and
+ * throw a clear "not deployed" error rather than building txs with null deps.
+ */
+export const ML_DSA_MAINNET = {
+    CODE_HASH: null,
+    HASH_TYPE: null,
+    TX_HASH: null,
+    INDEX: null,
+};
+
+/**
+ * Return the ML-DSA lock constants for the given network. Throws if the
+ * caller tries to use a network where the contract isn't deployed.
+ */
+export function getMlDsaConstants(network) {
+    if (network === 'mainnet') {
+        if (ML_DSA_MAINNET.CODE_HASH === null) {
+            throw new Error('CEMP-PQ contract not deployed on mainnet');
+        }
+        return ML_DSA_MAINNET;
+    }
+    if (network === 'testnet') return ML_DSA_TESTNET;
+    throw new Error(`Unknown CKB network: ${network}`);
+}
+
 export const CEMP_PQ_PROFILE_CODE_HASH = '0x0000000000000000000000000000000000000000000000000000000000000001'; // Placeholder for Type Script
 export const CEMP_PQ_PROFILE_HASH_TYPE = 'type';
 
