@@ -54,6 +54,18 @@ interface PayrollBatchesStore {
   retryNow: (batchId: string, slotIndex: number) => void;
   /** Set dismissed=true — retry scheduler will skip this slot indefinitely. */
   dismissRetry: (batchId: string, slotIndex: number) => void;
+  /** Toggle the auto-broadcast flag on a batch. */
+  setAutoBroadcast: (batchId: string, value: boolean) => void;
+  /** Transition a batch into broadcast_countdown (called by external countdown timer or Mth-sig side-effect). */
+  markBroadcastCountdown: (batchId: string) => void;
+  /** Cancel a pending broadcast_countdown — returns to approved without clearing sigs or autoBroadcast flag. */
+  cancelAutoBroadcast: (batchId: string) => void;
+  /** Lock the broadcast slot (idempotent via broadcastInFlight guard) and transition to broadcast_initiating. */
+  markBroadcastInitiating: (batchId: string) => void;
+  /** Record a broadcast failure — sets broadcastError, clears broadcastInFlight, transitions to broadcast_failed. */
+  markBroadcastFailed: (batchId: string, error: string) => void;
+  /** Operator re-arms after a broadcast failure — returns to approved and clears broadcastError. */
+  retryAutoBroadcast: (batchId: string) => void;
 }
 
 // PayrollBatch holds bigints inside `lines[i].fiat.minor`, `lines[i].crypto.value`,
@@ -143,9 +155,16 @@ export const usePayrollBatchesStore = create<PayrollBatchesStore>()(
 
         if (accepted.length === 0) return { merged: 0, rejected };
 
+        const previousSigCount = batch.partialSigs?.length ?? 0;
         const mergedSigs = [...(batch.partialSigs ?? []), ...accepted];
-        const shouldPromote =
-          mergedSigs.length === multisig.m && canTransition(batch.state, "approved");
+        const justCrossedM =
+          mergedSigs.length === multisig.m && previousSigCount < multisig.m;
+        const shouldAutoBroadcast =
+          justCrossedM &&
+          batch.autoBroadcast === true &&
+          canTransition("approved", "broadcast_countdown");
+        const shouldPromoteApproved =
+          justCrossedM && !shouldAutoBroadcast && canTransition(batch.state, "approved");
 
         set((s) => ({
           batches: s.batches.map((b) =>
@@ -153,7 +172,11 @@ export const usePayrollBatchesStore = create<PayrollBatchesStore>()(
               ? {
                   ...b,
                   partialSigs: mergedSigs,
-                  ...(shouldPromote ? { state: "approved" as PayrollBatchState } : {}),
+                  ...(shouldAutoBroadcast
+                    ? { state: "broadcast_countdown" as PayrollBatchState }
+                    : shouldPromoteApproved
+                      ? { state: "approved" as PayrollBatchState }
+                      : {}),
                   updatedAt: new Date().toISOString(),
                 }
               : b,
@@ -215,6 +238,64 @@ export const usePayrollBatchesStore = create<PayrollBatchesStore>()(
                 [slotIndex]: { ...existing, dismissed: true },
               },
             };
+          }),
+        }));
+      },
+      setAutoBroadcast: (batchId, value) => {
+        set((s) => ({
+          batches: s.batches.map((b) =>
+            b.id === batchId ? { ...b, autoBroadcast: value } : b,
+          ),
+        }));
+      },
+      markBroadcastCountdown: (batchId) => {
+        set((s) => ({
+          batches: s.batches.map((b) => {
+            if (b.id !== batchId) return b;
+            if (!canTransition(b.state, "broadcast_countdown")) return b;
+            return { ...b, state: "broadcast_countdown" as PayrollBatchState };
+          }),
+        }));
+      },
+      cancelAutoBroadcast: (batchId) => {
+        set((s) => ({
+          batches: s.batches.map((b) =>
+            b.id === batchId && b.state === "broadcast_countdown"
+              ? { ...b, state: "approved" as PayrollBatchState, broadcastInFlight: undefined }
+              : b,
+          ),
+        }));
+      },
+      markBroadcastInitiating: (batchId) => {
+        set((s) => ({
+          batches: s.batches.map((b) => {
+            if (b.id !== batchId) return b;
+            if (b.broadcastInFlight === true) return b; // idempotency guard
+            if (!canTransition(b.state, "broadcast_initiating")) return b;
+            return { ...b, state: "broadcast_initiating" as PayrollBatchState, broadcastInFlight: true };
+          }),
+        }));
+      },
+      markBroadcastFailed: (batchId, error) => {
+        set((s) => ({
+          batches: s.batches.map((b) => {
+            if (b.id !== batchId) return b;
+            if (!canTransition(b.state, "broadcast_failed")) return b;
+            return {
+              ...b,
+              state: "broadcast_failed" as PayrollBatchState,
+              broadcastError: error,
+              broadcastInFlight: undefined,
+            };
+          }),
+        }));
+      },
+      retryAutoBroadcast: (batchId) => {
+        set((s) => ({
+          batches: s.batches.map((b) => {
+            if (b.id !== batchId) return b;
+            if (!canTransition(b.state, "approved")) return b;
+            return { ...b, state: "approved" as PayrollBatchState, broadcastError: undefined };
           }),
         }));
       },
