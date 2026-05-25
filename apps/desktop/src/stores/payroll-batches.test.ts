@@ -398,7 +398,7 @@ describe("2.7c retryNow + dismissRetry", () => {
       },
     } as any);
     store.retryNow("b1", 0);
-    const slot = store.findById("b1")!.commSendStatus![0];
+    const slot = store.findById("b1")!.commSendStatus![0]!;
     expect(slot.retryCount).toBe(0);
     expect(slot.nextRetryAt).toBeUndefined();
     expect(slot.dismissed).toBeUndefined();
@@ -413,7 +413,7 @@ describe("2.7c retryNow + dismissRetry", () => {
       commSendStatus: { 0: { status: "sent", updatedAt: Date.now(), retryCount: 1 } },
     } as any);
     store.dismissRetry("b1", 0);
-    const slot = store.findById("b1")!.commSendStatus![0];
+    const slot = store.findById("b1")!.commSendStatus![0]!;
     expect(slot.dismissed).toBe(true);
   });
 

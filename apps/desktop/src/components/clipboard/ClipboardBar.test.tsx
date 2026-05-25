@@ -23,10 +23,10 @@ const FIXTURE_IDENTITY = {
 function resetStores(): void {
   useClipboardStore.setState({
     bins: [
-      { id: 0, value: "test-value-0", label: "A" },
-      { id: 1, value: "test-value-1", label: "B" },
-      { id: 2, value: "", label: "C" },
-      { id: 3, value: "", label: "D" },
+      { id: 0, value: "test-value-0", label: "A", savedAt: Date.now() },
+      { id: 1, value: "test-value-1", label: "B", savedAt: Date.now() },
+      { id: 2, value: "", label: "C", savedAt: Date.now() },
+      { id: 3, value: "", label: "D", savedAt: Date.now() },
     ],
   });
   useCommIdentityStore.setState({ identity: null });

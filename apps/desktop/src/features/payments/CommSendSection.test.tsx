@@ -198,7 +198,7 @@ describe("CommSendSection", () => {
         />,
       );
       const retryButtons = screen.getAllByRole("button", { name: /retry now/i });
-      fireEvent.click(retryButtons[0]);
+      fireEvent.click(retryButtons[0]!);
       expect(spy).toHaveBeenCalledWith("b1", 0);
     });
 
@@ -226,7 +226,7 @@ describe("CommSendSection", () => {
         />,
       );
       const dismissButtons = screen.getAllByRole("button", { name: /dismiss/i });
-      fireEvent.click(dismissButtons[0]);
+      fireEvent.click(dismissButtons[0]!);
       expect(spy).toHaveBeenCalledWith("b1", 0);
     });
 
