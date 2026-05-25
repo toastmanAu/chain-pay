@@ -379,3 +379,57 @@ describe("payroll-batches store — comm-channel auto-match", () => {
     expect(got?.commSendStatus?.[0]?.status).toBe("sent");
   });
 });
+
+describe("2.7c retryNow + dismissRetry", () => {
+  it("retryNow resets retryCount, clears nextRetryAt and dismissed", async () => {
+    const { usePayrollBatchesStore } = await import("./payroll-batches");
+    const store = usePayrollBatchesStore.getState();
+    store.addBatch({
+      id: "b1",
+      state: "approved",
+      commSendStatus: {
+        0: {
+          status: "sent",
+          updatedAt: Date.now() - 1000,
+          retryCount: 5,
+          nextRetryAt: Date.now() + 30 * 60_000,
+          dismissed: false,
+        },
+      },
+    } as any);
+    store.retryNow("b1", 0);
+    const slot = store.findById("b1")!.commSendStatus![0];
+    expect(slot.retryCount).toBe(0);
+    expect(slot.nextRetryAt).toBeUndefined();
+    expect(slot.dismissed).toBeUndefined();
+  });
+
+  it("dismissRetry sets dismissed=true", async () => {
+    const { usePayrollBatchesStore } = await import("./payroll-batches");
+    const store = usePayrollBatchesStore.getState();
+    store.addBatch({
+      id: "b1",
+      state: "approved",
+      commSendStatus: { 0: { status: "sent", updatedAt: Date.now(), retryCount: 1 } },
+    } as any);
+    store.dismissRetry("b1", 0);
+    const slot = store.findById("b1")!.commSendStatus![0];
+    expect(slot.dismissed).toBe(true);
+  });
+
+  it("retryNow on non-existent batch is a no-op", async () => {
+    const { usePayrollBatchesStore } = await import("./payroll-batches");
+    const store = usePayrollBatchesStore.getState();
+    store.retryNow("doesnotexist", 0);
+    // No throw; nothing changes
+    expect(store.findById("doesnotexist")).toBeUndefined();
+  });
+
+  it("dismissRetry on non-existent slot is a no-op", async () => {
+    const { usePayrollBatchesStore } = await import("./payroll-batches");
+    const store = usePayrollBatchesStore.getState();
+    store.addBatch({ id: "b1", state: "approved" } as any);
+    store.dismissRetry("b1", 99);
+    expect(store.findById("b1")!.commSendStatus).toBeUndefined();
+  });
+});

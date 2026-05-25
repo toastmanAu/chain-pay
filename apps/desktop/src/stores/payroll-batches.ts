@@ -50,6 +50,10 @@ interface PayrollBatchesStore {
     status: CommSendSlotStatus["status"],
     detail?: { txHash?: string; error?: string; retryCount?: number; nextRetryAt?: number },
   ) => void;
+  /** Reset retryCount to 0, clear nextRetryAt and dismissed, bump updatedAt — schedules retry from attempt 1. */
+  retryNow: (batchId: string, slotIndex: number) => void;
+  /** Set dismissed=true — retry scheduler will skip this slot indefinitely. */
+  dismissRetry: (batchId: string, slotIndex: number) => void;
 }
 
 // PayrollBatch holds bigints inside `lines[i].fiat.minor`, `lines[i].crypto.value`,
@@ -176,6 +180,40 @@ export const usePayrollBatchesStore = create<PayrollBatchesStore>()(
               ...b,
               commSendStatus: { ...(b.commSendStatus ?? {}), [slotIndex]: slot },
               updatedAt: new Date().toISOString(),
+            };
+          }),
+        }));
+      },
+      retryNow: (batchId, slotIndex) => {
+        set((s) => ({
+          batches: s.batches.map((b) => {
+            if (b.id !== batchId) return b;
+            const existing = b.commSendStatus?.[slotIndex];
+            if (!existing) return b;
+            // Strip nextRetryAt and dismissed; reset retryCount; bump updatedAt.
+            const { nextRetryAt: _n, dismissed: _d, ...rest } = existing;
+            return {
+              ...b,
+              commSendStatus: {
+                ...b.commSendStatus,
+                [slotIndex]: { ...rest, retryCount: 0, updatedAt: Date.now() },
+              },
+            };
+          }),
+        }));
+      },
+      dismissRetry: (batchId, slotIndex) => {
+        set((s) => ({
+          batches: s.batches.map((b) => {
+            if (b.id !== batchId) return b;
+            const existing = b.commSendStatus?.[slotIndex];
+            if (!existing) return b;
+            return {
+              ...b,
+              commSendStatus: {
+                ...b.commSendStatus,
+                [slotIndex]: { ...existing, dismissed: true },
+              },
             };
           }),
         }));
