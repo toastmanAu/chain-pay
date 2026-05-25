@@ -290,6 +290,49 @@ export function PayPanel() {
     }
   };
 
+  /**
+   * Core merge-and-broadcast sequence shared by the manual button and the
+   * auto-broadcast countdown.  Reconstructs the tx from `txBytes` (or falls
+   * back to `skeleton.tx` when called from the manual path), merges the
+   * provided partial signatures, runs pre-broadcast sanity checks, then
+   * broadcasts through the light client.
+   *
+   * @param tx        - The unsigned transaction to sign and broadcast.
+   * @param partials  - The M partial signatures to merge.
+   * @returns The confirmed tx hash.
+   */
+  async function buildSignedTxAndBroadcast(
+    tx: Transaction,
+    partials: PartialSignature[],
+  ): Promise<string> {
+    if (!cfg) throw new Error("No multisig config available");
+
+    const digest = treasurySighashDigest(tx);
+    mergeSignatures(tx, cfg, digest, partials);
+
+    // Pre-broadcast sanity: the multisig_script now sitting in witness[0]
+    // MUST blake160 to the input cells' lock.args, or the chain returns -52
+    // (ERROR_MULTSIG_SCRIPT_HASH). We check three things, in order of
+    // diagnostic value:
+    //
+    //   1. cfg ↔ treasury.address: the stored treasury address must
+    //      decode to lock.args matching what cfg.pubkeyHashes encode.
+    //      If this fails, the wizard/persist layer mutated cfg without
+    //      keeping address in sync.
+    //   2. witness[0] ↔ cfg: the bytes mergeSignatures just wrote must
+    //      blake160 to the same lock.args. If this fails, mergeSignatures
+    //      or WitnessArgs round-trip is corrupting bytes.
+    //   3. tx.inputs[0] ↔ treasury: caller's responsibility — the cells
+    //      we're spending must be at the treasury's lock. Not checked
+    //      inline (would need a chain query) but logged for inspection.
+    if (multisig) {
+      assertMultisigBytesMatchTreasury(tx, cfg, multisig);
+      dumpInputsForInspection(tx, multisig);
+    }
+
+    return lightClient().broadcastTransaction(tx);
+  }
+
   const handleBroadcast = async () => {
     if (!cfg || !skeleton) return;
     setError(null);
@@ -299,28 +342,7 @@ export function PayPanel() {
         if (!s.signature.trim()) throw new Error("All signature slots must be filled");
         return { slotIndex: s.slotIndex, signature: s.signature.trim() };
       });
-      const digest = treasurySighashDigest(skeleton.tx);
-      mergeSignatures(skeleton.tx, cfg, digest, partials);
 
-      // Pre-broadcast sanity: the multisig_script now sitting in witness[0]
-      // MUST blake160 to the input cells' lock.args, or the chain returns -52
-      // (ERROR_MULTSIG_SCRIPT_HASH). We check three things, in order of
-      // diagnostic value:
-      //
-      //   1. cfg ↔ treasury.address: the stored treasury address must
-      //      decode to lock.args matching what cfg.pubkeyHashes encode.
-      //      If this fails, the wizard/persist layer mutated cfg without
-      //      keeping address in sync.
-      //   2. witness[0] ↔ cfg: the bytes mergeSignatures just wrote must
-      //      blake160 to the same lock.args. If this fails, mergeSignatures
-      //      or WitnessArgs round-trip is corrupting bytes.
-      //   3. tx.inputs[0] ↔ treasury: caller's responsibility — the cells
-      //      we're spending must be at the treasury's lock. Not checked
-      //      inline (would need a chain query) but logged for inspection.
-      if (multisig) {
-        assertMultisigBytesMatchTreasury(skeleton.tx, cfg, multisig);
-        dumpInputsForInspection(skeleton.tx, multisig);
-      }
       // Mark the batch approved just before send so a network failure leaves
       // us in a recoverable state (approved → calculated is a legal revert).
       if (activeBatchId) {
@@ -330,7 +352,7 @@ export function PayPanel() {
           // ignore — batch may have been manually advanced or deleted
         }
       }
-      const txHash = await lightClient().broadcastTransaction(skeleton.tx);
+      const txHash = await buildSignedTxAndBroadcast(skeleton.tx, partials);
       setBroadcastedTxHash(txHash);
       setPhase("broadcasted");
       if (activeBatchId) {
@@ -566,8 +588,10 @@ export function PayPanel() {
       {activeBatch && activeBatch.state === "broadcast_countdown" ? (
         <AutoBroadcastCountdown
           onElapsed={async () => {
-            batchStore.markBroadcastInitiating(activeBatch.id);
-            const broadcastRpcUrl = useNetworkConfigStore.getState().broadcastRpcUrl;
+            // Guard: a broadcast RPC URL must be configured (or light-client
+            // broadcast must be viable). Check before marking initiating so
+            // the user sees a clear error instead of a silent failure.
+            const { broadcastRpcUrl } = useNetworkConfigStore.getState();
             if (!broadcastRpcUrl) {
               batchStore.markBroadcastFailed(
                 activeBatch.id,
@@ -575,12 +599,27 @@ export function PayPanel() {
               );
               return;
             }
-            if (!skeleton) {
-              batchStore.markBroadcastFailed(activeBatch.id, "No transaction skeleton available");
+            // Reconstruct the tx from the persisted bytes so this path is
+            // independent of React state (skeleton may be null if the user
+            // navigated away and back).
+            if (!activeBatch.txBytes) {
+              batchStore.markBroadcastFailed(activeBatch.id, "No transaction bytes in batch");
               return;
             }
+            if (!activeBatch.partialSigs || activeBatch.partialSigs.length === 0) {
+              batchStore.markBroadcastFailed(activeBatch.id, "No partial signatures collected yet");
+              return;
+            }
+            batchStore.markBroadcastInitiating(activeBatch.id);
             try {
-              const txHash = await lightClient().broadcastTransaction(skeleton.tx);
+              const tx = Transaction.fromBytes(bytesFrom(activeBatch.txBytes));
+              const partials: PartialSignature[] = activeBatch.partialSigs.map((p) => ({
+                slotIndex: p.slotIndex,
+                signature: p.signature,
+              }));
+              // buildSignedTxAndBroadcast merges sigs into tx, runs sanity
+              // checks, then broadcasts — same path as manual handleBroadcast.
+              const txHash = await buildSignedTxAndBroadcast(tx, partials);
               setBroadcastedTxHash(txHash);
               setPhase("broadcasted");
               batchStore.transition(activeBatch.id, "broadcasted");
