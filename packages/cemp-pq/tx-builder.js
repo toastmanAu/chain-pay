@@ -2,7 +2,7 @@
  * CEMP-PQ Transaction Builder
  */
 
-import { CEMPPQ, ML_DSA_TESTNET, serializeMessagePointer, serializeProfile, signingMessage, buildWitness } from './index.js';
+import { CEMPPQ, ML_DSA_TESTNET, getMlDsaConstants, serializeMessagePointer, serializeProfile, signingMessage, buildWitness } from './index.js';
 import { ccc } from '@ckb-ccc/core';
 import { ml_dsa65 } from '@noble/post-quantum/ml-dsa';
 
@@ -10,8 +10,9 @@ import { ml_dsa65 } from '@noble/post-quantum/ml-dsa';
  * Custom CCC Signer for ML-DSA-65
  */
 export class MLDSASigner extends ccc.Signer {
-    constructor(client, secretKey, publicKey) {
+    constructor(client, secretKey, publicKey, network = "testnet") {
         super(client);
+        this.network = network;
         if (secretKey.length === 32) {
             const keys = ml_dsa65.keygen(secretKey);
             this.secretKey = keys.secretKey;
@@ -20,7 +21,9 @@ export class MLDSASigner extends ccc.Signer {
             this.secretKey = secretKey;
             this.publicKey = publicKey;
         }
-        
+
+        const mlDsa = getMlDsaConstants(network);
+
         // Derive lock args
         const pubkeyHash = ccc.bytesFrom(ccc.hashCkb(this.publicKey));
         const args = new Uint8Array(36);
@@ -31,8 +34,8 @@ export class MLDSASigner extends ccc.Signer {
         args.set(pubkeyHash, 4);
 
         this.script = {
-            codeHash: ML_DSA_TESTNET.CODE_HASH,
-            hashType: ML_DSA_TESTNET.HASH_TYPE,
+            codeHash: mlDsa.CODE_HASH,
+            hashType: mlDsa.HASH_TYPE,
             args: ccc.hexFrom(args),
         };
     }
@@ -51,10 +54,11 @@ export class MLDSASigner extends ccc.Signer {
     async connect() {}
 
     async prepareTransaction(tx) {
+        const mlDsa = getMlDsaConstants(this.network);
         tx.addCellDeps({
             outPoint: {
-                txHash: ML_DSA_TESTNET.TX_HASH,
-                index: ML_DSA_TESTNET.INDEX,
+                txHash: mlDsa.TX_HASH,
+                index: mlDsa.INDEX,
             },
             depType: "code",
         });
@@ -78,8 +82,9 @@ export class MLDSASigner extends ccc.Signer {
 }
 
 export class CEMPTransactionBuilder {
-    constructor(client) {
+    constructor(client, network = "testnet") {
         this.client = client;
+        this.network = network;
     }
 
     /**
@@ -199,10 +204,11 @@ export class CEMPTransactionBuilder {
         });
 
         // Add CellDeps for ML-DSA
+        const mlDsa = getMlDsaConstants(this.network);
         tx.addCellDeps({
             outPoint: {
-                txHash: ML_DSA_TESTNET.TX_HASH,
-                index: ML_DSA_TESTNET.INDEX,
+                txHash: mlDsa.TX_HASH,
+                index: mlDsa.INDEX,
             },
             depType: "code",
         });
