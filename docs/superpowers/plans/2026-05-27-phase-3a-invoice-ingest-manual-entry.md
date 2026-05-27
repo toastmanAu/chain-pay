@@ -1045,7 +1045,7 @@ describe("useVendorsStore", () => {
     useVendorsStore.getState().addVendor(v({ id: "vendor_2", displayName: "Other" }));
     useVendorsStore.getState().removeVendor("vendor_1");
     expect(useVendorsStore.getState().vendors).toHaveLength(1);
-    expect(useVendorsStore.getState().vendors[0].id).toBe("vendor_2");
+    expect(useVendorsStore.getState().vendors[0]?.id).toBe("vendor_2");
   });
 
   it("findByDisplayNameAndTaxId matches exact name+taxId", () => {
@@ -1569,7 +1569,7 @@ describe("kind discriminator + v1→v2 migration", () => {
 
     const migrated = usePayrollBatchesStore.getState().batches;
     expect(migrated).toHaveLength(1);
-    expect(migrated[0].kind).toBe("payroll");
+    expect(migrated[0]?.kind).toBe("payroll");
   });
 
   it("migration is idempotent — records already having kind are unchanged", () => {
@@ -1579,7 +1579,7 @@ describe("kind discriminator + v1→v2 migration", () => {
     };
     globalThis.localStorage?.setItem("chain-pay:payroll-batches", JSON.stringify(v2Blob));
     usePayrollBatchesStore.persist.rehydrate();
-    expect(usePayrollBatchesStore.getState().batches[0].kind).toBe("vendor");
+    expect(usePayrollBatchesStore.getState().batches[0]?.kind).toBe("vendor");
   });
 });
 ```
@@ -2529,7 +2529,7 @@ describe("VendorPicker", () => {
     await user.type(screen.getByLabelText(/display name/i), "New Vendor Inc");
     await user.click(screen.getByRole("button", { name: /^create$/i }));
     expect(useVendorsStore.getState().vendors).toHaveLength(1);
-    expect(useVendorsStore.getState().vendors[0].displayName).toBe("New Vendor Inc");
+    expect(useVendorsStore.getState().vendors[0]?.displayName).toBe("New Vendor Inc");
     expect(onSelect).toHaveBeenCalledWith(expect.objectContaining({ displayName: "New Vendor Inc" }));
   });
 });
