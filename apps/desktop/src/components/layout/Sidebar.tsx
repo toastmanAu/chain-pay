@@ -1,11 +1,12 @@
 import { NavLink } from "react-router-dom";
-import { LayoutDashboard, Vault, Calendar, Send, PenLine, Users, Settings as Cog } from "lucide-react";
+import { LayoutDashboard, Vault, Calendar, FileText, Send, PenLine, Users, Settings as Cog } from "lucide-react";
 import { useSyncStore, type CkbSyncState } from "@/stores/sync";
 
 const items = [
   { to: "/dashboard", icon: LayoutDashboard, label: "Dashboard" },
   { to: "/treasury", icon: Vault, label: "Treasury" },
   { to: "/payroll", icon: Calendar, label: "Payroll" },
+  { to: "/invoices", icon: FileText, label: "Invoices" },
   { to: "/payments", icon: Send, label: "Payments" },
   { to: "/sign", icon: PenLine, label: "Sign" },
   { to: "/employees", icon: Users, label: "Employees" },

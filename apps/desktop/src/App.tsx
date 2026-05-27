@@ -9,6 +9,7 @@ import { PayrollBatches } from "./features/payroll/PayrollBatches";
 import { PayPanel } from "./features/payments/PayPanel";
 import { SignPanel } from "./features/sign/SignPanel";
 import { Employees } from "./features/employees/Employees";
+import { InvoicesPage } from "./features/invoices/InvoicesPage";
 import { Settings } from "./features/settings/Settings";
 import { useSyncStore } from "./stores/sync";
 import { useNetworkConfigStore } from "./stores/network-config";
@@ -21,6 +22,7 @@ import { useIncomingSigsStore } from "./stores/incoming-sigs";
 import { useIncomingPacketsStore } from "./stores/incoming-packets";
 import { usePayrollBatchesStore } from "./stores/payroll-batches";
 import { useCommSendRetry } from "./features/payments/useCommSendRetry";
+import { useBatchConfirmationSync } from "./lib/invoices/use-batch-confirmation-to-invoice";
 import { isExpired } from "./lib/comm/expires-at";
 import type { OutgoingPacket } from "./lib/comm/types";
 import type { TransferPacket } from "@chain-pay/shared";
@@ -220,6 +222,8 @@ export function App() {
 
   useCommSendRetry({ packetForBatch, multisigForBatch });
 
+  useBatchConfirmationSync();
+
   return (
     <AppShell>
       <Routes>
@@ -229,6 +233,7 @@ export function App() {
         <Route path="/treasury/new" element={<SetupMultisig />} />
         <Route path="/treasury/:id" element={<TreasuryDetail />} />
         <Route path="/payroll" element={<PayrollBatches />} />
+        <Route path="/invoices/*" element={<InvoicesPage />} />
         <Route path="/payments" element={<PayPanel />} />
         <Route path="/sign" element={<SignPanel />} />
         <Route path="/employees" element={<Employees />} />
