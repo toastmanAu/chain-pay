@@ -1937,7 +1937,7 @@ describe("file-storage", () => {
 
   it("deleteUri delegates to IPC", async () => {
     await deleteUri("file:///fake/x.pdf");
-    expect(window.electron.invoiceFiles.delete).toHaveBeenCalledWith("file:///fake/x.pdf");
+    expect(window.chainpay.invoiceFiles.delete).toHaveBeenCalledWith("file:///fake/x.pdf");
   });
 });
 ```
@@ -1963,18 +1963,18 @@ export async function hashBlob(blob: Blob): Promise<string> {
 export async function storeBlob(blob: Blob): Promise<{ uri: string; sha256: string }> {
   const sha256 = await hashBlob(blob);
   const bytes = new Uint8Array(await blob.arrayBuffer());
-  const uri = await window.electron.invoiceFiles.store(bytes, sha256);
+  const uri = await window.chainpay.invoiceFiles.store(bytes, sha256);
   return { uri, sha256 };
 }
 
 /** Read bytes for a previously-stored URI. */
 export async function readUri(uri: string): Promise<Uint8Array> {
-  return window.electron.invoiceFiles.read(uri);
+  return window.chainpay.invoiceFiles.read(uri);
 }
 
 /** Delete the stored file. No-op if absent. */
 export async function deleteUri(uri: string): Promise<void> {
-  return window.electron.invoiceFiles.delete(uri);
+  return window.chainpay.invoiceFiles.delete(uri);
 }
 ```
 
@@ -2667,7 +2667,7 @@ beforeEach(() => {
   useInvoicesStore.setState({ invoices: [] });
   useVendorsStore.setState({ vendors: [] });
   globalThis.localStorage?.clear();
-  // Mock window.electron.invoiceFiles
+  // Mock window.chainpay.invoiceFiles
   (globalThis as unknown as { window: typeof window & { electron: { invoiceFiles: { store: typeof vi.fn } } } }).window.electron = {
     invoiceFiles: {
       store: vi.fn(async (_b: Uint8Array, sha: string) => `file:///fake/${sha}.pdf`),
