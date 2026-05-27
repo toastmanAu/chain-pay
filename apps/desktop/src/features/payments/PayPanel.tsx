@@ -260,6 +260,7 @@ export function PayPanel() {
         const digest = treasurySighashDigest(result.tx);
         const batch: PayrollBatch = {
           id,
+          kind: "payroll",
           label: label.trim() || autoLabel(),
           treasuryId,
           cycleStart: monthStart(),

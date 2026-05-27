@@ -37,7 +37,7 @@ const PACKET: OutgoingPacket = {
   packet: "encoded" as TransferPacket,
 };
 const sampleBatch: PayrollBatch = {
-  id: "b1", label: "test", treasuryId: "t1",
+  id: "b1", kind: "payroll", label: "test", treasuryId: "t1",
   cycleStart: "2026-05-01", cycleEnd: "2026-05-31",
   fxSnapshot: [], lines: [], state: "calculated",
   sighashDigest: PACKET.txHash,

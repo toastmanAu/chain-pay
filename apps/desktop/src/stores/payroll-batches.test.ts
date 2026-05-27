@@ -12,6 +12,7 @@ const sampleLine: PayrollBatchLine = {
 
 const sampleBatch: PayrollBatch = {
   id: "b1",
+  kind: "payroll",
   label: "May 2026 payroll",
   treasuryId: "t-testnet",
   cycleStart: "2026-05-01",

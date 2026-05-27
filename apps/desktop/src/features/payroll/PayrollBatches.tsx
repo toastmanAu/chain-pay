@@ -76,6 +76,7 @@ function CreateBatchForm({ treasuries }: { treasuries: Array<{ id: string; label
     const id = (globalThis.crypto?.randomUUID?.() ?? `b-${Date.now()}`) as string;
     const batch: PayrollBatch = {
       id,
+      kind: "payroll",
       label: label.trim(),
       treasuryId,
       cycleStart,
