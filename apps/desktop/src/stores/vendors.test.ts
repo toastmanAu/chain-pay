@@ -47,7 +47,7 @@ describe("useVendorsStore", () => {
     useVendorsStore.getState().addVendor(v({ id: "vendor_2", displayName: "Other" }));
     useVendorsStore.getState().removeVendor("vendor_1");
     expect(useVendorsStore.getState().vendors).toHaveLength(1);
-    expect(useVendorsStore.getState().vendors[0].id).toBe("vendor_2");
+    expect(useVendorsStore.getState().vendors[0]?.id).toBe("vendor_2");
   });
 
   it("findByDisplayNameAndTaxId matches exact name+taxId", () => {
