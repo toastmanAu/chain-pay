@@ -6,8 +6,14 @@ import { getOwnIdentityHash } from "../lib/comm/own-identity-hash";
 
 interface TreasuryStore {
   treasuries: Treasury[];
+  /**
+   * Currently selected treasury id used by features like invoice review.
+   * Null when no treasury has been chosen yet (or treasuries is empty).
+   */
+  activeTreasuryId: string | null;
   addTreasury: (t: Treasury) => void;
   removeTreasury: (id: string) => void;
+  setActiveTreasury: (id: string | null) => void;
   findByMultisig: (cfg: MultisigConfig) => Treasury | undefined;
 }
 
@@ -52,6 +58,8 @@ export const useTreasuryStore = create<TreasuryStore>()(
   persist(
     (set, get) => ({
       treasuries: [],
+      activeTreasuryId: null,
+      setActiveTreasury: (id) => set({ activeTreasuryId: id }),
       addTreasury: (t) => {
         // Refusal invariant: refuse to add a treasury whose signer hash matches
         // the current comm-identity hash. Defense-in-depth alongside the
@@ -65,10 +73,18 @@ export const useTreasuryStore = create<TreasuryStore>()(
             ]);
           }
         }
-        set((s) => ({ treasuries: [...s.treasuries, t] }));
+        set((s) => ({
+          treasuries: [...s.treasuries, t],
+          // Auto-select the first treasury added so single-treasury workflows
+          // don't have to call setActiveTreasury manually.
+          activeTreasuryId: s.activeTreasuryId ?? t.id,
+        }));
       },
       removeTreasury: (id) =>
-        set((s) => ({ treasuries: s.treasuries.filter((t) => t.id !== id) })),
+        set((s) => ({
+          treasuries: s.treasuries.filter((t) => t.id !== id),
+          activeTreasuryId: s.activeTreasuryId === id ? null : s.activeTreasuryId,
+        })),
       findByMultisig: (cfg) =>
         get().treasuries.find(
           (t) => t.multisig.chain === cfg.chain && t.multisig.address === cfg.address,
@@ -78,7 +94,10 @@ export const useTreasuryStore = create<TreasuryStore>()(
       name: "chain-pay:treasuries",
       storage: jsonStorage,
       version: 1,
-      partialize: (state) => ({ treasuries: state.treasuries }),
+      partialize: (state) => ({
+        treasuries: state.treasuries,
+        activeTreasuryId: state.activeTreasuryId,
+      }),
     },
   ),
 );
