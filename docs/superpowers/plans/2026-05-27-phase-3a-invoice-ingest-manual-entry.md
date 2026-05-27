@@ -608,7 +608,7 @@ describe("VendorProfile", () => {
     const v: VendorProfile = {
       id: "vendor_1",
       displayName: "Acme Pty",
-      preferredChain: "ckb-testnet",
+      preferredChain: "ckb:testnet",
       active: true,
       createdAt: "2026-05-27T00:00:00Z",
       updatedAt: "2026-05-27T00:00:00Z",
@@ -1005,7 +1005,7 @@ function v(overrides: Partial<VendorProfile> = {}): VendorProfile {
   return {
     id: "vendor_1",
     displayName: "Acme Pty",
-    preferredChain: "ckb-testnet",
+    preferredChain: "ckb:testnet",
     active: true,
     createdAt: now,
     updatedAt: now,
@@ -2031,7 +2031,7 @@ function treasuryFixture(): Treasury {
   // Minimal valid Treasury — fields beyond id/label/chain are existing types
   // that may need additional setup. Use what the existing tests use as a fixture
   // (or extend with what's strictly needed for `routeInvoiceToBatch`).
-  return { id: "tr_1", label: "Test Treasury", chain: "ckb-testnet" } as unknown as Treasury;
+  return { id: "tr_1", label: "Test Treasury", chain: "ckb:testnet" } as unknown as Treasury;
 }
 
 describe("routeInvoiceToBatch", () => {
@@ -2215,7 +2215,7 @@ function inv(overrides: Partial<InvoiceRecord> = {}): InvoiceRecord {
   } as InvoiceRecord;
 }
 
-const treasury = { id: "tr_1", label: "T", chain: "ckb-testnet" } as unknown as Treasury;
+const treasury = { id: "tr_1", label: "T", chain: "ckb:testnet" } as unknown as Treasury;
 
 beforeEach(() => {
   globalThis.localStorage?.clear();
@@ -2497,8 +2497,8 @@ beforeEach(() => {
 describe("VendorPicker", () => {
   it("lists existing vendors filtered by typed query", async () => {
     const user = userEvent.setup();
-    useVendorsStore.getState().addVendor({ id: "v1", displayName: "Acme Pty", preferredChain: "ckb-testnet", active: true, createdAt: "", updatedAt: "" });
-    useVendorsStore.getState().addVendor({ id: "v2", displayName: "Beta Co", preferredChain: "ckb-testnet", active: true, createdAt: "", updatedAt: "" });
+    useVendorsStore.getState().addVendor({ id: "v1", displayName: "Acme Pty", preferredChain: "ckb:testnet", active: true, createdAt: "", updatedAt: "" });
+    useVendorsStore.getState().addVendor({ id: "v2", displayName: "Beta Co", preferredChain: "ckb:testnet", active: true, createdAt: "", updatedAt: "" });
     render(<VendorPicker onSelect={vi.fn()} />);
     await user.type(screen.getByPlaceholderText(/search vendors/i), "Acm");
     expect(screen.getByRole("button", { name: /Acme Pty/ })).toBeInTheDocument();
@@ -2508,7 +2508,7 @@ describe("VendorPicker", () => {
   it("selecting an existing vendor calls onSelect with that vendor", async () => {
     const user = userEvent.setup();
     const onSelect = vi.fn();
-    useVendorsStore.getState().addVendor({ id: "v1", displayName: "Acme Pty", preferredChain: "ckb-testnet", active: true, createdAt: "", updatedAt: "" });
+    useVendorsStore.getState().addVendor({ id: "v1", displayName: "Acme Pty", preferredChain: "ckb:testnet", active: true, createdAt: "", updatedAt: "" });
     render(<VendorPicker onSelect={onSelect} />);
     await user.click(screen.getByRole("button", { name: /Acme Pty/ }));
     expect(onSelect).toHaveBeenCalledWith(expect.objectContaining({ id: "v1" }));
@@ -2579,7 +2579,7 @@ export function VendorPicker({ onSelect }: Props) {
       id: `vendor_${crypto.randomUUID()}`,
       displayName: draftName.trim(),
       taxId: draftTaxId.trim() || undefined,
-      preferredChain: "ckb-testnet",
+      preferredChain: "ckb:testnet",
       active: true,
       createdAt: now,
       updatedAt: now,
@@ -2719,7 +2719,7 @@ describe("NewInvoiceForm (Stage A)", () => {
     const file = new File([new Uint8Array([1, 2, 3])], "ok.pdf", { type: "application/pdf" });
     await user.upload(screen.getByLabelText(/upload pdf/i), file);
     expect(screen.getByRole("button", { name: /continue/i })).toBeDisabled();
-    useVendorsStore.getState().addVendor({ id: "v1", displayName: "Acme", preferredChain: "ckb-testnet", active: true, createdAt: "", updatedAt: "" });
+    useVendorsStore.getState().addVendor({ id: "v1", displayName: "Acme", preferredChain: "ckb:testnet", active: true, createdAt: "", updatedAt: "" });
     // Re-render via state update; in this minimal form, picking the vendor enables Continue
     await user.click(await screen.findByRole("button", { name: /Acme/i }));
     expect(screen.getByRole("button", { name: /continue/i })).toBeEnabled();
@@ -2727,7 +2727,7 @@ describe("NewInvoiceForm (Stage A)", () => {
 
   it("Continue creates InvoiceRecord, calls storeBlob, and navigates to Stage B", async () => {
     const user = userEvent.setup();
-    useVendorsStore.getState().addVendor({ id: "v1", displayName: "Acme", preferredChain: "ckb-testnet", active: true, createdAt: "", updatedAt: "" });
+    useVendorsStore.getState().addVendor({ id: "v1", displayName: "Acme", preferredChain: "ckb:testnet", active: true, createdAt: "", updatedAt: "" });
     renderWithRouter();
     const file = new File([new Uint8Array([1, 2, 3])], "ok.pdf", { type: "application/pdf" });
     await user.upload(screen.getByLabelText(/upload pdf/i), file);
@@ -2914,7 +2914,7 @@ beforeEach(() => {
   useInvoicesStore.setState({ invoices: [inv()] });
   usePayrollBatchesStore.setState({ batches: [], selectedDraftId: null });
   // Set an active treasury — wire matches the existing useTreasuryStore API
-  useTreasuryStore.setState({ treasuries: [{ id: "tr_1", label: "Test", chain: "ckb-testnet" } as never], activeTreasuryId: "tr_1" });
+  useTreasuryStore.setState({ treasuries: [{ id: "tr_1", label: "Test", chain: "ckb:testnet" } as never], activeTreasuryId: "tr_1" });
   // Mock pdf.js so the side-by-side preview doesn't actually render
   vi.mock("pdfjs-dist", () => ({ getDocument: () => ({ promise: Promise.resolve({ numPages: 1, getPage: () => Promise.resolve({ render: () => ({ promise: Promise.resolve() }) }) }) }) }));
 });
