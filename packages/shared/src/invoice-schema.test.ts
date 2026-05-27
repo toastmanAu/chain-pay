@@ -1,7 +1,8 @@
 import { readFileSync } from "node:fs";
-import { homedir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
+import { z } from "zod";
 import { InvoiceSchema } from "./invoice-schema";
 
 describe("InvoiceSchema", () => {
@@ -73,15 +74,22 @@ describe("InvoiceSchema", () => {
   });
 });
 
-describe("InvoiceSchema completeness vs vault file", () => {
-  it("parses a maximal invoice covering every field from the vault JSON schema", () => {
-    // Sanity: vault file must be present and pin schema_version
-    const vaultSchemaPath = join(
-      homedir(),
-      "Documents/loacal-vault/Projects/ChainPay/schemas/invoice-extraction-v0.schema.json",
+describe("InvoiceSchema completeness vs canonical schema file", () => {
+  it("parses a maximal invoice covering every field from the canonical JSON schema", () => {
+    // Sanity: vendored schema file must be present and pin schema_version
+    const schemaFilePath = join(
+      dirname(fileURLToPath(import.meta.url)),
+      "..",
+      "schemas",
+      "invoice-extraction-v0.schema.json",
     );
-    const vaultSchema = JSON.parse(readFileSync(vaultSchemaPath, "utf8")) as { properties: { schema_version: { const: string } } };
-    expect(vaultSchema.properties.schema_version.const).toBe("0.1.0");
+    const repoSchemaShape = z.object({
+      properties: z.object({
+        schema_version: z.object({ const: z.literal("0.1.0") }),
+      }),
+    });
+    const repoSchema = repoSchemaShape.parse(JSON.parse(readFileSync(schemaFilePath, "utf8")));
+    expect(repoSchema.properties.schema_version.const).toBe("0.1.0");
 
     // Maximal invoice — every optional field populated
     const maximal = {
@@ -91,7 +99,7 @@ describe("InvoiceSchema completeness vs vault file", () => {
         source: "manual-upload",
         uploaded_by: "user_42",
         received_at: "2026-05-27T03:14:15Z",
-        sender_identity: null,
+        sender_identity: { email: "billing@acme.example", display_name: "Acme Billing", verified_via: "allowlist" },
         raw_file: {
           sha256: "f".repeat(64),
           mime_type: "application/pdf",
@@ -161,8 +169,10 @@ describe("InvoiceSchema completeness vs vault file", () => {
     };
 
     const result = InvoiceSchema.safeParse(maximal);
-    if (!result.success) console.error(JSON.stringify(result.error.issues, null, 2));
-    expect(result.success).toBe(true);
+    expect(
+      result.success,
+      result.success ? "" : JSON.stringify(result.error.issues, null, 2),
+    ).toBe(true);
   });
 
   it("rejects unknown top-level fields (strict mode)", () => {
