@@ -38,14 +38,18 @@ packages/shared/src/
   invoice-schema.ts                 NEW   Zod schema — single source of truth
   payroll.ts                        EXTEND  add VendorPaymentBatch + VendorPaymentLine types
 
+apps/desktop/src/stores/
+  invoices.ts                       NEW   zustand store w/ persist (chain-pay:invoices)
+  vendors.ts                        NEW   zustand store w/ persist (chain-pay:vendors)
+  invoice-drafts.ts                 NEW   zustand store w/ persist (chain-pay:invoice-drafts)
+  payroll-batches.ts                EXTEND  add kind discriminator + version 1→2 migration
+
 apps/desktop/src/lib/
   invoices/
     state-machine.ts                NEW   draft → in-review → queued-for-signing → signed | rejected
-    store.ts                        NEW   IDB persistence (invoices + invoiceDrafts stores)
     file-storage.ts                 NEW   content-addressed PDF blob storage (IPC bridge to main)
     route-to-batch.ts               NEW   invoice → PayrollBatch | VendorPaymentBatch
-  vendors/
-    store.ts                        NEW   IDB persistence (vendors store)
+    approve-and-queue.ts            NEW   safe-ordered handoff: write batch → update invoice → nav
 
 apps/desktop/electron/main/
   invoice-files-host.ts             NEW   IPC handler: store/read/delete PDFs in userData/invoice-pdfs/
@@ -56,9 +60,7 @@ apps/desktop/src/features/invoices/
   NewInvoiceForm.tsx                NEW   Stage A: flow + payee + PDF upload
   ReviewInvoiceForm.tsx             NEW   Stage B: editable fields + approve & queue
   VendorPicker.tsx                  NEW   Search-or-create vendor address-book entry
-  hooks/useInvoices.ts              NEW   CRUD hook
-  hooks/useVendors.ts               NEW   CRUD hook
-  hooks/useInvoiceDraft.ts          NEW   Debounced autosave to invoiceDrafts store
+  hooks/useInvoiceDraft.ts          NEW   Debounced autosave to invoice-drafts store
 
 apps/desktop/src/features/payroll/
   (no changes — employee-payment invoices route into existing PayrollBatch via route-to-batch.ts)
@@ -232,37 +234,40 @@ Form-state autosave on every change (debounced 500ms) so closing the window mid-
 2. Click Continue → InvoiceRecord built with intake.raw_file populated
    ├─ status: "draft"
    ├─ extraction.pipeline.stages: []
-   └─ invoices.put()
+   └─ useInvoicesStore.addInvoice()
 
 3. Stage B field edits
-   └─ debounced 500ms → invoiceDrafts.put()
+   └─ debounced 500ms → useInvoiceDraftsStore.upsertDraft()
 
 4. Click "Approve & queue"
    ├─ InvoiceSchema.safeParse() — block on failure
    ├─ Diff against draft baseline → append approval.edits_made[]
-   ├─ Set approval.status = "queued-for-signing"
-   ├─ IDB transaction (atomic across stores):
-   │    ├─ payrollBatches.put(batch)
-   │    └─ invoices.put(invoice)
+   ├─ approveAndQueue() — safe-ordered handoff:
+   │    ├─ usePayrollBatchesStore.addBatch(batch)   ← write batch FIRST
+   │    └─ useInvoicesStore.markQueuedForSigning(invoiceId, batchId)
    └─ Navigate to /payments/{batchId}
 
 5. Existing 2.7c pipeline takes over
    └─ on batch.state === "confirmed":
-      ├─ invoices.put(): chainpay_link.tx_hash, chain
-      └─ approval.status = "signed"
+      ├─ useInvoicesStore.markSigned(invoiceId, { txHash, chain })
+      └─ writes chainpay_link + approval.status = "signed"
 ```
 
 ## Storage
 
-### IDB additions
+### Storage layer (zustand + localStorage)
 
-```
-Database: chainpay (existing)
-  └─ NEW stores:
-     ├─ invoices            keyPath: id   indexes: status, flow, createdAt, vendorId
-     ├─ vendors             keyPath: id   indexes: displayName, taxId, active
-     └─ invoiceDrafts       keyPath: invoiceId    (free-form, no schema validation)
-```
+Chain-pay's existing storage stack is **zustand stores with `persist` middleware backed by localStorage**, using a `"123n"`-suffix replacer/reviver to round-trip bigints (see `apps/desktop/src/stores/payroll-batches.ts` for the canonical pattern).
+
+Three new zustand stores under `apps/desktop/src/stores/`:
+
+| Store | localStorage key | Shape | Notes |
+|---|---|---|---|
+| `useInvoicesStore` | `chain-pay:invoices` | `{ invoices: InvoiceRecord[] }` | Schema-validated on write |
+| `useVendorsStore` | `chain-pay:vendors` | `{ vendors: VendorProfile[] }` | Search-or-create flow |
+| `useInvoiceDraftsStore` | `chain-pay:invoice-drafts` | `{ drafts: Record<invoiceId, Partial<InvoiceRecord>> }` | Free-form, no schema validation |
+
+Each uses the same bigint-suffix replacer/reviver as `payroll-batches.ts` for consistency.
 
 ### PDF storage
 
@@ -282,7 +287,7 @@ IPC bridge (matches existing pattern in `light-client-host.ts`):
 
 ### Batch discriminator + migration
 
-`payrollBatches` store gains a `kind: "payroll" | "vendor"` discriminator. One-shot migration on first launch after this slice writes `kind: "payroll"` to existing records (idempotent — checks before writing). Runs in the existing IDB upgrade callback.
+`usePayrollBatchesStore` is extended to hold both `PayrollBatch` and `VendorPaymentBatch` records, discriminated by the `kind: "payroll" | "vendor"` field. A zustand `persist` migration bumps the store's `version: 1 → 2` and backfills `kind: "payroll"` on existing persisted records (idempotent — checks before writing). The migration runs once per browser-profile on first launch after this slice.
 
 ## Error handling
 
@@ -308,24 +313,24 @@ IPC bridge (matches existing pattern in `light-client-host.ts`):
 |---|---|---|
 | No active treasury | Pre-check | Block; deep-link to Treasury Settings |
 | Treasury has no signers | Pre-check | Block; deep-link |
-| `payrollBatches.put` fails | IDB rejects | IDB transaction rollback; toast; no partial state |
+| `addBatch` throws | zustand set throws (rare: localStorage quota) | Surface error; abort handoff; invoice stays in `in-review` |
 | `routeInvoiceToBatch` throws | try/catch | Block; invoice stays in `in-review` |
 
-Atomic handoff via IDB multi-store transaction:
+Handoff ordering (no true multi-store transactions in zustand — synchronous sequential writes with safe ordering):
 
 ```typescript
-async function approveAndQueue(invoice: InvoiceRecord, treasury: Treasury) {
-  const batch = routeInvoiceToBatch(invoice, treasury);   // pure; throws on missing payee
-  const tx = db.transaction(["invoices", "payrollBatches"], "readwrite");
-  await tx.objectStore("payrollBatches").put(batch);
-  await tx.objectStore("invoices").put({
-    ...invoice,
-    approval: { ...invoice.approval, status: "queued-for-signing", reviewed_at: now(), reviewed_by: currentUserId },
-  });
-  await tx.done;  // both succeed or both roll back
-  navigate(`/payments/${batch.id}`);
+function approveAndQueue(invoice: InvoiceRecord, treasury: Treasury): { batchId: string } {
+  const batch = routeInvoiceToBatch(invoice, treasury);   // pure; throws on missing payee/treasury
+  // Write batch FIRST: if the second call fails, the batch is an orphan
+  // visible in the payroll list — recoverable. If we wrote invoice first
+  // and addBatch failed, the invoice would point at a non-existent batch — worse.
+  usePayrollBatchesStore.getState().addBatch(batch);
+  useInvoicesStore.getState().markQueuedForSigning(invoice.id, batch.id, currentUserId);
+  return { batchId: batch.id };
 }
 ```
+
+Failure recovery: if `addBatch` succeeds but `markQueuedForSigning` throws (rare — localStorage quota hit on the invoices key only), the user sees an orphan batch in PayPanel. The invoice remains in `in-review`. Operator can either cancel the orphan batch (existing PayPanel "Cancel" path) or re-approve the invoice (idempotent — `addBatch` no-ops on duplicate id).
 
 ### Out of scope
 
@@ -344,30 +349,31 @@ packages/shared/src/
   invoice-schema.test.ts                       schema happy paths + boundaries + round-trip against vault JSON schema
   invoices.test.ts                             type derivation sanity
 
+apps/desktop/src/stores/
+  invoices.test.ts                             store CRUD + status filters + markQueuedForSigning + markSigned
+  vendors.test.ts                              vendor CRUD + dedup on (displayName, taxId)
+  invoice-drafts.test.ts                       upsert + read + clear
+  payroll-batches.test.ts                      EXTEND  add cases for kind discriminator + v1→v2 migration
+
 apps/desktop/src/lib/invoices/
   state-machine.test.ts                        legal / illegal transition matrix
-  store.test.ts                                IDB CRUD + status indexing + draft autosave
   file-storage.test.ts                         content-addressed write + dedup + delete
   route-to-batch.test.ts                       both flows → correct batch types
-
-apps/desktop/src/lib/vendors/
-  store.test.ts                                vendor CRUD + dedup
+  approve-and-queue.test.ts                    safe-ordered write; orphan-batch outcome on second-write failure
 
 apps/desktop/src/features/invoices/
   NewInvoiceForm.test.tsx                      RTL: stage transitions, validation, draft autosave
   ReviewInvoiceForm.test.tsx                   RTL: edit tracking → edits_made[], approve & queue
   VendorPicker.test.tsx                        RTL: search-or-create
 
-apps/desktop/src/lib/invoices/
-  approve-and-queue.integration.test.ts        end-to-end: form → IDB → batch → status update, atomicity under injected failure
 ```
 
 ### Highest-priority tests (write first per TDD)
 
-1. **`approve-and-queue.integration.test.ts`** — atomic rollback under injected `payrollBatches.put` failure. The seam most likely to harbour cross-task bugs.
+1. **`approve-and-queue.test.ts`** — safe-ordered write under injected `markQueuedForSigning` failure: assert the batch is persisted AND the invoice remains in `in-review` (the orphan-batch outcome is recoverable).
 2. **Schema completeness round-trip** — every field from vault `invoice-extraction-v0.schema.json` survives Zod parse without silent drop.
 3. **Edits audit trail** — N field edits + approve ⇒ `approval.edits_made.length === N` with matching `before`/`after`.
-4. **Migration idempotency** — `kind` backfill twice ⇒ no duplicate writes.
+4. **Migration idempotency** — v1→v2 `kind` backfill twice ⇒ no duplicate writes; existing-records-with-kind unchanged.
 5. **Batch confirmation hook** — simulated `state === "confirmed"` ⇒ invoice transitions to `signed` with `chainpay_link.tx_hash` populated.
 
 ### Test count estimate
@@ -402,8 +408,8 @@ apps/desktop/src/lib/invoices/
 | Semantic conflation of `cancelled` state across batch types | Documented; UI shows context-appropriate label |
 | Treasurer over-trusts pre-filled fields when OCR ships | Out of 3a scope; Phase 3b adds "I verified totals" affordance |
 | Vendor address-book pollution from new-vendor inline creation | Exact-match dedup in this slice; fuzzy-match deferred |
-| IDB transaction edge cases across `invoices` + `payrollBatches` | Highest-priority integration test |
-| `kind` discriminator migration races first-launch UI | Migration runs in IDB upgrade callback before stores accept reads |
+| Non-atomic two-store handoff leaves orphan batch on second-write failure | Safe ordering (batch first, then invoice) makes the failure mode recoverable; tested in `approve-and-queue.test.ts` |
+| `kind` discriminator migration races UI reads | Zustand `persist` migration runs synchronously during `hydrate` before any consumer reads from the store |
 
 ## References
 
