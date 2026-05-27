@@ -1906,8 +1906,8 @@ beforeEach(() => {
     read: vi.fn(async (_uri: string) => new Uint8Array([7, 8, 9])),
     delete: vi.fn(async (_uri: string) => {}),
   };
-  (globalThis as unknown as { window: { electron: { invoiceFiles: typeof ipc } } }).window = {
-    electron: { invoiceFiles: ipc },
+  (globalThis as unknown as { window: { chainpay: { invoiceFiles: typeof ipc } } }).window = {
+    chainpay: { invoiceFiles: ipc },
   };
 });
 
@@ -2668,7 +2668,7 @@ beforeEach(() => {
   useVendorsStore.setState({ vendors: [] });
   globalThis.localStorage?.clear();
   // Mock window.chainpay.invoiceFiles
-  (globalThis as unknown as { window: typeof window & { electron: { invoiceFiles: { store: typeof vi.fn } } } }).window.electron = {
+  (globalThis as unknown as { window: typeof window & { chainpay: { invoiceFiles: { store: typeof vi.fn } } } }).window.chainpay = {
     invoiceFiles: {
       store: vi.fn(async (_b: Uint8Array, sha: string) => `file:///fake/${sha}.pdf`),
       read: vi.fn(),
