@@ -1548,7 +1548,7 @@ describe("kind discriminator + v1→v2 migration", () => {
       invoiceId: "inv_1",
       vendorId: "vendor_1",
       fxSnapshot: [],
-      line: { vendorId: "vendor_1", fiat: { minor: 100n, currency: "AUD", scale: 2 }, crypto: { value: 1000000n, asset: "CKB" }, fxRate: "1", feeAllocated: { value: 0n, asset: "CKB" } },
+      line: { vendorId: "vendor_1", fiat: { minor: 100n, currency: "AUD", scale: 2 }, crypto: { value: 1000000n, asset: "CKB" }, fxRate: "1", feeAllocated: { value: 0n, asset: "CKB", decimals: 8 } },
       state: "draft",
     };
     usePayrollBatchesStore.getState().addBatch(vb);
@@ -2121,10 +2121,10 @@ function buildPayrollBatchFromInvoice(invoice: InvoiceRecord, treasury: Treasury
   const totalMinor = BigInt(Math.round(invoice.invoice.total * 100));
   const line: PayrollBatchLine = {
     payeeId,
-    fiat: { minor: totalMinor, currency: invoice.invoice.currency, scale: 2 },
-    crypto: { value: 0n, asset: "CKB" }, // resolved by PayPanel via FX at calculate time
+    fiat: { minor: totalMinor, currency: invoice.invoice.currency },
+    crypto: { value: 0n, asset: "CKB", decimals: 8 }, // resolved by PayPanel via FX at calculate time
     fxRate: "0",
-    feeAllocated: { value: 0n, asset: "CKB" },
+    feeAllocated: { value: 0n, asset: "CKB", decimals: 8 },
   };
   const id = `pb_${crypto.randomUUID()}`;
   return {
@@ -2149,10 +2149,10 @@ function buildVendorPaymentBatch(invoice: InvoiceRecord, treasury: Treasury): Ve
   const totalMinor = BigInt(Math.round(invoice.invoice.total * 100));
   const line: VendorPaymentLine = {
     vendorId,
-    fiat: { minor: totalMinor, currency: invoice.invoice.currency, scale: 2 },
-    crypto: { value: 0n, asset: "CKB" },
+    fiat: { minor: totalMinor, currency: invoice.invoice.currency },
+    crypto: { value: 0n, asset: "CKB", decimals: 8 },
     fxRate: "0",
-    feeAllocated: { value: 0n, asset: "CKB" },
+    feeAllocated: { value: 0n, asset: "CKB", decimals: 8 },
   };
   const id = `vb_${crypto.randomUUID()}`;
   return {
@@ -3454,7 +3454,7 @@ describe("syncBatchConfirmedToInvoice", () => {
       }] as never,
     });
     usePayrollBatchesStore.setState({
-      batches: [{ kind: "vendor", id: "vb_1", state: "confirmed", pendingTxId: "0xdeadbeef", createdAt: now, updatedAt: now, label: "", treasuryId: "", invoiceId: "inv_1", vendorId: "v_1", fxSnapshot: [], line: { vendorId: "v_1", fiat: { minor: 100n, currency: "AUD", scale: 2 }, crypto: { value: 0n, asset: "CKB" }, fxRate: "0", feeAllocated: { value: 0n, asset: "CKB" } } }] as never,
+      batches: [{ kind: "vendor", id: "vb_1", state: "confirmed", pendingTxId: "0xdeadbeef", createdAt: now, updatedAt: now, label: "", treasuryId: "", invoiceId: "inv_1", vendorId: "v_1", fxSnapshot: [], line: { vendorId: "v_1", fiat: { minor: 100n, currency: "AUD" }, crypto: { value: 0n, asset: "CKB", decimals: 8 }, fxRate: "0", feeAllocated: { value: 0n, asset: "CKB", decimals: 8 } } }] as never,
       selectedDraftId: null,
     });
 
@@ -3496,7 +3496,7 @@ describe("syncBatchConfirmedToInvoice", () => {
       }] as never,
     });
     usePayrollBatchesStore.setState({
-      batches: [{ kind: "vendor", id: "vb_1", state: "confirmed", pendingTxId: "0xdead", createdAt: now, updatedAt: now, label: "", treasuryId: "", invoiceId: "inv_1", vendorId: "v_1", fxSnapshot: [], line: { vendorId: "v_1", fiat: { minor: 100n, currency: "AUD", scale: 2 }, crypto: { value: 0n, asset: "CKB" }, fxRate: "0", feeAllocated: { value: 0n, asset: "CKB" } } }] as never,
+      batches: [{ kind: "vendor", id: "vb_1", state: "confirmed", pendingTxId: "0xdead", createdAt: now, updatedAt: now, label: "", treasuryId: "", invoiceId: "inv_1", vendorId: "v_1", fxSnapshot: [], line: { vendorId: "v_1", fiat: { minor: 100n, currency: "AUD" }, crypto: { value: 0n, asset: "CKB", decimals: 8 }, fxRate: "0", feeAllocated: { value: 0n, asset: "CKB", decimals: 8 } } }] as never,
       selectedDraftId: null,
     });
     syncBatchConfirmedToInvoice();
