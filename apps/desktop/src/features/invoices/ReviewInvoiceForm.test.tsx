@@ -93,7 +93,7 @@ function renderWithRouter() {
     <MemoryRouter initialEntries={["/invoices/inv_1/review"]}>
       <Routes>
         <Route path="/invoices/:id/review" element={<ReviewInvoiceForm />} />
-        <Route path="/payments/:batchId" element={<div>PAY PANEL</div>} />
+        <Route path="/payments" element={<div>PAY PANEL</div>} />
       </Routes>
     </MemoryRouter>,
   );

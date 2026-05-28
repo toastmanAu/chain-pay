@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useLocation } from "react-router-dom";
 import { addressPayloadFromString } from "@ckb-ccc/core/advanced";
 import {
   bytesFrom,
@@ -104,6 +104,44 @@ export function PayPanel() {
   // rows; advances state on broadcast. null = manual one-off payment, no batch
   // lifecycle attached.
   const [activeBatchId, setActiveBatchId] = useState<string | null>(null);
+
+  // Pre-select a batch and hydrate recipient rows from its lines if the
+  // navigator passed `autoSelectBatchId` via state. Used by ReviewInvoiceForm
+  // to land the operator on the batch they just queued. Only fires on mount.
+  // Invoice-built batches have fiat amounts populated but crypto.value=0 — the
+  // operator runs Fetch FX next to fill the amountCkb column.
+  const location = useLocation();
+  useEffect(() => {
+    const state = location.state as { autoSelectBatchId?: string } | null;
+    const batchId = state?.autoSelectBatchId;
+    if (!batchId) return;
+    setActiveBatchId(batchId);
+    const batch = usePayrollBatchesStore.getState().findById(batchId);
+    if (!batch || batch.kind !== "payroll" || batch.lines.length === 0) return;
+    if (batch.treasuryId) setTreasuryId(batch.treasuryId);
+    const payees = usePayeesStore.getState().payees;
+    const hydrated: RecipientRow[] = batch.lines.map((line) => {
+      const payee = payees.find((p) => p.id === line.payeeId);
+      const row: RecipientRow = {
+        address: payee?.walletAddress ?? "",
+        amountCkb: line.crypto.value > 0n
+          ? (Number(line.crypto.value) / Number(SHANNONS_PER_CKB)).toString()
+          : "",
+        payeeId: line.payeeId,
+      };
+      if (line.fxRate && line.fxRate !== "0") row.fxRate = line.fxRate;
+      return row;
+    });
+    if (hydrated.length > 0) {
+      setRecipients(hydrated);
+      // Kick off FX fetch with the fresh rows so the operator doesn't have to
+      // hunt for a "Fetch FX" button — by default that button only appears
+      // after quotes load. Fires-and-forgets; refetchFx surfaces its own errors.
+      void refetchFx(hydrated);
+    }
+    // mount-only — don't react to location changes mid-session.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const treasury = ckbTreasuries.find((t) => t.id === treasuryId);
   const multisig = treasury?.multisig as CkbMultisig | undefined;
@@ -448,10 +486,13 @@ export function PayPanel() {
     }
   }
 
-  async function refetchFx() {
+  async function refetchFx(rowsOverride?: RecipientRow[]): Promise<void> {
+    // Allow callers (e.g. mount-time hydration) to pass a fresh rows array so
+    // currency detection isn't gated on the React state update having flushed.
+    const rows = rowsOverride ?? recipients;
     const currencies = Array.from(
       new Set(
-        recipients
+        rows
           .map((r) => (r.payeeId ? payeeStore.findById(r.payeeId)?.salaryFiat.currency : null))
           .filter((c): c is string => Boolean(c))
           .map((c) => c.toUpperCase()),
@@ -463,7 +504,7 @@ export function PayPanel() {
     try {
       const fx = await fetchCkbPrices(currencies);
       setFxSnapshot(fx);
-      setRecipients(fillAmountsFromFx(recipients, fx));
+      setRecipients(fillAmountsFromFx(rows, fx));
     } catch (e) {
       setFxError(e instanceof Error ? e.message : String(e));
     } finally {

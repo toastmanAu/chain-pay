@@ -178,7 +178,9 @@ export function ReviewInvoiceForm() {
     try {
       const { batchId } = approveAndQueue(next, treasury, CURRENT_USER_ID);
       clear();
-      navigate(`/payments/${batchId}`);
+      // PayPanel reads autoSelectBatchId from navigate state on mount and
+      // pre-selects the new batch. Route is `/payments` (no path param).
+      navigate("/payments", { state: { autoSelectBatchId: batchId } });
     } catch (e: unknown) {
       setSubmitError(e instanceof Error ? e.message : "Approve failed");
     }
