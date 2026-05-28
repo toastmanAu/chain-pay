@@ -85,7 +85,13 @@ export const useInvoicesStore = create<InvoicesStore>()(
         })),
       markInReview: (id) =>
         set((s) => ({
-          invoices: s.invoices.map((i) => (i.id === id ? transitionStatus(i, "in-review") : i)),
+          // Idempotent on already-in-review: route effects can fire this twice under
+          // React Strict Mode. Other illegal transitions still throw.
+          invoices: s.invoices.map((i) => {
+            if (i.id !== id) return i;
+            if (i.approval.status === "in-review") return i;
+            return transitionStatus(i, "in-review");
+          }),
         })),
       markQueuedForSigning: (id, batchId, reviewerId) =>
         set((s) => ({

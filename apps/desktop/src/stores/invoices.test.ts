@@ -50,6 +50,14 @@ describe("useInvoicesStore", () => {
     expect(() => useInvoicesStore.getState().markInReview("inv_1")).toThrow(/invalid invoice transition/);
   });
 
+  it("markInReview is idempotent on already-in-review (React Strict Mode safety)", () => {
+    useInvoicesStore.getState().addInvoice(inv({ id: "inv_1", approval: { status: "draft" } }));
+    useInvoicesStore.getState().markInReview("inv_1");
+    // Second call must not throw — route effects double-fire under React Strict Mode.
+    expect(() => useInvoicesStore.getState().markInReview("inv_1")).not.toThrow();
+    expect(useInvoicesStore.getState().findById("inv_1")?.approval.status).toBe("in-review");
+  });
+
   it("markQueuedForSigning records reviewer, timestamp, batchId", () => {
     useInvoicesStore.getState().addInvoice(inv({ id: "inv_1", approval: { status: "in-review" } }));
     useInvoicesStore.getState().markQueuedForSigning("inv_1", "batch_99", "user_42");
