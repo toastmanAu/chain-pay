@@ -93,11 +93,24 @@ export const useTreasuryStore = create<TreasuryStore>()(
     {
       name: "chain-pay:treasuries",
       storage: jsonStorage,
-      version: 1,
+      version: 2,
       partialize: (state) => ({
         treasuries: state.treasuries,
         activeTreasuryId: state.activeTreasuryId,
       }),
+      // v1 → v2: backfill activeTreasuryId for users who added treasuries before
+      // the field existed. Pick the first treasury so single-treasury workflows
+      // (the only Phase-3a-supported shape) just work. Always returns an
+      // explicit activeTreasuryId so rehydrate's shallow merge can't leak stale
+      // in-memory state.
+      migrate: (persisted, fromVersion) => {
+        const state = persisted as Partial<TreasuryStore> | undefined;
+        if (!state) return state;
+        if (fromVersion >= 2) return state;
+        const treasuries = state.treasuries ?? [];
+        const activeTreasuryId = state.activeTreasuryId ?? treasuries[0]?.id ?? null;
+        return { ...state, activeTreasuryId };
+      },
     },
   ),
 );
