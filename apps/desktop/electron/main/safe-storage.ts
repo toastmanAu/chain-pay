@@ -1,4 +1,7 @@
 import { scryptSync, randomBytes, createCipheriv, createDecipheriv } from "node:crypto";
+import { createRequire } from "node:module";
+
+const nodeRequire = createRequire(import.meta.url);
 
 export interface SafeStorageProvider {
   encrypt(plaintext: string): Buffer;
@@ -9,8 +12,7 @@ export interface SafeStorageProvider {
 class ElectronSafeStorage implements SafeStorageProvider {
   // Lazy require so this module is importable in plain Node (smoke).
   private get safe(): { encryptString: (s: string) => Buffer; decryptString: (b: Buffer) => string; isEncryptionAvailable: () => boolean } {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    return require("electron").safeStorage;
+    return nodeRequire("electron").safeStorage;
   }
   encrypt(plaintext: string): Buffer {
     return this.safe.encryptString(plaintext);

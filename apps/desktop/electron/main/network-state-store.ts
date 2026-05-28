@@ -1,14 +1,15 @@
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { createRequire } from "node:module";
 import { join } from "node:path";
 import type { CkbNetwork } from "@/lib/light-client/network-configs";
 
 const FILE_NAME = "network-state.json";
+const nodeRequire = createRequire(import.meta.url);
 
 function dir(): string {
   if (process.env.NETWORK_STATE_DIR) return process.env.NETWORK_STATE_DIR;
   // Lazy require so the file is importable in non-Electron contexts (vitest).
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const { app } = require("electron") as typeof import("electron");
+  const { app } = nodeRequire("electron") as typeof import("electron");
   return app.getPath("userData");
 }
 

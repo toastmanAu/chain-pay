@@ -1,5 +1,8 @@
 import { app, BrowserWindow, ipcMain, session, shell } from "electron";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
 import {
   exists as commExists,
   publicInfo as commPublicInfo,

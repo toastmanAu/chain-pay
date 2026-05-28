@@ -1,7 +1,10 @@
 import fs from "node:fs/promises";
+import { createRequire } from "node:module";
 import path from "node:path";
 import { getSafeStorage } from "./safe-storage";
 import type { CkbNetwork } from "@/lib/light-client/network-configs";
+
+const nodeRequire = createRequire(import.meta.url);
 
 export interface PlainIdentity {
   mlDsaSec: Uint8Array;
@@ -42,8 +45,7 @@ function resolveIdentityFile(): string {
 function defaultUserDataDir(): string {
   // Lazy require so this file is importable outside Electron (smoke).
   try {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    return require("electron").app.getPath("userData");
+    return nodeRequire("electron").app.getPath("userData");
   } catch {
     throw new Error("Set COMM_IDENTITY_DIR when running outside Electron");
   }
