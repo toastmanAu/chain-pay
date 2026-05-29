@@ -9,7 +9,7 @@ const networkSetMock = vi.fn();
 
 beforeEach(() => {
   (globalThis as { localStorage?: Storage }).localStorage = new MemoryStorage();
-  (globalThis as { electron?: object }).electron = {
+  (globalThis as { chainpay?: object }).chainpay = {
     network: { get: vi.fn().mockResolvedValue("testnet"), set: networkSetMock },
     app: { quit: quitMock },
   };
@@ -19,7 +19,7 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   delete (globalThis as { localStorage?: Storage }).localStorage;
-  delete (globalThis as { electron?: object }).electron;
+  delete (globalThis as { chainpay?: object }).chainpay;
   quitMock.mockReset();
   networkSetMock.mockReset();
 });

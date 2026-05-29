@@ -118,6 +118,9 @@ app.whenReady().then(async () => {
   ipcMain.handle("lcStorage:clear", async (): Promise<void> => {
     await session.defaultSession.clearStorageData({ storages: ["indexdb"] });
   });
+  ipcMain.handle("app:quit", (): void => {
+    app.quit();
+  });
 
   // comm-identity handlers
   ipcMain.handle("commIdentity:exists", () => commExists());

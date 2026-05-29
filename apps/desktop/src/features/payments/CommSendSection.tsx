@@ -43,16 +43,6 @@ export function CommSendSection({
   disabledReason,
 }: CommSendSectionProps) {
   const network = useNetworkConfigStore((s) => s.network);
-
-  // On mainnet, replace with a simple fallback message.
-  if (network === "mainnet") {
-    return (
-      <p className="text-xs text-neutral-500 italic">
-        Comm channel unavailable; use clipboard.
-      </p>
-    );
-  }
-
   const { sendAll, retry } = useCommSendDispatch();
   // Subscribe to the batch's commSendStatus directly so pills re-render on writes.
   const batch = usePayrollBatchesStore((s) => s.batches.find((b) => b.id === batchId));
@@ -67,6 +57,15 @@ export function CommSendSection({
       }),
     [multisig.pubkeyHashes, peers, batch?.commSendStatus],
   );
+
+  // On mainnet, replace with a simple fallback message.
+  if (network === "mainnet") {
+    return (
+      <p className="text-xs text-neutral-500 italic">
+        Comm channel unavailable; use clipboard.
+      </p>
+    );
+  }
 
   const mappedCount = rows.filter((r) => r.peer !== undefined).length;
   const canSend = !disabled && mappedCount > 0;

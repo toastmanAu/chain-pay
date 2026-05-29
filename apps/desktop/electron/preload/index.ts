@@ -65,6 +65,9 @@ const chainpayApi = {
   lcStorage: {
     clear: (): Promise<void> => ipcRenderer.invoke("lcStorage:clear"),
   },
+  app: {
+    quit: (): Promise<void> => ipcRenderer.invoke("app:quit"),
+  },
   invoiceFiles: {
     store: (bytes: Uint8Array, sha256: string): Promise<string> =>
       ipcRenderer.invoke("invoice-files:store", bytes, sha256),
