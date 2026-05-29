@@ -4,6 +4,7 @@ import { render, screen, fireEvent, cleanup } from "@testing-library/react";
 import "@testing-library/jest-dom/vitest";
 import { CommChannelSection } from "./CommChannelSection";
 import { useCommIdentityStore } from "../../stores/comm-identity";
+import { useNetworkConfigStore } from "../../stores/network-config";
 
 const FIXTURE_ID = {
   mlDsaPub: "0x" + "11".repeat(1952),
@@ -19,6 +20,8 @@ const FIXTURE_ID = {
 function resetStore(): void {
   useCommIdentityStore.setState({ identity: null });
   globalThis.localStorage?.removeItem("chain-pay:comm-identity");
+  useNetworkConfigStore.setState({ network: "testnet" });
+  globalThis.localStorage?.removeItem("chain-pay:network-config");
 }
 
 function mockChainpay(opts?: { generateReject?: Error }) {
@@ -105,5 +108,30 @@ describe("CommChannelSection", () => {
     await new Promise((r) => setTimeout(r, 0));
     expect(window.chainpay.commIdentity.delete).toHaveBeenCalledTimes(1);
     expect(useCommIdentityStore.getState().identity).toBeNull();
+  });
+});
+
+describe("mainnet soft-fail", () => {
+  beforeEach(() => {
+    resetStore();
+    mockChainpay();
+  });
+
+  afterEach(() => {
+    cleanup();
+    resetStore();
+  });
+
+  it("renders the soft-fail banner and hides the ceremony when network === 'mainnet'", () => {
+    useNetworkConfigStore.setState({ network: "mainnet" });
+    render(<CommChannelSection />);
+    expect(screen.getByText(/Comm-channel unavailable on mainnet/i)).toBeInTheDocument();
+    expect(
+      screen.getByText(/post-quantum signature contract has not yet been deployed/i),
+    ).toBeInTheDocument();
+    // Ceremony controls hidden
+    expect(screen.queryByRole("button", { name: /Set up comm channel/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Generate identity/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Publish Profile/i })).not.toBeInTheDocument();
   });
 });

@@ -5,8 +5,21 @@ import { usePayrollBatchesStore } from "@/stores/payroll-batches";
 import { usePeerBookStore } from "@/stores/peer-book";
 import { createCommTransport } from "@/lib/comm";
 
-const RETRY_SCHEDULE_MS = [5 * 60_000, 10 * 60_000, 20 * 60_000] as const;
-const RETRY_CAP = 3;
+/** Lifecycle-bound backoff. Attempt 0 = initial send (handled by dispatcher).
+ *  Attempts 1..3 escalate; from attempt 4 onward we cap at 30 minutes so the
+ *  schedule remains responsive when a signer comes back online late. */
+export function nextDelayMs(attempt: number): number {
+  if (attempt <= 0) return 0;
+  if (attempt === 1) return 5 * 60_000;
+  if (attempt === 2) return 10 * 60_000;
+  if (attempt === 3) return 20 * 60_000;
+  return 30 * 60_000;
+}
+
+const TERMINAL_BATCH_STATES = new Set([
+  "broadcasted", "confirmed", "failed", "cancelled",
+  "broadcast_failed",
+]);
 
 interface UseCommSendRetryParams {
   packetForBatch: (batchId: string) => OutgoingPacket | null;
@@ -17,9 +30,10 @@ interface UseCommSendRetryParams {
  * App-level retry scheduler. Mounted once in App.tsx; survives PayPanel unmount.
  *
  * Subscribes to payroll-batches commSendStatus changes. For each (batchId,
- * slotIndex) entry whose status === "sent" and retryCount < RETRY_CAP,
- * schedules a re-send at the appropriate exponential delay from updatedAt.
- * Cancels timers when status leaves "sent" or retryCount caps.
+ * slotIndex) entry whose status === "sent", schedules a re-send at the
+ * lifecycle-bound delay from updatedAt (or persisted nextRetryAt if present).
+ * Stops when batch reaches a terminal state, expiresAt passes, or
+ * slot.dismissed is true.
  *
  * Callers MUST memoize `packetForBatch` and `multisigForBatch` (e.g., with
  * useCallback) to avoid thrashing the subscription on every render.
@@ -43,13 +57,18 @@ export function useCommSendRetry({
           timersRef.current.delete(key);
 
           if (slotStatus.status !== "sent") continue;
-          const count = slotStatus.retryCount ?? 0;
-          if (count >= RETRY_CAP) continue;
+          if (slotStatus.dismissed) continue;
+          if (TERMINAL_BATCH_STATES.has(b.state)) continue;
+          if (b.expiresAt !== undefined && Date.now() > b.expiresAt) continue;
 
-          const nextDelay = RETRY_SCHEDULE_MS[count];
-          if (nextDelay === undefined) continue;
-          const elapsed = Date.now() - slotStatus.updatedAt;
-          const remaining = Math.max(0, nextDelay - elapsed);
+          const count = slotStatus.retryCount ?? 0;
+          const targetDelay = nextDelayMs(count + 1);
+
+          // Restart-safe: prefer persisted nextRetryAt if present.
+          const remaining =
+            slotStatus.nextRetryAt !== undefined
+              ? Math.max(0, slotStatus.nextRetryAt - Date.now())
+              : Math.max(0, targetDelay - (Date.now() - slotStatus.updatedAt));
 
           const timer = setTimeout(() => {
             void fireRetry(b.id, Number(slot), count + 1);
@@ -75,7 +94,9 @@ export function useCommSendRetry({
       }
 
       // Bump retryCount BEFORE the send so a successful send doesn't lose it.
-      rec(batchId, slotIndex, "sent", { retryCount: nextCount });
+      // Persist nextRetryAt for restart-safe scheduling.
+      const next = Date.now() + nextDelayMs(nextCount + 1);
+      rec(batchId, slotIndex, "sent", { retryCount: nextCount, nextRetryAt: next });
 
       const transport = createCommTransport();
       if (!transport) {
@@ -86,7 +107,7 @@ export function useCommSendRetry({
       try {
         const profile = peer.cachedProfile ?? (await transport.resolveProfile(peer.address));
         const txHash = await transport.sendPacket(profile, packet);
-        rec(batchId, slotIndex, "sent", { txHash, retryCount: nextCount });
+        rec(batchId, slotIndex, "sent", { txHash, retryCount: nextCount, nextRetryAt: next });
       } catch (cause) {
         const error = cause instanceof Error ? cause.message : String(cause);
         rec(batchId, slotIndex, "error", { error });

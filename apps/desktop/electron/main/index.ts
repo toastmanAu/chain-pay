@@ -1,5 +1,8 @@
 import { app, BrowserWindow, ipcMain, session, shell } from "electron";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
 import {
   exists as commExists,
   publicInfo as commPublicInfo,
@@ -9,7 +12,10 @@ import {
   sendMessage,
   decryptIncoming,
   resolveProfile,
+  setCurrentNetwork,
 } from "./comm-transport-service";
+import { loadNetworkState, saveNetworkState } from "./network-state-store";
+import type { CkbNetwork } from "@/lib/light-client/network-configs";
 
 const isDev = !app.isPackaged;
 
@@ -92,7 +98,28 @@ async function createWindow(): Promise<void> {
 
 app.whenReady().then(async () => {
   applyResponseHeaders();
+
+  // Load persisted network selection BEFORE creating the window or any
+  // comm-transport call. setCurrentNetwork pins the module-level network
+  // used by comm-transport for getClient(), MLDSASigner, and tx-builder.
+  const bootNetwork = loadNetworkState();
+  setCurrentNetwork(bootNetwork);
+
   await createWindow();
+
+  // network handlers
+  ipcMain.handle("network:get", (): CkbNetwork => loadNetworkState());
+  ipcMain.handle("network:set", (_e, network: CkbNetwork): void => {
+    saveNetworkState(network);
+    // Don't update setCurrentNetwork here — renderer is committing to a
+    // restart, so the in-memory client cache stays consistent until quit.
+  });
+  ipcMain.handle("lcStorage:clear", async (): Promise<void> => {
+    await session.defaultSession.clearStorageData({ storages: ["indexdb"] });
+  });
+  ipcMain.handle("app:quit", (): void => {
+    app.quit();
+  });
 
   // comm-identity handlers
   ipcMain.handle("commIdentity:exists", () => commExists());
@@ -101,7 +128,10 @@ app.whenReady().then(async () => {
   ipcMain.handle("commIdentity:delete", () => deleteIdentity());
 
   // comm-transport handlers
-  ipcMain.handle("commTransport:publishProfile", (_e, metadata) => publishProfile(metadata));
+  // Renderer currently sends the bare metadata object (legacy shape from Phase 2.7a/b).
+  // Wrap into {metadata} so publishProfile receives the correct args shape.
+  // Task 5/6 will later update the renderer to pass {metadata, network} explicitly.
+  ipcMain.handle("commTransport:publishProfile", (_e, metadata) => publishProfile({ metadata }));
   ipcMain.handle(
     "commTransport:sendMessage",
     (_e, recipientAddress: string, envelopeBytesHex: string) => {

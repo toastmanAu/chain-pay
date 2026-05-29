@@ -277,6 +277,12 @@ function stateTone(state: PayrollBatchState): string {
       return "bg-warn/20 text-warn";
     case "approved":
       return "bg-accent/20 text-accent";
+    case "broadcast_countdown":
+      return "bg-warn/30 text-warn";
+    case "broadcast_initiating":
+      return "bg-accent/30 text-accent";
+    case "broadcast_failed":
+      return "bg-danger/20 text-danger";
     case "broadcasted":
       return "bg-accent/40 text-accent-fg";
     case "confirmed":
@@ -285,6 +291,10 @@ function stateTone(state: PayrollBatchState): string {
       return "bg-danger/30 text-danger";
     case "cancelled":
       return "bg-surface-hi text-fg-muted line-through";
+    default: {
+      const _exhaustive: never = state;
+      return _exhaustive;
+    }
   }
 }
 

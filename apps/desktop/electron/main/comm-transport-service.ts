@@ -32,15 +32,18 @@ import {
   CEMPPQ,
   CEMPTransactionBuilder,
   MLDSASigner,
-  ML_DSA_TESTNET,
+  ML_DSA_MAINNET,
+  getMlDsaConstants,
   serializeMessagePointer,
 } from "cemp-pq";
 import { ml_dsa65 } from "@noble/post-quantum/ml-dsa";
 import { ml_kem768 } from "@noble/post-quantum/ml-kem";
+import type { CkbNetwork } from "@/lib/light-client/network-configs";
 import {
   withSecrets,
   loadCommIdentity,
   saveCommIdentity,
+  updateCommIdentity,
   deleteCommIdentity,
   type PlainIdentity,
   type PublicIdentity,
@@ -67,17 +70,41 @@ export interface SignedTxBundle {
   txBytes: string;
 }
 
+// ── Network state ────────────────────────────────────────────────────────────
+
+let currentNetwork: CkbNetwork = "testnet";
+
+export function setCurrentNetwork(network: CkbNetwork): void {
+  currentNetwork = network;
+}
+
+export function getCurrentNetwork(): CkbNetwork {
+  return currentNetwork;
+}
+
 // ── CKB client ───────────────────────────────────────────────────────────────
 
-let cachedClient: ccc.ClientPublicTestnet | null = null;
+const clientCache = new Map<CkbNetwork, ccc.Client>();
 
-function getClient(): ccc.ClientPublicTestnet {
-  if (!cachedClient) {
-    const url =
-      process.env.COMM_CKB_RPC_URL ?? "https://testnet.ckb.dev/rpc";
-    cachedClient = new ccc.ClientPublicTestnet({ url });
+function urlFor(network: CkbNetwork): string {
+  if (network === "mainnet") {
+    return (
+      process.env.COMM_CKB_RPC_URL_MAINNET ?? "https://mainnet.ckb.dev/rpc"
+    );
   }
-  return cachedClient;
+  return process.env.COMM_CKB_RPC_URL ?? "https://testnet.ckb.dev/rpc";
+}
+
+function getClient(network: CkbNetwork = currentNetwork): ccc.Client {
+  const cached = clientCache.get(network);
+  if (cached) return cached;
+  const url = urlFor(network);
+  const client =
+    network === "mainnet"
+      ? new ccc.ClientPublicMainnet({ url })
+      : new ccc.ClientPublicTestnet({ url });
+  clientCache.set(network, client);
+  return client;
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -91,22 +118,35 @@ function fromHex(hex: string): Uint8Array {
 }
 
 /**
- * Derive the CKB testnet address + 20-byte addrHash for a given 32-byte ML-DSA seed.
- * We instantiate a throw-away MLDSASigner (which computes the lock internally)
- * rather than replicating the hashCkb/args derivation here.
+ * Derive per-network CKB addresses + the network-invariant addrHash for a
+ * given 32-byte ML-DSA seed. addrHash is the first 20 bytes of lock.args
+ * (= blake160(ML-DSA pubkey)), identical across networks since it's derived
+ * solely from the keypair. Address strings differ because of the network
+ * prefix and ID byte. Mainnet returns null until ML_DSA_MAINNET.CODE_HASH
+ * lands.
  */
-async function deriveIdentityLock(seed: Uint8Array): Promise<{ address: string; addrHash: Uint8Array }> {
-  const signer = new MLDSASigner(getClient(), seed);
-  const addrObj = await signer.getRecommendedAddressObj();
-  const argsHex = addrObj.script.args.startsWith("0x")
-    ? addrObj.script.args.slice(2)
-    : addrObj.script.args;
-  // First 20 bytes of args = the canonical comm-identity hash used for the refusal invariant.
+async function deriveAddresses(
+  seed: Uint8Array,
+): Promise<{ testnet: string; mainnet: string | null; addrHash: Uint8Array }> {
+  const signerTestnet = new MLDSASigner(getClient("testnet"), seed);
+  const addrTestnet = await signerTestnet.getRecommendedAddressObj();
+  const argsHex = addrTestnet.script.args.startsWith("0x")
+    ? addrTestnet.script.args.slice(2)
+    : addrTestnet.script.args;
+  // First 20 bytes of args = the canonical comm-identity hash.
   const addrHash = new Uint8Array(20);
   for (let i = 0; i < 20; i++) {
     addrHash[i] = parseInt(argsHex.slice(i * 2, i * 2 + 2), 16);
   }
-  return { address: addrObj.toString(), addrHash };
+
+  let mainnet: string | null = null;
+  if (ML_DSA_MAINNET.CODE_HASH !== null) {
+    const signerMainnet = new MLDSASigner(getClient("mainnet"), seed);
+    const addrMainnet = await signerMainnet.getRecommendedAddressObj();
+    mainnet = addrMainnet.toString();
+  }
+
+  return { testnet: addrTestnet.toString(), mainnet, addrHash };
 }
 
 // ── Public API ────────────────────────────────────────────────────────────────
@@ -123,16 +163,17 @@ export async function generateIdentity(): Promise<PublicIdentity> {
   const dsa = ml_dsa65.keygen(dsaSeed);
   const kemSeed = crypto.getRandomValues(new Uint8Array(64));
   const kem = ml_kem768.keygen(kemSeed);
-  const { address, addrHash } = await deriveIdentityLock(dsaSeed);
+  const addresses = await deriveAddresses(dsaSeed);
 
   const plain: PlainIdentity = {
     mlDsaSec: dsaSeed, // store the 32-byte seed; MLDSASigner will expand on use
     mlKemSec: kem.secretKey,
     mlDsaPub: dsa.publicKey,
     mlKemPub: kem.publicKey,
-    address,
-    addrHash,
+    address: addresses.testnet, // legacy field — keeps existing consumers reading testnet-formatted string
+    addrHash: addresses.addrHash,
     createdAt: Date.now(),
+    publishedOn: [],
   };
   await saveCommIdentity(plain);
 
@@ -143,8 +184,10 @@ export async function generateIdentity(): Promise<PublicIdentity> {
   return {
     mlDsaPub: toHex(dsa.publicKey),
     mlKemPub: toHex(kem.publicKey),
-    address,
-    addrHash: toHex(addrHash),
+    address: addresses.testnet,
+    addrHash: toHex(addresses.addrHash),
+    addresses: { testnet: addresses.testnet, mainnet: addresses.mainnet },
+    publishedOn: [],
     createdAt: plain.createdAt,
   };
 }
@@ -156,7 +199,23 @@ export async function exists(): Promise<boolean> {
 
 /** Returns public fields of the stored identity, or null if none. */
 export async function publicInfo(): Promise<PublicIdentity | null> {
-  return loadCommIdentity();
+  const stored = await loadCommIdentity();
+  if (!stored) return null;
+  // Derive addresses fresh from the seed so they stay in sync with mainnet
+  // contract deployment status (mainnet flips from null → string when
+  // ML_DSA_MAINNET.CODE_HASH lands, no re-keygen needed).
+  return withSecrets(async (secrets) => {
+    const addresses = await deriveAddresses(secrets.mlDsaSec);
+    return {
+      mlDsaPub: stored.mlDsaPub,
+      mlKemPub: stored.mlKemPub,
+      addrHash: stored.addrHash,
+      address: addresses.testnet, // deprecated legacy field
+      addresses: { testnet: addresses.testnet, mainnet: addresses.mainnet },
+      publishedOn: stored.publishedOn,
+      createdAt: stored.createdAt,
+    };
+  });
 }
 
 /** Permanently delete the stored comm identity. */
@@ -165,16 +224,26 @@ export async function deleteIdentity(): Promise<void> {
 }
 
 /**
- * Publish a Profile Cell to CKB testnet.
+ * Publish a Profile Cell to CKB.
  * The cell advertises the ML-DSA verifying key and ML-KEM encapsulation key so
  * other participants can encrypt messages to this identity.
+ *
+ * `args.network` selects the target network (defaults to currentNetwork).
+ * Throws immediately if the CEMP-PQ contract is not yet deployed on mainnet.
  *
  * Returns a SignedTxBundle; the caller (IPC handler / smoke script) is
  * responsible for broadcasting the tx bytes.
  */
 export async function publishProfile(
-  metadata: { displayName?: string } = {},
+  args: { metadata?: { displayName?: string }; network?: CkbNetwork } = {},
 ): Promise<SignedTxBundle> {
+  const network = args.network ?? currentNetwork;
+  const metadata = args.metadata ?? {};
+
+  if (network === "mainnet" && ML_DSA_MAINNET.CODE_HASH === null) {
+    throw new Error("CEMP-PQ contract not deployed on mainnet");
+  }
+
   const pub = await loadCommIdentity();
   if (!pub) throw new Error("no comm identity — call generateIdentity() first");
 
@@ -184,8 +253,8 @@ export async function publishProfile(
 
   return withSecrets(async (secrets) => {
     // secrets.mlDsaSec is the 32-byte seed; MLDSASigner expands it internally.
-    const signer = new MLDSASigner(getClient(), secrets.mlDsaSec);
-    const builder = new CEMPTransactionBuilder(getClient());
+    const signer = new MLDSASigner(getClient(network), secrets.mlDsaSec);
+    const builder = new CEMPTransactionBuilder(getClient(network));
 
     const tx = await builder.buildCreateProfileTx(
       signer,
@@ -195,6 +264,14 @@ export async function publishProfile(
     );
     const signed = await signer.signOnlyTransaction(tx);
     const txBytes = signed.toBytes();
+
+    // Persist the network to publishedOn before returning so callers don't
+    // need to track this themselves.
+    const updatedPublishedOn = Array.from(
+      new Set([...secrets.publishedOn, network]),
+    );
+    await updateCommIdentity({ publishedOn: updatedPublishedOn });
+
     return {
       txHash: "0x" + Buffer.from(ccc.bytesFrom(signed.hash())).toString("hex"),
       txBytes: toHex(txBytes),
@@ -228,23 +305,28 @@ export async function publishProfile(
 export async function sendMessage(
   recipientAddress: string,
   envelopeBytes: Uint8Array,
+  network: CkbNetwork = currentNetwork,
 ): Promise<SignedTxBundle> {
+  if (network === "mainnet" && ML_DSA_MAINNET.CODE_HASH === null) {
+    throw new Error("CEMP-PQ contract not deployed on mainnet");
+  }
+
   const pub = await loadCommIdentity();
   if (!pub) throw new Error("no comm identity — call generateIdentity() first");
 
   // Resolve recipient lock from address.
   const recipientAddrObj = await ccc.Address.fromString(
     recipientAddress,
-    getClient(),
+    getClient(network),
   );
   const recipientLock = recipientAddrObj.script;
 
   return withSecrets(async (secrets) => {
-    const signer = new MLDSASigner(getClient(), secrets.mlDsaSec);
+    const signer = new MLDSASigner(getClient(network), secrets.mlDsaSec);
     const { script: senderLock } = await signer.getRecommendedAddressObj();
 
     // Fetch recipient's profile (ML-KEM public key + ML-DSA pubkey + metadata).
-    const builder = new CEMPTransactionBuilder(getClient());
+    const builder = new CEMPTransactionBuilder(getClient(network));
     const profile = await builder.fetchRecipientProfile(recipientLock);
     if (!profile) {
       throw new Error(`profile not found for recipient ${recipientAddress}`);
@@ -283,10 +365,14 @@ export async function sendMessage(
       outputsData: [ccc.hexFrom(encryptedData), ccc.hexFrom(pointerPlaceholder)],
     });
 
+    const mlDsaConsts = getMlDsaConstants(network);
+    if (mlDsaConsts.TX_HASH === null || mlDsaConsts.INDEX === null) {
+      throw new Error("CEMP-PQ constants not initialised");
+    }
     tx.addCellDeps({
       outPoint: {
-        txHash: ML_DSA_TESTNET.TX_HASH,
-        index: ML_DSA_TESTNET.INDEX,
+        txHash: mlDsaConsts.TX_HASH,
+        index: mlDsaConsts.INDEX,
       },
       depType: "code",
     });
@@ -341,12 +427,15 @@ export async function sendMessage(
  *
  * Returns the decrypted payload as a 0x-prefixed hex string.
  */
-export async function decryptIncoming(messageOutPoint: {
-  txHash: string;
-  index: number;
-}): Promise<string> {
+export async function decryptIncoming(
+  messageOutPoint: {
+    txHash: string;
+    index: number;
+  },
+  network: CkbNetwork = currentNetwork,
+): Promise<string> {
   // getCellLive bypasses CCC's internal cell cache.
-  const messageCell = await getClient().getCellLive(
+  const messageCell = await getClient(network).getCellLive(
     {
       txHash: messageOutPoint.txHash,
       index: BigInt(messageOutPoint.index),
@@ -375,10 +464,11 @@ export async function decryptIncoming(messageOutPoint: {
  */
 export async function resolveProfile(
   address: string,
+  network: CkbNetwork = currentNetwork,
 ): Promise<ProfileFetchResult> {
-  const addrObj = await ccc.Address.fromString(address, getClient());
+  const addrObj = await ccc.Address.fromString(address, getClient(network));
   const lock = addrObj.script;
-  const builder = new CEMPTransactionBuilder(getClient());
+  const builder = new CEMPTransactionBuilder(getClient(network));
 
   const profile = await builder.fetchRecipientProfile(lock);
   if (!profile) {

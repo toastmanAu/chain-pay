@@ -423,6 +423,23 @@ async function main(): Promise<void> {
     process.exit(2);
   }
 
+  // Parse --network flag (default: testnet)
+  const networkArg = process.argv.find((a) => a.startsWith("--network="));
+  const network: "testnet" | "mainnet" = networkArg
+    ? (networkArg.split("=")[1] as "testnet" | "mainnet")
+    : "testnet";
+  if (network !== "testnet" && network !== "mainnet") {
+    console.error(`[smoke] error: --network value must be 'testnet' or 'mainnet', got '${network}'`);
+    process.exit(2);
+  }
+  if (network === "mainnet") {
+    console.error(
+      "[smoke] error: CEMP-PQ contract not deployed on mainnet — smoke roundtrip cannot run",
+    );
+    process.exit(2);
+  }
+  console.log(`[smoke] network: ${network}`);
+
   requireEnv("COMM_IDENTITY_DIR");
   requireEnv("SMOKE_PASSPHRASE");
 

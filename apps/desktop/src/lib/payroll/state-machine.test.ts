@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { PayrollBatchState } from "@chain-pay/shared";
-import { canTransition, assertCanTransition, terminalStates } from "./state-machine";
+import { canTransition, assertCanTransition, terminalStates, nextStates } from "./state-machine";
 
 describe("PayrollBatch state machine", () => {
   describe("canTransition", () => {
@@ -91,6 +91,49 @@ describe("PayrollBatch state machine", () => {
       expect(terminals).not.toContain("calculated");
       expect(terminals).not.toContain("approved");
       expect(terminals).not.toContain("broadcasted");
+    });
+  });
+
+  describe("2.7c auto-broadcast transitions", () => {
+    it("allows approved → broadcast_countdown", () => {
+      expect(canTransition("approved", "broadcast_countdown")).toBe(true);
+    });
+
+    it("allows broadcast_countdown → broadcast_initiating", () => {
+      expect(canTransition("broadcast_countdown", "broadcast_initiating")).toBe(true);
+    });
+
+    it("allows broadcast_countdown → approved (cancel)", () => {
+      expect(canTransition("broadcast_countdown", "approved")).toBe(true);
+    });
+
+    it("allows broadcast_initiating → broadcasted", () => {
+      expect(canTransition("broadcast_initiating", "broadcasted")).toBe(true);
+    });
+
+    it("allows broadcast_initiating → broadcast_failed", () => {
+      expect(canTransition("broadcast_initiating", "broadcast_failed")).toBe(true);
+    });
+
+    it("allows broadcast_failed → approved (retryAutoBroadcast)", () => {
+      expect(canTransition("broadcast_failed", "approved")).toBe(true);
+    });
+
+    it("disallows broadcast_failed → broadcast_countdown directly", () => {
+      expect(canTransition("broadcast_failed", "broadcast_countdown")).toBe(false);
+    });
+
+    it("disallows broadcasted reverts (terminal-ish, same as before)", () => {
+      expect(canTransition("broadcasted", "broadcast_countdown")).toBe(false);
+      expect(canTransition("broadcasted", "approved")).toBe(false);
+    });
+
+    it("disallows broadcast_countdown → broadcasted (must go via broadcast_initiating)", () => {
+      expect(canTransition("broadcast_countdown", "broadcasted")).toBe(false);
+    });
+
+    it("nextStates(approved) includes broadcast_countdown", () => {
+      expect(nextStates("approved")).toContain("broadcast_countdown");
     });
   });
 });

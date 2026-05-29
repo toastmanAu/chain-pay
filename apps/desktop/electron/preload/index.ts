@@ -16,6 +16,8 @@ const chainpayApi = {
       mlDsaPub: string;
       mlKemPub: string;
       address: string;
+      addresses: { testnet: string; mainnet: string | null };
+      publishedOn: ("testnet" | "mainnet")[];
       addrHash: string;
       createdAt: number;
     } | null> => ipcRenderer.invoke("commIdentity:publicInfo"),
@@ -53,6 +55,18 @@ const chainpayApi = {
       mlKemPubKey: string;
       metadata: string;
     }> => ipcRenderer.invoke("commTransport:resolveProfile", address),
+  },
+  network: {
+    get: (): Promise<"testnet" | "mainnet"> =>
+      ipcRenderer.invoke("network:get"),
+    set: (network: "testnet" | "mainnet"): Promise<void> =>
+      ipcRenderer.invoke("network:set", network),
+  },
+  lcStorage: {
+    clear: (): Promise<void> => ipcRenderer.invoke("lcStorage:clear"),
+  },
+  app: {
+    quit: (): Promise<void> => ipcRenderer.invoke("app:quit"),
   },
 };
 

@@ -21,7 +21,10 @@ import type { PayrollBatchState } from "@chain-pay/shared";
 const TRANSITIONS: Record<PayrollBatchState, PayrollBatchState[]> = {
   draft: ["calculated", "cancelled"],
   calculated: ["approved", "draft", "cancelled"],
-  approved: ["broadcasted", "calculated", "cancelled"],
+  approved: ["broadcasted", "broadcast_countdown", "calculated", "cancelled"],
+  broadcast_countdown: ["broadcast_initiating", "approved", "cancelled"],
+  broadcast_initiating: ["broadcasted", "broadcast_failed"],
+  broadcast_failed: ["approved", "cancelled"],
   broadcasted: ["confirmed", "failed"],
   confirmed: [],
   failed: [],

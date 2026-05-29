@@ -50,6 +50,16 @@ export interface PayrollBatch extends Identified, Timestamped {
    * Keyed by multisig slotIndex. Absent when comm send hasn't been attempted.
    */
   commSendStatus?: Record<number, CommSendSlotStatus>;
+  /** True when the operator opted into auto-broadcast for this batch. Default
+   *  undefined ≡ false. Set via PayPanel toggle; persists across reload. */
+  autoBroadcast?: boolean;
+  /** RPC error string when state === "broadcast_failed". */
+  broadcastError?: string;
+  /** Atomic guard for the broadcast_countdown → broadcast_initiating transition.
+   *  Prevents duplicate Mth-sig events from re-broadcasting. */
+  broadcastInFlight?: boolean;
+  /** Epoch ms; 24h after createdAt. Comm-send retry stops once this passes. */
+  expiresAt?: number;
 }
 
 export interface CommSendSlotStatus {
@@ -60,9 +70,16 @@ export interface CommSendSlotStatus {
   error?: string;
   /** Epoch ms of the last status change. */
   updatedAt: number;
-  /** Number of auto-retries completed for this slot (0..3). Reset to 0 on
-   *  manual Retry. Used by useCommSendRetry to decide next-delay + stop. */
+  /** Number of auto-retries completed for this slot. Reset to 0 on "Retry now".
+   *  Used by useCommSendRetry to decide next-delay + stop. */
   retryCount?: number;
+  /** Epoch ms of the next scheduled retry firing. Persisted so retry survives
+   *  app restart — on mount, useCommSendRetry checks each entry and either
+   *  fires immediately (if past) or schedules the residual delay. */
+  nextRetryAt?: number;
+  /** When true, useCommSendRetry treats the entry as terminal and will not
+   *  schedule further retries. Set by dismissRetry; cleared by retryNow. */
+  dismissed?: boolean;
 }
 
 export interface PayrollBatchTotals {
@@ -89,6 +106,9 @@ export type PayrollBatchState =
   | "draft"
   | "calculated"
   | "approved"
+  | "broadcast_countdown"
+  | "broadcast_initiating"
+  | "broadcast_failed"
   | "broadcasted"
   | "confirmed"
   | "failed"

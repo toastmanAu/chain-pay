@@ -149,11 +149,38 @@ export function App() {
   }, [broadcastRpcUrl]);
 
   useEffect(() => {
-    // Default to testnet for the Phase 2 smoke-test loop. A network selector
-    // belongs in Settings (Phase 2.5+) — switching at runtime needs to stop
-    // the existing LightClient, swap the IndexedDB scope, then re-subscribe
-    // every watched lock under the new network.
-    void startCkb("testnet");
+    // On boot: (1) check wipe flag in localStorage, (2) read network from store,
+    // (3) call startCkb(network), (4) notify main process via electron.network.set.
+    // The wipe flag sidesteps WASM IndexedDB Byte32 hash-mismatch panic when switching networks.
+    void (async () => {
+      const wipeFlag = globalThis.localStorage?.getItem(
+        "chain-pay:wipe-lc-on-next-boot"
+      );
+      if (wipeFlag === "true") {
+        try {
+          await (
+            globalThis as unknown as {
+              chainpay: { lcStorage: { clear: () => Promise<void> } };
+            }
+          ).chainpay.lcStorage.clear();
+          globalThis.localStorage?.removeItem("chain-pay:wipe-lc-on-next-boot");
+        } catch (err) {
+          // eslint-disable-next-line no-console
+          console.error("lcStorage.clear failed:", err);
+        }
+      }
+      const network = useNetworkConfigStore.getState().network;
+      try {
+        await (
+          globalThis as unknown as {
+            chainpay: { network: { set: (n: "testnet" | "mainnet") => Promise<void> } };
+          }
+        ).chainpay.network.set(network);
+      } catch {
+        /* preload may not be loaded in tests */
+      }
+      await startCkb(network);
+    })();
   }, [startCkb]);
 
   useCommTransportBoot();

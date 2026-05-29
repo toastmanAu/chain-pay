@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { ccc } from "@ckb-ccc/core";
+import { useNetworkConfigStore } from "../../stores/network-config";
 import { useCommChannelSetup } from "./useCommChannelSetup";
 import { useCommIdentityStore } from "../../stores/comm-identity";
 import { lightClient } from "../../lib/light-client/client";
@@ -19,10 +20,29 @@ function hexToBytes(hex: string): Uint8Array {
 }
 
 export function CommChannelSection() {
+  const network = useNetworkConfigStore((s) => s.network);
   const { state, generate, deleteIdentity } = useCommChannelSetup();
   const [generationError, setGenerationError] = useState<Error | null>(null);
   const [isPublishing, setIsPublishing] = useState(false);
   const [publishError, setPublishError] = useState<Error | null>(null);
+
+  if (network === "mainnet") {
+    return (
+      <section className="rounded-lg border border-amber-700 bg-amber-950/40 p-5">
+        <h2 className="mb-3 text-lg font-semibold">Comm channel</h2>
+        <div className="space-y-3">
+          <div className="rounded border border-amber-700 bg-amber-950/40 p-3 text-sm">
+            <strong className="mb-1 block">Comm-channel unavailable on mainnet.</strong>
+            <p className="text-neutral-300">
+              The post-quantum signature contract has not yet been deployed on CKB mainnet.
+              Treasury operations work normally; signature relay falls back to clipboard.{" "}
+              <em>(Status: awaiting upstream deployment of CEMP-PQ.)</em>
+            </p>
+          </div>
+        </div>
+      </section>
+    );
+  }
 
   async function handleSetup(): Promise<void> {
     setGenerationError(null);

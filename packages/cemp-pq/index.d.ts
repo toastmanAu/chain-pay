@@ -4,12 +4,17 @@
 import type { ccc } from "@ckb-ccc/core";
 
 // Flat property names match the runtime object in index.js.
-export const ML_DSA_TESTNET: {
-  CODE_HASH: string;
-  HASH_TYPE: "data" | "type" | "data1" | "data2";
-  TX_HASH: string;
-  INDEX: number;
-};
+export interface MlDsaLockConstants {
+  CODE_HASH: string | null;
+  HASH_TYPE: string | null;
+  TX_HASH: string | null;
+  INDEX: number | null;
+}
+
+export const ML_DSA_TESTNET: MlDsaLockConstants;
+export const ML_DSA_MAINNET: MlDsaLockConstants;
+
+export function getMlDsaConstants(network: "testnet" | "mainnet"): MlDsaLockConstants;
 
 export const CEMP_PQ_PROFILE_CODE_HASH: string;
 export const CEMP_PQ_PROFILE_HASH_TYPE: "data" | "type" | "data1" | "data2";
@@ -33,7 +38,13 @@ export function ckbBlake2b(data: Uint8Array): Uint8Array;
 export class MLDSASigner extends ccc.Signer {
   // Pass a 32-byte seed (keygen is run internally) or a pre-expanded secretKey +
   // publicKey pair. The 2.7a integration always passes a 32-byte seed.
-  constructor(client: ccc.Client, seedOrSecretKey: Uint8Array, publicKey?: Uint8Array);
+  // network defaults to "testnet" if omitted.
+  constructor(
+    client: ccc.Client,
+    seedOrSecretKey: Uint8Array,
+    publicKeyOrNetwork?: Uint8Array | "testnet" | "mainnet",
+    network?: "testnet" | "mainnet",
+  );
   getAddressObjs(): Promise<ccc.Address[]>;
   getRecommendedAddressObj(): Promise<ccc.Address>;
   isConnected(): Promise<boolean>;
@@ -49,7 +60,8 @@ export interface ProfileFetchResult {
 }
 
 export class CEMPTransactionBuilder {
-  constructor(client: ccc.Client);
+  // network defaults to "testnet" if omitted.
+  constructor(client: ccc.Client, network?: "testnet" | "mainnet");
   fetchRecipientProfile(recipientLock: ccc.Script): Promise<ProfileFetchResult | null>;
   buildCreateProfileTx(
     signer: MLDSASigner,

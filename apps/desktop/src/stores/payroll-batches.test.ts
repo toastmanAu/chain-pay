@@ -379,3 +379,136 @@ describe("payroll-batches store — comm-channel auto-match", () => {
     expect(got?.commSendStatus?.[0]?.status).toBe("sent");
   });
 });
+
+describe("2.7c retryNow + dismissRetry", () => {
+  it("retryNow resets retryCount, clears nextRetryAt and dismissed", async () => {
+    const { usePayrollBatchesStore } = await import("./payroll-batches");
+    const store = usePayrollBatchesStore.getState();
+    store.addBatch({
+      id: "b1",
+      state: "approved",
+      commSendStatus: {
+        0: {
+          status: "sent",
+          updatedAt: Date.now() - 1000,
+          retryCount: 5,
+          nextRetryAt: Date.now() + 30 * 60_000,
+          dismissed: false,
+        },
+      },
+    } as any);
+    store.retryNow("b1", 0);
+    const slot = store.findById("b1")!.commSendStatus![0]!;
+    expect(slot.retryCount).toBe(0);
+    expect(slot.nextRetryAt).toBeUndefined();
+    expect(slot.dismissed).toBeUndefined();
+  });
+
+  it("dismissRetry sets dismissed=true", async () => {
+    const { usePayrollBatchesStore } = await import("./payroll-batches");
+    const store = usePayrollBatchesStore.getState();
+    store.addBatch({
+      id: "b1",
+      state: "approved",
+      commSendStatus: { 0: { status: "sent", updatedAt: Date.now(), retryCount: 1 } },
+    } as any);
+    store.dismissRetry("b1", 0);
+    const slot = store.findById("b1")!.commSendStatus![0]!;
+    expect(slot.dismissed).toBe(true);
+  });
+
+  it("retryNow on non-existent batch is a no-op", async () => {
+    const { usePayrollBatchesStore } = await import("./payroll-batches");
+    const store = usePayrollBatchesStore.getState();
+    store.retryNow("doesnotexist", 0);
+    // No throw; nothing changes
+    expect(store.findById("doesnotexist")).toBeUndefined();
+  });
+
+  it("dismissRetry on non-existent slot is a no-op", async () => {
+    const { usePayrollBatchesStore } = await import("./payroll-batches");
+    const store = usePayrollBatchesStore.getState();
+    store.addBatch({ id: "b1", state: "approved" } as any);
+    store.dismissRetry("b1", 99);
+    expect(store.findById("b1")!.commSendStatus).toBeUndefined();
+  });
+});
+
+describe("2.7c auto-broadcast state transitions", () => {
+  it("setAutoBroadcast(batchId, true) flips the toggle", async () => {
+    const { usePayrollBatchesStore } = await import("./payroll-batches");
+    const store = usePayrollBatchesStore.getState();
+    store.addBatch({ id: "b1", state: "approved" } as any);
+    store.setAutoBroadcast("b1", true);
+    expect(store.findById("b1")!.autoBroadcast).toBe(true);
+  });
+
+  it("cancelAutoBroadcast transitions broadcast_countdown → approved (sigs preserved, toggle stays on)", async () => {
+    const { usePayrollBatchesStore } = await import("./payroll-batches");
+    const store = usePayrollBatchesStore.getState();
+    store.addBatch({
+      id: "b1",
+      state: "broadcast_countdown",
+      autoBroadcast: true,
+      partialSigs: [
+        { slotIndex: 0, signature: "0xa" },
+        { slotIndex: 1, signature: "0xb" },
+      ],
+    } as any);
+    store.cancelAutoBroadcast("b1");
+    const b = store.findById("b1")!;
+    expect(b.state).toBe("approved");
+    expect(b.partialSigs).toHaveLength(2);
+    expect(b.autoBroadcast).toBe(true);
+  });
+
+  it("markBroadcastInitiating sets broadcastInFlight=true and transitions state", async () => {
+    const { usePayrollBatchesStore } = await import("./payroll-batches");
+    const store = usePayrollBatchesStore.getState();
+    store.addBatch({ id: "b1", state: "broadcast_countdown" } as any);
+    store.markBroadcastInitiating("b1");
+    const b = store.findById("b1")!;
+    expect(b.state).toBe("broadcast_initiating");
+    expect(b.broadcastInFlight).toBe(true);
+  });
+
+  it("markBroadcastInitiating is idempotent — no-op if broadcastInFlight is already true", async () => {
+    const { usePayrollBatchesStore } = await import("./payroll-batches");
+    const store = usePayrollBatchesStore.getState();
+    store.addBatch({
+      id: "b1",
+      state: "broadcast_initiating",
+      broadcastInFlight: true,
+    } as any);
+    const before = store.findById("b1")!;
+    store.markBroadcastInitiating("b1");
+    const after = store.findById("b1")!;
+    expect(after.state).toBe(before.state);
+    expect(after.broadcastInFlight).toBe(before.broadcastInFlight);
+  });
+
+  it("markBroadcastFailed sets state + broadcastError and clears broadcastInFlight", async () => {
+    const { usePayrollBatchesStore } = await import("./payroll-batches");
+    const store = usePayrollBatchesStore.getState();
+    store.addBatch({
+      id: "b1",
+      state: "broadcast_initiating",
+      broadcastInFlight: true,
+    } as any);
+    store.markBroadcastFailed("b1", "RPC timeout after 30s");
+    const b = store.findById("b1")!;
+    expect(b.state).toBe("broadcast_failed");
+    expect(b.broadcastError).toBe("RPC timeout after 30s");
+    expect(b.broadcastInFlight).toBeUndefined();
+  });
+
+  it("retryAutoBroadcast transitions broadcast_failed → approved (operator re-arms)", async () => {
+    const { usePayrollBatchesStore } = await import("./payroll-batches");
+    const store = usePayrollBatchesStore.getState();
+    store.addBatch({ id: "b1", state: "broadcast_failed", broadcastError: "x" } as any);
+    store.retryAutoBroadcast("b1");
+    const b = store.findById("b1")!;
+    expect(b.state).toBe("approved");
+    expect(b.broadcastError).toBeUndefined();
+  });
+});

@@ -3,6 +3,7 @@ import type { CommSendSlotStatus } from "@chain-pay/shared";
 import type { OutgoingPacket } from "@/lib/comm/types";
 import { usePayrollBatchesStore } from "@/stores/payroll-batches";
 import { usePeerBookStore } from "@/stores/peer-book";
+import { useNetworkConfigStore } from "@/stores/network-config";
 import { useCommSendDispatch, type MultisigRouting } from "./useCommSendDispatch";
 
 interface CommSendSectionProps {
@@ -41,6 +42,7 @@ export function CommSendSection({
   disabled,
   disabledReason,
 }: CommSendSectionProps) {
+  const network = useNetworkConfigStore((s) => s.network);
   const { sendAll, retry } = useCommSendDispatch();
   // Subscribe to the batch's commSendStatus directly so pills re-render on writes.
   const batch = usePayrollBatchesStore((s) => s.batches.find((b) => b.id === batchId));
@@ -55,6 +57,15 @@ export function CommSendSection({
       }),
     [multisig.pubkeyHashes, peers, batch?.commSendStatus],
   );
+
+  // On mainnet, replace with a simple fallback message.
+  if (network === "mainnet") {
+    return (
+      <p className="text-xs text-neutral-500 italic">
+        Comm channel unavailable; use clipboard.
+      </p>
+    );
+  }
 
   const mappedCount = rows.filter((r) => r.peer !== undefined).length;
   const canSend = !disabled && mappedCount > 0;
@@ -105,14 +116,26 @@ export function CommSendSection({
                 >
                   {glyph} {status?.status ?? (peer ? "idle" : "unmapped")}
                 </span>
-                {status?.status === "error" && peer && (
-                  <button
-                    type="button"
-                    onClick={() => void retry(batchId, slotIndex, packet, multisig)}
-                    className="rounded bg-accent px-2 py-0.5 text-xs text-accent-fg"
-                  >
-                    retry
-                  </button>
+                {(status?.status === "sent" || status?.status === "error") && (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => usePayrollBatchesStore.getState().retryNow(batchId, slotIndex)}
+                      className="text-xs px-1.5 py-0.5 rounded border border-neutral-600 hover:bg-neutral-800"
+                      title="Reset retry schedule and re-send now"
+                    >
+                      Retry now
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => usePayrollBatchesStore.getState().dismissRetry(batchId, slotIndex)}
+                      className="text-xs px-1 text-neutral-500 hover:text-neutral-300"
+                      aria-label="Dismiss retry"
+                      title="Stop retrying this signer"
+                    >
+                      ×
+                    </button>
+                  </>
                 )}
               </span>
             </li>
