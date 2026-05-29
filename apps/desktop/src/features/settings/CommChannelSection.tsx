@@ -21,6 +21,10 @@ function hexToBytes(hex: string): Uint8Array {
 
 export function CommChannelSection() {
   const network = useNetworkConfigStore((s) => s.network);
+  const { state, generate, deleteIdentity } = useCommChannelSetup();
+  const [generationError, setGenerationError] = useState<Error | null>(null);
+  const [isPublishing, setIsPublishing] = useState(false);
+  const [publishError, setPublishError] = useState<Error | null>(null);
 
   if (network === "mainnet") {
     return (
@@ -39,11 +43,6 @@ export function CommChannelSection() {
       </section>
     );
   }
-
-  const { state, generate, deleteIdentity } = useCommChannelSetup();
-  const [generationError, setGenerationError] = useState<Error | null>(null);
-  const [isPublishing, setIsPublishing] = useState(false);
-  const [publishError, setPublishError] = useState<Error | null>(null);
 
   async function handleSetup(): Promise<void> {
     setGenerationError(null);

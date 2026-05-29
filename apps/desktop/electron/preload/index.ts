@@ -65,6 +65,9 @@ const chainpayApi = {
   lcStorage: {
     clear: (): Promise<void> => ipcRenderer.invoke("lcStorage:clear"),
   },
+  app: {
+    quit: (): Promise<void> => ipcRenderer.invoke("app:quit"),
+  },
 };
 
 contextBridge.exposeInMainWorld("chainpay", chainpayApi);

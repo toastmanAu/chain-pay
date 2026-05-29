@@ -34,14 +34,16 @@ export function NetworkSection() {
   async function confirmAndQuit(): Promise<void> {
     setNetworkPersisted(pending);
     globalThis.localStorage?.setItem(WIPE_FLAG_KEY, "true");
-    await (
+    const chainpay = (
       globalThis as unknown as {
-        electron: { network: { set: (n: CkbNetwork) => Promise<void> } };
+        chainpay: {
+          network: { set: (n: CkbNetwork) => Promise<void> };
+          app: { quit: () => Promise<void> };
+        };
       }
-    ).electron.network.set(pending);
-    (
-      globalThis as unknown as { electron: { app: { quit: () => void } } }
-    ).electron.app.quit();
+    ).chainpay;
+    await chainpay.network.set(pending);
+    await chainpay.app.quit();
   }
 
   function onConfirmModal(): void {

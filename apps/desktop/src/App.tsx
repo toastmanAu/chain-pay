@@ -160,9 +160,9 @@ export function App() {
         try {
           await (
             globalThis as unknown as {
-              electron: { lcStorage: { clear: () => Promise<void> } };
+              chainpay: { lcStorage: { clear: () => Promise<void> } };
             }
-          ).electron.lcStorage.clear();
+          ).chainpay.lcStorage.clear();
           globalThis.localStorage?.removeItem("chain-pay:wipe-lc-on-next-boot");
         } catch (err) {
           // eslint-disable-next-line no-console
@@ -173,9 +173,9 @@ export function App() {
       try {
         await (
           globalThis as unknown as {
-            electron: { network: { set: (n: "testnet" | "mainnet") => Promise<void> } };
+            chainpay: { network: { set: (n: "testnet" | "mainnet") => Promise<void> } };
           }
-        ).electron.network.set(network);
+        ).chainpay.network.set(network);
       } catch {
         /* preload may not be loaded in tests */
       }
