@@ -3,7 +3,7 @@
 Crypto-native payroll & accounting suite. CKB and EVM multisig treasuries, **embedded WASM CKB light client** in the desktop app, no private key custody.
 
 > [!NOTE]
-> Phases 1–2.7 are **shipped end-to-end on testnet**, with a confirmed multisig payroll batch and a working PQ-secure signature relay. Phase 2.7c (mainnet plumbing) and Phase 3a (invoice ingest) are open as PRs awaiting review. EVM treasuries (Phase 3) and the Frappe accounting bridge (Phase 4) are next. See [Status](#status) for the full table and [What's actually working](#whats-actually-working) for canonical on-chain artefacts.
+> Phases 1–3a are **shipped end-to-end on testnet** and live on `main`, with a confirmed multisig payroll batch, a working PQ-secure signature relay, mainnet network plumbing, and invoice ingest (manual entry, payee + vendor flows). EVM treasuries (Phase 3) and the Frappe accounting bridge (Phase 4) are next. See [Status](#status) for the full table and [What's actually working](#whats-actually-working) for canonical on-chain artefacts.
 
 ## Why ChainPay exists
 
@@ -33,8 +33,8 @@ The trust-minimisation half is the differentiator. The CKB light client is **emb
 | 2 | CKB multisig treasury (setup wizard, address derivation, tx builder, JoyID→ckb-cli signer pivot) | ✅ done — first confirmed testnet tx `0x4e66d1…0e92` on block 21,161,590 (2026-05-21) |
 | 2.5 | Payroll batch over CKB multisig (N-output tx, FX snapshot, approval queue, status machine) | ✅ done — first confirmed multi-input testnet batch `0x69ebf7…3b4e1` on block 21,176,012 (2026-05-23) |
 | 2.7a–b | Comm channel: on-chain encrypted signature relay (CEMP-PQ — ML-DSA + ML-KEM, Profile Cells, ack loop) | ✅ done — PRs #1–#4 merged; first confirmed A↔B testnet roundtrip 2026-05-24 |
-| 2.7c | Mainnet plumbing, auto-broadcast, broadcast-lifecycle retry | 🟡 **PR #6 open** — mergeable, awaiting review; manual mainnet smoke pending |
-| 3a | Invoice ingest — manual entry + payee flow, vendor flow, draft autosave, approve-and-queue | 🟡 **PR #7 open** — mergeable, awaiting review; React 19 Strict Mode + Buffer polyfill fixes pushed 2026-05-28 |
+| 2.7c | Mainnet plumbing, network-switch UX, auto-broadcast with 5s countdown, lifecycle-bound retry | ✅ done — PR #6 merged `d090354` (2026-05-29); fast-path manual smoke surfaced and fixed 4 bugs (preload namespace, missing `app.quit` IPC, hooks-rules in mainnet-conditional renders) |
+| 3a | Invoice ingest — manual entry + payee flow, vendor flow, draft autosave, approve-and-queue, batch↔invoice confirmation sync | ✅ done — PR #7 merged `8a3b426` (2026-05-29); shell-level smoke clean on `main` |
 | 3b | Invoice ingest — OCR extraction + multi-invoice bundling | planned (deferred from 3a scope) |
 | 3 (EVM) | EVM (Safe) treasury — MetaMask + WalletConnect + Ledger signers | planned |
 | 4 | Frappe accounting bridge — every confirmed payment posts a journal entry | planned |
@@ -50,7 +50,8 @@ Detailed roadmap: [docs/mvp-roadmap.md](docs/mvp-roadmap.md). Phase-specific not
 | 2-of-3 multisig treasury — propose, sign, broadcast, confirm | `src/features/treasury/`, `src/lib/chains/ckb/multisig.ts` | Testnet tx `0x4e66d1…0e92` (single-input, 2026-05-21) |
 | N-output payroll batch from multisig | `src/features/payroll/`, `packages/shared/src/payroll.ts` | Testnet tx `0x69ebf7…3b4e1` (multi-input, 2026-05-23) — surfaced the witness-padding digest-divergence trap, now fixed |
 | Post-quantum signature relay (CEMP-PQ) | `packages/cemp-pq/`, `src/features/sign/` | First confirmed A↔B roundtrip 2026-05-24; ML-DSA + ML-KEM; comm keys segregated from multisig signers by design |
-| Invoice ingest (manual entry, both flows) | `src/features/invoices/` | 465 tests green on `feat/phase-3a-invoice-ingest`; smoke-tested locally |
+| Invoice ingest (manual entry, both flows) | `src/features/invoices/` | 450 tests green on `main` post-merge; routes verified on shell smoke |
+| Mainnet network switch (UX only, no real-fund tx yet) | `src/features/settings/NetworkSection.tsx`, `electron/main/network-state-store.ts` | Manual smoke 2026-05-29: testnet → mainnet → soft-fail UX → testnet round-trip with LC IDB wipe |
 
 ### Why the JoyID → ckb-cli signer pivot
 
