@@ -3,7 +3,7 @@
 Crypto-native payroll & accounting suite. CKB and EVM multisig treasuries, **embedded WASM CKB light client** in the desktop app, no private key custody.
 
 > [!NOTE]
-> Phase 1 (embedded CKB light client) is **shipped and verified live on mainnet**. Phase 2 (CKB multisig treasury) is in progress. See [Status](#status).
+> Phases 1–2.7 are **shipped end-to-end on testnet**, with a confirmed multisig payroll batch and a working PQ-secure signature relay. Phase 2.7c (mainnet plumbing) and Phase 3a (invoice ingest) are open as PRs awaiting review. EVM treasuries (Phase 3) and the Frappe accounting bridge (Phase 4) are next. See [Status](#status) for the full table and [What's actually working](#whats-actually-working) for canonical on-chain artefacts.
 
 ## Why ChainPay exists
 
@@ -30,13 +30,31 @@ The trust-minimisation half is the differentiator. The CKB light client is **emb
 |---|---|---|
 | 0 | Repo scaffold | ✅ done |
 | 1 | Embedded CKB light client (renderer-owned, WASM, browser-storage) | ✅ done — verified live on mainnet, peers attach within ~30 s |
-| 2 | CKB multisig treasury (setup wizard, address derivation, tx builder + JoyID signer) | 🚧 in progress — encoding primitives + address derivation + wizard shipped; tx builder next |
-| 2.5 | Payroll batch over CKB multisig | planned |
-| 3 | EVM (Safe) treasury — MetaMask + WalletConnect signers | planned |
-| 4 | Frappe accounting bridge | planned |
-| 5+ | BTC/SOL adapters, fiat ramps, mobile signer companion | planned |
+| 2 | CKB multisig treasury (setup wizard, address derivation, tx builder, JoyID→ckb-cli signer pivot) | ✅ done — first confirmed testnet tx `0x4e66d1…0e92` on block 21,161,590 (2026-05-21) |
+| 2.5 | Payroll batch over CKB multisig (N-output tx, FX snapshot, approval queue, status machine) | ✅ done — first confirmed multi-input testnet batch `0x69ebf7…3b4e1` on block 21,176,012 (2026-05-23) |
+| 2.7a–b | Comm channel: on-chain encrypted signature relay (CEMP-PQ — ML-DSA + ML-KEM, Profile Cells, ack loop) | ✅ done — PRs #1–#4 merged; first confirmed A↔B testnet roundtrip 2026-05-24 |
+| 2.7c | Mainnet plumbing, auto-broadcast, broadcast-lifecycle retry | 🟡 **PR #6 open** — mergeable, awaiting review; manual mainnet smoke pending |
+| 3a | Invoice ingest — manual entry + payee flow, vendor flow, draft autosave, approve-and-queue | 🟡 **PR #7 open** — mergeable, awaiting review; React 19 Strict Mode + Buffer polyfill fixes pushed 2026-05-28 |
+| 3b | Invoice ingest — OCR extraction + multi-invoice bundling | planned (deferred from 3a scope) |
+| 3 (EVM) | EVM (Safe) treasury — MetaMask + WalletConnect + Ledger signers | planned |
+| 4 | Frappe accounting bridge — every confirmed payment posts a journal entry | planned |
+| 5+ | BTC watch-only, SOL adapter, fiat ramps, mobile signer companion | planned |
 
-Detailed roadmap: [docs/mvp-roadmap.md](docs/mvp-roadmap.md). Phase-specific notes: [PHASE-1.md](PHASE-1.md).
+Detailed roadmap: [docs/mvp-roadmap.md](docs/mvp-roadmap.md). Phase-specific notes: [PHASE-1.md](PHASE-1.md). Comm-channel design (CEMP-PQ integration): [docs/comm-channel-design.md](docs/comm-channel-design.md).
+
+### What's actually working
+
+| Capability | Where | Evidence |
+|---|---|---|
+| Embedded CKB light client on mainnet | renderer-side WASM, `src/lib/light-client/` | Tip block + peers update live; no third-party RPC required |
+| 2-of-3 multisig treasury — propose, sign, broadcast, confirm | `src/features/treasury/`, `src/lib/chains/ckb/multisig.ts` | Testnet tx `0x4e66d1…0e92` (single-input, 2026-05-21) |
+| N-output payroll batch from multisig | `src/features/payroll/`, `packages/shared/src/payroll.ts` | Testnet tx `0x69ebf7…3b4e1` (multi-input, 2026-05-23) — surfaced the witness-padding digest-divergence trap, now fixed |
+| Post-quantum signature relay (CEMP-PQ) | `packages/cemp-pq/`, `src/features/sign/` | First confirmed A↔B roundtrip 2026-05-24; ML-DSA + ML-KEM; comm keys segregated from multisig signers by design |
+| Invoice ingest (manual entry, both flows) | `src/features/invoices/` | 465 tests green on `feat/phase-3a-invoice-ingest`; smoke-tested locally |
+
+### Why the JoyID → ckb-cli signer pivot
+
+Phase 2 originally planned JoyID as the first signer transport. Discovery during Phase 2 bring-up: JoyID's passkey-derived keys are structurally incompatible with `secp256k1_blake160_multisig_all` — the underlying signature primitive doesn't match what the multisig system script verifies. JoyID stays in the SignerTransport interface for non-multisig (single-sig) flows; ckb-cli keystore became the first working multisig signer. See [auto-memory note](./.remember/) for the full rationale.
 
 ## Architecture overview
 
@@ -162,11 +180,13 @@ chain-pay/
 │   │   │   ├── App.tsx         App-level light-client auto-start
 │   │   │   ├── features/       one folder per product surface
 │   │   │   │   ├── dashboard/  tip block, peer count, sync status
-│   │   │   │   ├── treasury/   list, setup wizard, detail (WIP)
-│   │   │   │   ├── payroll/    (Phase 2.5)
-│   │   │   │   ├── payments/   (Phase 2)
+│   │   │   │   ├── treasury/   list, setup wizard, detail, multi-treasury switching
+│   │   │   │   ├── payroll/    batch builder, FX snapshot, approval queue, status machine
+│   │   │   │   ├── payments/   pay panel — sign / broadcast / track confirmations
+│   │   │   │   ├── invoices/   ingest (manual entry), payee + vendor flows (PR #7)
+│   │   │   │   ├── sign/       comm-channel signer-side UI (CEMP-PQ relay, ack loop)
 │   │   │   │   ├── employees/  (Phase 4 with Frappe)
-│   │   │   │   └── settings/
+│   │   │   │   └── settings/   broadcast RPC, treasury switching, debug
 │   │   │   ├── lib/
 │   │   │   │   ├── chains/     ChainAdapter — ckb, evm; btc/sol stubs
 │   │   │   │   │   ├── ckb/    multisig.ts, address.ts, adapter.ts
@@ -180,15 +200,19 @@ chain-pay/
 │   └── backend/                Frappe bench (Phase 4)
 │       └── apps/crypto_payroll/  custom Frappe app skeleton
 ├── packages/
-│   └── shared/                 cross-cutting types and schemas
+│   ├── shared/                 cross-cutting types and schemas (payroll, vendors, batches)
+│   └── cemp-pq/                CEMP-PQ tx-builder + Profile Cell molecule (ML-DSA / ML-KEM)
 ├── docs/                       architecture, security, payment flow
 │   ├── architecture.md
 │   ├── light-client-integration.md
 │   ├── ckb-multisig-witness.md
+│   ├── comm-channel-design.md         CEMP-PQ relay design (Phase 2.7)
 │   ├── crypto-payment-flow.md
 │   ├── accounting-model.md
 │   ├── api-contract.md
 │   ├── security-model.md
+│   ├── phase-2-smoke-playbook.md      manual verification scripts
+│   ├── phase-2.5-smoke-playbook.md
 │   └── mvp-roadmap.md
 ├── docker/                     Frappe compose + Dockerfile (Phase 4)
 ├── PHASE-1.md                  current/recent phase deep-dive
@@ -239,13 +263,20 @@ Security model details: [docs/security-model.md](docs/security-model.md).
 ## Tested
 
 ```
-Test Files  2 passed (2)
-     Tests  23 passed (23)
-  Coverage  98% statements, 100% functions, 86% branches
-            (multisig encoding + address derivation)
+Test Files  47 across desktop + shared + cemp-pq
+     Tests  465 passed (on feat/phase-3a-invoice-ingest at 24a0bd0)
+   Surface  multisig encoding · address derivation · payroll batch state machine ·
+            FX snapshot · CEMP-PQ tx builder · vendor + invoice flows ·
+            treasury/payee/clipboard/debug-settings stores
 ```
 
-UI components are not unit-tested yet; the encoding/decoding layer is the trust-critical surface and that's where coverage matters most. UI testing comes after Phase 2 ships and the surface stabilises.
+Trust-critical encoding and state-machine logic carry the heaviest coverage; UI components are exercised through store-level tests plus manual smoke playbooks (`docs/phase-2-smoke-playbook.md`, `docs/phase-2.5-smoke-playbook.md`). Two-stage review (per-task TDD + whole-branch tsc + cross-task review) caught three seam bugs during Phase 2.7c — see `subagent-driven-cross-task-bugs` in auto-memory.
+
+## Engineering process
+
+Phases 2.7c and 3a were executed via **subagent-driven development** — 24 discrete TDD tasks per phase, each landing as its own commit, then a final whole-branch review pass before PR. This is the pattern documented in the `superpowers:subagent-driven-development` skill and has caught cross-task integration bugs that per-task tests miss (React 19 Strict Mode double-effects, treasury v1→v2 migration backfill, witness-padding digest divergence under multi-input multisig).
+
+For domain-specific traps when touching CKB tx construction, see `~/.claude/rules/ckb-transactions.md` — feedback log entries from this repo include the multi-input witness-padding fix (2026-05-24) and the molecule self-size trap.
 
 ## License
 
