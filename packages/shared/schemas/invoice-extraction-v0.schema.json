@@ -1,0 +1,248 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://chainpay.local/schemas/invoice-extraction-v0.json",
+  "title": "ChainPay Invoice Extraction (v0 — draft, not yet committed to ChainPay)",
+  "description": "Durable contract between the OCR/extraction pipeline and any consumer (manual-upload UI, email service, batch import). Frappe-doctype-agnostic — designed to be mappable to Journal Entry, Purchase Invoice, Expense Claim, or Payment Entry without lossy renaming. Version 0 is the planning baseline; bump to v1 when ChainPay agrees the contract.",
+  "type": "object",
+  "required": ["schema_version", "intake", "invoice", "extraction", "approval"],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": "0.1.0",
+      "description": "SemVer. Bump minor for additive fields, major for breaking changes. Pre-1.0 = unstable."
+    },
+    "org_id": {
+      "type": ["string", "null"],
+      "description": "Multi-tenant namespace. Null for single-tenant. Add now so multi-tenant slots in without schema bump."
+    },
+    "intake": {
+      "type": "object",
+      "required": ["source", "received_at", "raw_file"],
+      "additionalProperties": false,
+      "properties": {
+        "source": {
+          "enum": ["manual-upload", "email", "api", "batch-import"],
+          "description": "Where the document came from. manual-upload is the Phase 1 only value."
+        },
+        "uploaded_by": {
+          "type": ["string", "null"],
+          "description": "User id of treasurer/signatory who uploaded. Null for non-upload sources."
+        },
+        "received_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "sender_identity": {
+          "type": ["object", "null"],
+          "description": "For email source: who sent it. Null for manual-upload (uploader is in uploaded_by).",
+          "properties": {
+            "email": { "type": "string", "format": "email" },
+            "display_name": { "type": "string" },
+            "verified_via": { "enum": ["dmarc", "spf", "allowlist", "none"] }
+          }
+        },
+        "raw_file": {
+          "type": "object",
+          "required": ["sha256", "mime_type", "byte_size", "filename", "storage_uri"],
+          "properties": {
+            "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+            "mime_type": { "type": "string", "examples": ["application/pdf", "image/png", "image/jpeg"] },
+            "byte_size": { "type": "integer", "minimum": 1 },
+            "filename": { "type": "string" },
+            "storage_uri": {
+              "type": "string",
+              "description": "Where the original bytes live. file://, s3://, vault:// — consumer-resolves."
+            },
+            "page_count": { "type": ["integer", "null"], "minimum": 1 }
+          }
+        }
+      }
+    },
+    "invoice": {
+      "type": "object",
+      "required": ["flow", "payee", "currency", "total"],
+      "additionalProperties": false,
+      "properties": {
+        "flow": {
+          "enum": ["one-off-vendor", "employee-payment", "recurring-vendor", "unknown"],
+          "description": "Treasurer-selected at upload time, or 'unknown' if not yet classified."
+        },
+        "payee": {
+          "type": "object",
+          "required": ["kind", "display_name"],
+          "additionalProperties": false,
+          "properties": {
+            "kind": { "enum": ["vendor", "employee", "contractor", "unknown"] },
+            "id": {
+              "type": ["string", "null"],
+              "description": "Address-book id. Null if new payee (treasurer creates during review)."
+            },
+            "display_name": { "type": "string" },
+            "tax_id": {
+              "type": ["string", "null"],
+              "description": "ABN (AU), VAT (EU), EIN (US), etc. Format-validation deferred to consumer."
+            },
+            "tax_id_country": {
+              "type": ["string", "null"],
+              "description": "ISO 3166-1 alpha-2 (AU, US, GB, ...)."
+            }
+          }
+        },
+        "invoice_number": { "type": ["string", "null"] },
+        "issue_date": {
+          "type": ["string", "null"],
+          "format": "date",
+          "description": "ISO 8601 date (YYYY-MM-DD). Null if not present on document."
+        },
+        "due_date": {
+          "type": ["string", "null"],
+          "format": "date"
+        },
+        "currency": {
+          "type": "string",
+          "pattern": "^[A-Z]{3}$",
+          "description": "ISO 4217 (AUD, USD, EUR, GBP, ...)."
+        },
+        "subtotal": { "type": ["number", "null"] },
+        "tax_total": { "type": ["number", "null"] },
+        "tax_label": {
+          "type": ["string", "null"],
+          "description": "GST, VAT, Sales Tax, ..."
+        },
+        "total": { "type": "number" },
+        "line_items": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["description", "line_total"],
+            "properties": {
+              "description": { "type": "string" },
+              "quantity": { "type": ["number", "null"] },
+              "unit_price": { "type": ["number", "null"] },
+              "line_total": { "type": "number" },
+              "tax_amount": { "type": ["number", "null"] },
+              "account_hint": {
+                "type": ["string", "null"],
+                "description": "Suggested Frappe account (e.g. 'expense:consulting'). Treasurer can override during review."
+              }
+            }
+          }
+        },
+        "payment_details": {
+          "type": "object",
+          "description": "Where/how the payee wants to be paid. Hints only — multisig signer flow may override.",
+          "properties": {
+            "method_hint": { "enum": ["bank-transfer", "ckb", "evm", "cheque", "cash", "unknown"] },
+            "bank": {
+              "type": ["object", "null"],
+              "properties": {
+                "bsb": { "type": ["string", "null"] },
+                "account_number": { "type": ["string", "null"] },
+                "iban": { "type": ["string", "null"] },
+                "swift": { "type": ["string", "null"] },
+                "account_name": { "type": ["string", "null"] }
+              }
+            },
+            "ckb_address": { "type": ["string", "null"] },
+            "evm_address": { "type": ["string", "null"] },
+            "reference": { "type": ["string", "null"] }
+          }
+        },
+        "notes": {
+          "type": ["string", "null"],
+          "description": "Free-text notes on the invoice (e.g. 'Pay within 14 days net')."
+        }
+      }
+    },
+    "extraction": {
+      "type": "object",
+      "required": ["pipeline", "extracted_at"],
+      "additionalProperties": false,
+      "properties": {
+        "pipeline": {
+          "type": "object",
+          "required": ["stages"],
+          "properties": {
+            "stages": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": ["name", "model", "version"],
+                "properties": {
+                  "name": { "enum": ["layout-ocr", "schema-extraction", "page-routing", "single-shot"] },
+                  "model": { "type": "string", "examples": ["PaddleOCR-VL", "NuExtract-2.0-8B", "olmOCR-2-7B-1025", "MiniCPM-V-4.5"] },
+                  "version": { "type": "string" },
+                  "elapsed_ms": { "type": ["integer", "null"], "minimum": 0 }
+                }
+              }
+            }
+          }
+        },
+        "extracted_at": { "type": "string", "format": "date-time" },
+        "field_confidences": {
+          "type": "object",
+          "description": "Map of dotted-path field name → confidence 0..1. Sparse — only fields the pipeline scored.",
+          "patternProperties": {
+            "^[a-z][a-z_]*(\\.[a-z][a-z_0-9]*|\\[[0-9]+\\])*$": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            }
+          }
+        },
+        "warnings": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["field", "severity", "message"],
+            "properties": {
+              "field": { "type": "string" },
+              "severity": { "enum": ["info", "warn", "error"] },
+              "message": { "type": "string" }
+            }
+          }
+        }
+      }
+    },
+    "approval": {
+      "type": "object",
+      "required": ["status"],
+      "additionalProperties": false,
+      "properties": {
+        "status": { "enum": ["draft", "in-review", "queued-for-signing", "signed", "rejected", "auto-rejected"] },
+        "reviewed_by": { "type": ["string", "null"] },
+        "reviewed_at": { "type": ["string", "null"], "format": "date-time" },
+        "rejection_reason": { "type": ["string", "null"] },
+        "edits_made": {
+          "type": "array",
+          "description": "Audit trail of treasurer edits. Each entry diff'd against extraction output.",
+          "items": {
+            "type": "object",
+            "required": ["field", "before", "after", "edited_at", "edited_by"],
+            "properties": {
+              "field": { "type": "string", "description": "Dotted path (e.g. 'invoice.total')" },
+              "before": {},
+              "after": {},
+              "edited_at": { "type": "string", "format": "date-time" },
+              "edited_by": { "type": "string" }
+            }
+          }
+        }
+      }
+    },
+    "chainpay_link": {
+      "type": "object",
+      "description": "Filled in once ChainPay posts the multisig tx and Frappe doctype.",
+      "additionalProperties": false,
+      "properties": {
+        "tx_hash": { "type": ["string", "null"] },
+        "chain": { "enum": ["ckb", "evm", null] },
+        "frappe_doctype": {
+          "type": ["string", "null"],
+          "description": "Which Frappe doctype this maps to in the end. Examples: 'Journal Entry', 'Purchase Invoice', 'Expense Claim', 'Payment Entry'. Decision deferred until ChainPay phase 4 integration is designed."
+        },
+        "frappe_docname": { "type": ["string", "null"] }
+      }
+    }
+  }
+}

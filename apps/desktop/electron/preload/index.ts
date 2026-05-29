@@ -68,6 +68,14 @@ const chainpayApi = {
   app: {
     quit: (): Promise<void> => ipcRenderer.invoke("app:quit"),
   },
+  invoiceFiles: {
+    store: (bytes: Uint8Array, sha256: string): Promise<string> =>
+      ipcRenderer.invoke("invoice-files:store", bytes, sha256),
+    read: (uri: string): Promise<Uint8Array> =>
+      ipcRenderer.invoke("invoice-files:read", uri),
+    delete: (uri: string): Promise<void> =>
+      ipcRenderer.invoke("invoice-files:delete", uri),
+  },
 };
 
 contextBridge.exposeInMainWorld("chainpay", chainpayApi);

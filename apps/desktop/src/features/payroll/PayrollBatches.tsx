@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import type { CkbMultisig, PayrollBatch, PayrollBatchState, Treasury } from "@chain-pay/shared";
+import { isPayrollBatch } from "@chain-pay/shared";
 import { usePayrollBatchesStore } from "@/stores/payroll-batches";
 import { useTreasuryStore } from "@/stores/treasury";
 import { nextStates, isTerminal } from "@/lib/payroll/state-machine";
@@ -16,8 +17,14 @@ export function PayrollBatches() {
     [treasuries],
   );
 
+  // This page is the payroll-batch index — vendor batches surface in their own
+  // (3a-T13) UI. Filter the heterogeneous AnyBatch[] before sorting so
+  // BatchCard can keep its narrower PayrollBatch prop type.
   const sorted = useMemo(
-    () => [...batches].sort((a, b) => b.createdAt.localeCompare(a.createdAt)),
+    () =>
+      batches
+        .filter(isPayrollBatch)
+        .sort((a, b) => b.createdAt.localeCompare(a.createdAt)),
     [batches],
   );
 
@@ -36,7 +43,7 @@ export function PayrollBatches() {
 
       <section className="space-y-2">
         <h2 className="text-sm font-medium text-fg-muted">
-          {batches.length} {batches.length === 1 ? "batch" : "batches"}
+          {sorted.length} {sorted.length === 1 ? "batch" : "batches"}
         </h2>
         {sorted.length === 0 ? (
           <p className="rounded-lg border border-dashed border-surface-hi bg-surface/50 p-6 text-center text-sm text-fg-muted">
@@ -76,6 +83,7 @@ function CreateBatchForm({ treasuries }: { treasuries: Array<{ id: string; label
     const id = (globalThis.crypto?.randomUUID?.() ?? `b-${Date.now()}`) as string;
     const batch: PayrollBatch = {
       id,
+      kind: "payroll",
       label: label.trim(),
       treasuryId,
       cycleStart,

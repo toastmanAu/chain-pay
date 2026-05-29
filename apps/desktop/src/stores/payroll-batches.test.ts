@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { PayrollBatch, PayrollBatchLine } from "@chain-pay/shared";
+import type { PayrollBatch, PayrollBatchLine, VendorPaymentBatch } from "@chain-pay/shared";
 import { MemoryStorage } from "./test-utils/memory-storage";
 
 const sampleLine: PayrollBatchLine = {
@@ -12,6 +12,7 @@ const sampleLine: PayrollBatchLine = {
 
 const sampleBatch: PayrollBatch = {
   id: "b1",
+  kind: "payroll",
   label: "May 2026 payroll",
   treasuryId: "t-testnet",
   cycleStart: "2026-05-01",
@@ -65,8 +66,9 @@ describe("payroll-batches store", () => {
     vi.resetModules();
     const second = await import("./payroll-batches");
     const got = second.usePayrollBatchesStore.getState().batches[0];
-    expect(got?.lines[0]?.fiat.minor).toBe(500000n);
-    expect(got?.lines[0]?.crypto.value).toBe(119047619047619n);
+    if (!got || got.kind !== "payroll") throw new Error("expected a PayrollBatch");
+    expect(got.lines[0]?.fiat.minor).toBe(500000n);
+    expect(got.lines[0]?.crypto.value).toBe(119047619047619n);
   });
 
   it("transition() advances state on valid transitions and bumps updatedAt", async () => {
@@ -510,5 +512,103 @@ describe("2.7c auto-broadcast state transitions", () => {
     const b = store.findById("b1")!;
     expect(b.state).toBe("approved");
     expect(b.broadcastError).toBeUndefined();
+  });
+});
+
+// ── 3a-T11: kind discriminator + v1→v2 migration ────────────────────────────
+
+describe("kind discriminator + v1→v2 migration", () => {
+  it("addBatch accepts a VendorPaymentBatch", async () => {
+    const { usePayrollBatchesStore } = await import("./payroll-batches");
+    const vb: VendorPaymentBatch = {
+      kind: "vendor",
+      id: "vb_1",
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      label: "Acme INV-001",
+      treasuryId: "tr_1",
+      invoiceId: "inv_1",
+      vendorId: "vendor_1",
+      fxSnapshot: [],
+      line: {
+        vendorId: "vendor_1",
+        fiat: { minor: 100n, currency: "AUD" },
+        crypto: { value: 1_000_000n, asset: "CKB", decimals: 8 },
+        fxRate: "1",
+        feeAllocated: { value: 0n, asset: "CKB", decimals: 8 },
+      },
+      state: "draft",
+    };
+    usePayrollBatchesStore.getState().addBatch(vb);
+    const stored = usePayrollBatchesStore.getState().findById("vb_1");
+    expect(stored?.kind).toBe("vendor");
+  });
+
+  it("v1→v2 migration backfills kind: payroll on records without one", async () => {
+    const v1Blob = {
+      state: {
+        batches: [
+          {
+            id: "old_1",
+            label: "Old Batch",
+            treasuryId: "tr_1",
+            cycleStart: "2026-01-01",
+            cycleEnd: "2026-01-31",
+            fxSnapshot: [],
+            lines: [],
+            state: "draft",
+            createdAt: "2026-01-01T00:00:00Z",
+            updatedAt: "2026-01-01T00:00:00Z",
+          },
+        ],
+      },
+      version: 1,
+    };
+    globalThis.localStorage?.setItem("chain-pay:payroll-batches", JSON.stringify(v1Blob));
+
+    const { usePayrollBatchesStore } = await import("./payroll-batches");
+    await usePayrollBatchesStore.persist.rehydrate();
+
+    const migrated = usePayrollBatchesStore.getState().batches;
+    expect(migrated).toHaveLength(1);
+    expect(migrated[0]?.kind).toBe("payroll");
+    // Migration must not lose fields.
+    expect(migrated[0]?.id).toBe("old_1");
+    expect(migrated[0]?.label).toBe("Old Batch");
+  });
+
+  it("migration is idempotent — v2 records already having kind are unchanged", async () => {
+    const v2Blob = {
+      state: {
+        batches: [
+          {
+            kind: "vendor",
+            id: "vb_1",
+            label: "X",
+            treasuryId: "tr_1",
+            invoiceId: "inv_1",
+            vendorId: "v_1",
+            fxSnapshot: [],
+            line: {
+              vendorId: "v_1",
+              fiat: { minor: "100n", currency: "AUD" },
+              crypto: { value: "1000000n", asset: "CKB", decimals: 8 },
+              fxRate: "1",
+              feeAllocated: { value: "0n", asset: "CKB", decimals: 8 },
+            },
+            state: "draft",
+            createdAt: "2026-01-01T00:00:00Z",
+            updatedAt: "2026-01-01T00:00:00Z",
+          },
+        ],
+      },
+      version: 2,
+    };
+    globalThis.localStorage?.setItem("chain-pay:payroll-batches", JSON.stringify(v2Blob));
+
+    const { usePayrollBatchesStore } = await import("./payroll-batches");
+    await usePayrollBatchesStore.persist.rehydrate();
+
+    expect(usePayrollBatchesStore.getState().batches[0]?.kind).toBe("vendor");
   });
 });

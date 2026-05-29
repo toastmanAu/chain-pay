@@ -45,6 +45,7 @@ const MULTISIG = { pubkeyHashes: [HASH_A, HASH_B] as const };
 
 const baseBatch: PayrollBatch = {
   id: "b1",
+  kind: "payroll",
   label: "test",
   treasuryId: "t1",
   cycleStart: "2026-05-01",

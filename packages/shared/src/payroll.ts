@@ -17,6 +17,8 @@ export interface PayeeProfile extends Identified, Timestamped {
 }
 
 export interface PayrollBatch extends Identified, Timestamped {
+  /** Discriminator. Backfilled to "payroll" on existing persisted records by store v1→v2 migration. */
+  kind: "payroll";
   label: string;
   treasuryId: string;
   cycleStart: string;
@@ -148,4 +150,44 @@ export interface JournalEntry {
     txHash: TransactionHash;
   };
   memo?: string;
+}
+
+export interface VendorPaymentLine {
+  vendorId: string;
+  fiat: FiatAmount;
+  crypto: Money;
+  fxRate: string;
+  feeAllocated: Money;
+}
+
+export interface VendorPaymentBatch extends Identified, Timestamped {
+  kind: "vendor";
+  label: string;
+  treasuryId: string;
+  invoiceId: string;
+  vendorId: string;
+  fxSnapshot: FxQuote[];
+  line: VendorPaymentLine;
+  state: PayrollBatchState;
+  pendingTxId?: string;
+  txBytes?: string;
+  sighashDigest?: string;
+  totals?: PayrollBatchTotals;
+  commPacket?: string;
+  partialSigs?: PartialSigEntry[];
+  commSendStatus?: Record<number, CommSendSlotStatus>;
+  autoBroadcast?: boolean;
+  broadcastError?: string;
+  broadcastInFlight?: boolean;
+  expiresAt?: number;
+}
+
+export type AnyBatch = PayrollBatch | VendorPaymentBatch;
+
+export function isVendorBatch(b: AnyBatch): b is VendorPaymentBatch {
+  return b.kind === "vendor";
+}
+
+export function isPayrollBatch(b: AnyBatch): b is PayrollBatch {
+  return b.kind === "payroll";
 }

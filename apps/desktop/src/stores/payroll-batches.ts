@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import { createJSONStorage, persist, type StateStorage } from "zustand/middleware";
 import type {
+  AnyBatch,
   CommSendSlotStatus,
   PartialSigEntry,
   PayrollBatch,
@@ -18,7 +19,7 @@ export interface MultisigDrainCfg {
 }
 
 interface PayrollBatchesStore {
-  batches: PayrollBatch[];
+  batches: AnyBatch[];
   /**
    * Batch id the user has elected to resume in PayPanel. PayPanel reads this
    * on mount, hydrates from the matching batch, then clears it. Lives in the
@@ -26,12 +27,21 @@ interface PayrollBatchesStore {
    * to know about routing internals.
    */
   selectedDraftId: string | null;
-  addBatch: (b: PayrollBatch) => void;
-  updateBatch: (id: string, patch: Partial<Omit<PayrollBatch, "id" | "createdAt">>) => void;
+  /**
+   * Add a batch. Idempotent: if a batch with the same id is already in the
+   * store, the call is a no-op (avoids accidental duplicate-listing from
+   * effect-driven callers in 3a invoice → vendor-batch flow).
+   */
+  addBatch: (b: AnyBatch) => void;
+  /**
+   * Update a batch. Patch is typed against shared fields — vendor- and
+   * payroll-specific shapes (line vs lines) need their own dedicated actions.
+   */
+  updateBatch: (id: string, patch: Partial<Omit<PayrollBatch, "id" | "createdAt" | "kind">>) => void;
   /** Advance a batch's state through the validated state machine. Throws on invalid transitions or unknown ids. */
   transition: (id: string, to: PayrollBatchState) => void;
   removeBatch: (id: string) => void;
-  findById: (id: string) => PayrollBatch | undefined;
+  findById: (id: string) => AnyBatch | undefined;
   selectDraft: (id: string | null) => void;
   /**
    * Pull all buffered incoming sigs whose sighashDigest matches this batch's,
@@ -98,7 +108,8 @@ export const usePayrollBatchesStore = create<PayrollBatchesStore>()(
     (set, get) => ({
       batches: [],
       selectedDraftId: null,
-      addBatch: (b) => set((s) => ({ batches: [...s.batches, b] })),
+      addBatch: (b) =>
+        set((s) => (s.batches.some((x) => x.id === b.id) ? s : { batches: [...s.batches, b] })),
       selectDraft: (id) => set({ selectedDraftId: id }),
       updateBatch: (id, patch) =>
         set((s) => ({
@@ -300,8 +311,33 @@ export const usePayrollBatchesStore = create<PayrollBatchesStore>()(
     {
       name: "chain-pay:payroll-batches",
       storage: jsonStorage,
-      version: 1,
+      version: 2,
       partialize: (state) => ({ batches: state.batches }),
+      /**
+       * v1→v2: backfill `kind: "payroll"` on persisted batches that predate
+       * the discriminator. Idempotent — records already carrying a `kind`
+       * (vendor batches written by ≥v2 builds) pass through untouched.
+       *
+       * Field shape is otherwise preserved; bigint suffix-tagging continues
+       * to round-trip via the JSONStorage reviver, so no value coercion
+       * happens here.
+       */
+      migrate: (persistedState, version) => {
+        const state = (persistedState as { batches?: Array<Record<string, unknown>> }) ?? {
+          batches: [],
+        };
+        const incoming = Array.isArray(state.batches) ? state.batches : [];
+        if (version < 2) {
+          return {
+            batches: incoming.map((b) =>
+              b !== null && typeof b === "object" && "kind" in b && b.kind
+                ? (b as unknown as AnyBatch)
+                : ({ ...b, kind: "payroll" } as unknown as AnyBatch),
+            ),
+          };
+        }
+        return { batches: incoming as unknown as AnyBatch[] };
+      },
     },
   ),
 );

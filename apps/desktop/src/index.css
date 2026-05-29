@@ -20,3 +20,115 @@ html, body, #root { height: 100%; }
 body { font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
 
 ::selection { background: var(--color-accent); color: var(--color-accent-fg); }
+
+/* ─── Form controls ────────────────────────────────────────────────────────
+   Inputs/selects/textareas have visible borders, padding, focus rings.
+   Labels + their inputs wrap together via flex so resizing reflows them as
+   a unit instead of splitting label from field.
+   Browser-native <option>s in dropdowns on Linux/Chromium inherit from the
+   system theme — we explicitly set bg/color so they're readable on dark.
+   Buttons get a visible click boundary (outline + hover state). */
+
+input[type="text"],
+input[type="number"],
+input[type="date"],
+input[type="email"],
+input[type="search"],
+input[type="file"],
+input:not([type]),
+select,
+textarea {
+  border: 1px solid var(--color-fg-muted);
+  background: var(--color-surface);
+  color: var(--color-fg);
+  border-radius: var(--radius-sm);
+  padding: 6px 10px;
+  font: inherit;
+  min-width: 0;
+}
+
+input:focus,
+select:focus,
+textarea:focus {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 1px;
+  border-color: var(--color-accent);
+}
+
+select option {
+  background: var(--color-surface);
+  color: var(--color-fg);
+}
+
+textarea { min-height: 80px; resize: vertical; }
+
+button {
+  border: 1px solid var(--color-fg-muted);
+  background: var(--color-surface-hi);
+  color: var(--color-fg);
+  border-radius: var(--radius-sm);
+  padding: 6px 14px;
+  font: inherit;
+  cursor: pointer;
+}
+
+button:hover:not(:disabled) {
+  border-color: var(--color-accent);
+  background: var(--color-surface);
+}
+
+button:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 1px;
+}
+
+button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+button[type="submit"] {
+  background: var(--color-accent);
+  color: var(--color-accent-fg);
+  border-color: var(--color-accent);
+}
+
+/* Invoice form layouts — keep label+input as one wrapping unit. */
+.new-invoice-form,
+.review-invoice-form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px;
+  max-width: 720px;
+}
+
+.new-invoice-form label,
+.review-invoice-form label {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.new-invoice-form label > input,
+.new-invoice-form label > select,
+.new-invoice-form label > textarea,
+.review-invoice-form label > input,
+.review-invoice-form label > select,
+.review-invoice-form label > textarea {
+  flex: 1 1 220px;
+}
+
+.new-invoice-form fieldset,
+.review-invoice-form fieldset {
+  border: 1px solid var(--color-fg-muted);
+  border-radius: var(--radius-sm);
+  padding: 12px;
+}
+
+.new-invoice-form .error,
+.review-invoice-form .error {
+  color: var(--color-danger);
+}

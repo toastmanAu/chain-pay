@@ -1,6 +1,7 @@
 import { defineConfig } from "electron-vite";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
+import { nodePolyfills } from "vite-plugin-node-polyfills";
 import { resolve } from "node:path";
 
 export default defineConfig({
@@ -51,7 +52,17 @@ export default defineConfig({
         "@shared": resolve(__dirname, "../../packages/shared/src"),
       },
     },
-    plugins: [react(), tailwindcss()],
+    plugins: [
+      react(),
+      tailwindcss(),
+      // Polyfills Node built-ins (buffer, process, util, etc.) for the
+      // sandboxed renderer. CCC and other CKB libs reach for Node's Buffer
+      // and process.env at runtime — without this they throw at call time.
+      nodePolyfills({
+        protocolImports: true,
+        globals: { Buffer: true, global: true, process: true },
+      }),
+    ],
     server: {
       port: 5173,
       headers: {

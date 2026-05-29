@@ -14,6 +14,7 @@ import {
   resolveProfile,
   setCurrentNetwork,
 } from "./comm-transport-service";
+import { registerInvoiceFilesIpc } from "./invoice-files-host";
 import { loadNetworkState, saveNetworkState } from "./network-state-store";
 import type { CkbNetwork } from "@/lib/light-client/network-configs";
 
@@ -146,6 +147,9 @@ app.whenReady().then(async () => {
   ipcMain.handle("commTransport:resolveProfile", (_e, address: string) =>
     resolveProfile(address),
   );
+
+  // invoice-files handlers
+  registerInvoiceFilesIpc();
 
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) void createWindow();

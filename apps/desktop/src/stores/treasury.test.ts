@@ -9,7 +9,7 @@ import { MemoryStorage } from "./test-utils/memory-storage";
 // ─── Shared helpers ────────────────────────────────────────────────────────
 
 function resetStores(): void {
-  useTreasuryStore.setState({ treasuries: [] });
+  useTreasuryStore.setState({ treasuries: [], activeTreasuryId: null });
   useCommIdentityStore.setState({ identity: null });
   globalThis.localStorage?.removeItem("chain-pay:treasuries");
   globalThis.localStorage?.removeItem("chain-pay:comm-identity");
@@ -259,5 +259,55 @@ describe("treasury store — refusal invariant against comm identity", () => {
 
     useTreasuryStore.getState().addTreasury(treasury);
     expect(useTreasuryStore.getState().treasuries).toHaveLength(1);
+  });
+
+  it("v1→v2 migration backfills activeTreasuryId from first treasury", async () => {
+    (globalThis as { localStorage?: Storage }).localStorage = new MemoryStorage();
+    const v1Blob = {
+      state: {
+        treasuries: [
+          {
+            id: "t_legacy",
+            label: "Legacy Treasury",
+            createdAt: "2026-01-01T00:00:00Z",
+            updatedAt: "2026-01-01T00:00:00Z",
+            multisig: {
+              chain: "ckb:testnet",
+              s: 0,
+              r: 0,
+              m: 2,
+              n: 3,
+              pubkeyHashes: [OTHER_HASH_HEX, `0x${"bb".repeat(20)}`],
+              address: "ckt1qlegacy",
+            },
+          },
+        ],
+        // No activeTreasuryId — the field didn't exist in v1.
+      },
+      version: 1,
+    };
+    globalThis.localStorage?.setItem("chain-pay:treasuries", JSON.stringify(v1Blob));
+
+    vi.resetModules();
+    const { useTreasuryStore: freshStore } = await import("./treasury");
+    await freshStore.persist.rehydrate();
+
+    expect(freshStore.getState().activeTreasuryId).toBe("t_legacy");
+    expect(freshStore.getState().treasuries).toHaveLength(1);
+  });
+
+  it("v1→v2 migration leaves empty treasuries → activeTreasuryId null", async () => {
+    (globalThis as { localStorage?: Storage }).localStorage = new MemoryStorage();
+    const v1Blob = {
+      state: { treasuries: [] },
+      version: 1,
+    };
+    globalThis.localStorage?.setItem("chain-pay:treasuries", JSON.stringify(v1Blob));
+
+    vi.resetModules();
+    const { useTreasuryStore: freshStore } = await import("./treasury");
+    await freshStore.persist.rehydrate();
+
+    expect(freshStore.getState().activeTreasuryId).toBeNull();
   });
 });
