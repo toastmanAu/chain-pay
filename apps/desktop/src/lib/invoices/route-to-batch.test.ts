@@ -68,7 +68,7 @@ describe("routeInvoiceToBatch", () => {
     if (!isVendorBatch(batch)) throw new Error("type narrowing failed");
     expect(batch.invoiceIds[0]).toBe("inv_1");
     expect(batch.vendorId).toBe("vendor_1");
-    expect(batch.line.fiat.currency).toBe("AUD");
+    expect(batch.lines[0]?.fiat.currency).toBe("AUD");
     expect(batch.state).toBe("draft");
   });
 
@@ -188,22 +188,30 @@ describe("routeInvoicesToBatch", () => {
     expect(batch.treasuryId).toBe("tr_1");
   });
 
-  it("sums invoice totals into the consolidated line", () => {
+  it("produces one line per invoice with correct per-vendor amounts (no consolidation)", () => {
     const invA = storedInvoiceFixture("a", { total: 200, currency: "AUD" });
     const invB = storedInvoiceFixture("b", { total: 350, currency: "AUD" });
     const batch = routeInvoicesToBatch([invA, invB], treasuryFixture());
-    // 200 + 350 = 550 → 55000 minor
-    expect(batch.line.fiat.minor).toBe(55000n);
-    expect(batch.line.fiat.currency).toBe("AUD");
+    expect(batch.lines).toHaveLength(2);
+    // lines[0] corresponds to invoiceIds[0] (invA)
+    expect(batch.lines[0]?.vendorId).toBe("vendor_a");
+    expect(batch.lines[0]?.fiat.minor).toBe(20000n);
+    expect(batch.lines[0]?.fiat.currency).toBe("AUD");
+    // lines[1] corresponds to invoiceIds[1] (invB)
+    expect(batch.lines[1]?.vendorId).toBe("vendor_b");
+    expect(batch.lines[1]?.fiat.minor).toBe(35000n);
+    expect(batch.lines[1]?.fiat.currency).toBe("AUD");
   });
 
   it("uses the first invoice's vendorId on batch.vendorId", () => {
     const invA = storedInvoiceFixture("a");
     const invB = storedInvoiceFixture("b");
     const batch = routeInvoicesToBatch([invA, invB], treasuryFixture());
-    // first invoice has vendor_a
+    // batch-level vendorId stays the first invoice's vendorId for label/display purposes
     expect(batch.vendorId).toBe("vendor_a");
-    expect(batch.line.vendorId).toBe("vendor_a");
+    // per-line vendorIds are distinct
+    expect(batch.lines[0]?.vendorId).toBe("vendor_a");
+    expect(batch.lines[1]?.vendorId).toBe("vendor_b");
   });
 
   it("throws when any invoice lacks a payee id", () => {

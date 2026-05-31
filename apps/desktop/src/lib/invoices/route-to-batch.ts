@@ -65,9 +65,9 @@ function buildPayrollBatchFromInvoice(invoice: InvoiceRecord, treasury: Treasury
  * - All are one-off-vendor or recurring-vendor flow
  * - All have a CKB address
  *
- * This builder sums totals into one consolidated VendorPaymentLine and uses
- * the first invoice's vendorId as the canonical batch vendorId (multi-vendor
- * bundles are allowed by canBundle; the line vendorId records the primary payer).
+ * Produces one VendorPaymentLine per invoice; ordering matches invoiceIds so
+ * batch.invoiceIds[i] ↔ batch.lines[i] (load-bearing for Phase 4 journal entries).
+ * batch.vendorId reflects the first invoice's vendorId for label/display purposes.
  */
 export function routeInvoicesToBatch(
   invoices: StoredInvoiceRecord[],
@@ -86,21 +86,19 @@ export function routeInvoicesToBatch(
     }
   }
 
-  // Aggregate total — all invoices share the same currency (canBundle gate)
-  const totalMinor = invoices.reduce(
-    (acc, inv) => acc + BigInt(Math.round(inv.invoice.total * 100)),
-    0n,
-  );
-  const currency = invoices[0]!.invoice.currency;
   const primaryVendorId = invoices[0]!.invoice.payee.id!;
 
-  const line: VendorPaymentLine = {
-    vendorId: primaryVendorId,
-    fiat: { minor: totalMinor, currency },
+  // One line per invoice — preserves per-vendor output mapping for signing path
+  const lines: VendorPaymentLine[] = invoices.map((inv) => ({
+    vendorId: inv.invoice.payee.id!,
+    fiat: {
+      minor: BigInt(Math.round(inv.invoice.total * 100)),
+      currency: inv.invoice.currency,
+    },
     crypto: { asset: "CKB", value: 0n, decimals: 8 },
     fxRate: "0",
     feeAllocated: { asset: "CKB", value: 0n, decimals: 8 },
-  };
+  }));
 
   const id = `vb_${crypto.randomUUID()}`;
   const invoiceIds = invoices.map((i) => i.id);
@@ -115,7 +113,7 @@ export function routeInvoicesToBatch(
     invoiceIds,
     vendorId: primaryVendorId,
     fxSnapshot: [],
-    line,
+    lines,
     state: "draft",
   };
 }
@@ -145,7 +143,7 @@ function buildVendorPaymentBatch(invoice: InvoiceRecord, treasury: Treasury): Ve
     invoiceIds: [invoice.id],
     vendorId,
     fxSnapshot: [],
-    line,
+    lines: [line],
     state: "draft",
   };
 }

@@ -34,8 +34,8 @@ interface PayrollBatchesStore {
    */
   addBatch: (b: AnyBatch) => void;
   /**
-   * Update a batch. Patch is typed against shared fields — vendor- and
-   * payroll-specific shapes (line vs lines) need their own dedicated actions.
+   * Update a batch. Patch is typed against shared fields — lines (per-kind)
+   * are never patched here; use kind-specific actions for those.
    */
   updateBatch: (id: string, patch: Partial<Omit<PayrollBatch, "id" | "createdAt" | "kind">>) => void;
   /** Advance a batch's state through the validated state machine. Throws on invalid transitions or unknown ids. */
@@ -115,7 +115,7 @@ export const usePayrollBatchesStore = create<PayrollBatchesStore>()(
         set((s) => ({
           batches: s.batches.map((b) =>
             b.id === id
-              ? { ...b, ...patch, id: b.id, createdAt: b.createdAt, updatedAt: new Date().toISOString() }
+              ? ({ ...b, ...patch, id: b.id, createdAt: b.createdAt, updatedAt: new Date().toISOString() } as AnyBatch)
               : b,
           ),
         })),

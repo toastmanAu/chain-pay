@@ -167,7 +167,8 @@ export interface VendorPaymentBatch extends Identified, Timestamped {
   invoiceIds: string[];
   vendorId: string;
   fxSnapshot: FxQuote[];
-  line: VendorPaymentLine;
+  /** One line per invoice. Ordering mirrors invoiceIds: lines[i] corresponds to invoiceIds[i]. */
+  lines: VendorPaymentLine[];
   state: PayrollBatchState;
   pendingTxId?: string;
   txBytes?: string;
