@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { ExtractionService } from "./index";
+import { ExtractionService, type ExtractionStoreSlice } from "./index";
 
 interface FakeStore {
   markExtractionRunning: ReturnType<typeof vi.fn>;
@@ -23,7 +23,7 @@ describe("ExtractionService", () => {
     let resolveOcr: (v: { pages: []; elapsed_ms: number; version: string }) => void = () => {};
     const ocr = vi.fn(() => new Promise<{ pages: []; elapsed_ms: number; version: string }>((r) => { resolveOcr = r; }));
     const rasterise = vi.fn(async () => ({ pages: [], pageCount: 0 }));
-    const svc = new ExtractionService(store as any, { ocr, rasterise });
+    const svc = new ExtractionService(store as unknown as ExtractionStoreSlice, { ocr, rasterise });
     const done = svc.enqueue("inv_1", new Blob([], { type: "image/png" }));
     // synchronously moved to running
     expect(store.markExtractionRunning).toHaveBeenCalledWith("inv_1");
@@ -40,7 +40,7 @@ describe("ExtractionService", () => {
   it("enqueue calls markExtractionFailed on worker error", async () => {
     const ocr = vi.fn(async () => { throw new Error("WASM init failed"); });
     const rasterise = vi.fn(async () => ({ pages: [], pageCount: 0 }));
-    const svc = new ExtractionService(store as any, { ocr, rasterise });
+    const svc = new ExtractionService(store as unknown as ExtractionStoreSlice, { ocr, rasterise });
     await svc.enqueue("inv_1", new Blob([], { type: "image/png" }));
     expect(store.markExtractionFailed).toHaveBeenCalledWith("inv_1", expect.stringContaining("WASM init failed"));
   });
@@ -49,7 +49,7 @@ describe("ExtractionService", () => {
     const order: string[] = [];
     const ocr = vi.fn(async () => { order.push("ocr"); return { pages: [] as [], elapsed_ms: 1, version: "5.1.1" }; });
     const rasterise = vi.fn(async () => { order.push("ras"); return { pages: [], pageCount: 0 }; });
-    const svc = new ExtractionService(store as any, { ocr, rasterise });
+    const svc = new ExtractionService(store as unknown as ExtractionStoreSlice, { ocr, rasterise });
     const a = svc.enqueue("inv_a", new Blob([], { type: "image/png" }));
     const b = svc.enqueue("inv_b", new Blob([], { type: "image/png" }));
     await Promise.all([a, b]);
