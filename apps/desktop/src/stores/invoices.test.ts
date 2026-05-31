@@ -173,6 +173,12 @@ describe("invoicesStore extraction actions", () => {
     expect(invRecord.invoice.total).toBe(1234.56);
   });
 
+  it("applyExtraction on unknown id is a no-op and does not throw", () => {
+    const s = useInvoicesStore.getState();
+    expect(() => s.applyExtraction("does-not-exist", SAMPLE_RESULT)).not.toThrow();
+    expect(useInvoicesStore.getState().invoices).toHaveLength(0);
+  });
+
   it("markExtractionFailed sets failed status and error", () => {
     const s = useInvoicesStore.getState();
     s.addInvoice(inv({ id: "inv_1" }));

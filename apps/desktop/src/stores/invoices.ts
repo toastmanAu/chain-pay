@@ -188,6 +188,10 @@ export const useInvoicesStore = create<InvoicesStore>()(
           ),
         })),
 
+      // Contract: `result` is a complete atomic result from one pipeline invocation —
+      // not an incremental partial. The idempotency guard compares only the head (last)
+      // stage signature, which is sufficient when the caller never sends partial runs.
+      // Retries land a fresh `result` and append a new run to the stages history.
       applyExtraction: (id, result) =>
         set((s) => ({
           invoices: s.invoices.map((i) => {
@@ -214,6 +218,9 @@ export const useInvoicesStore = create<InvoicesStore>()(
               unknown,
             ][]) {
               const current = merged[k];
+              // `total` is required + numeric and coerced to 0 at form-init by ReviewInvoiceForm.fromInvoice,
+              // so 0 is the "not yet typed" sentinel for it. `subtotal` and `tax_total` are optional and
+              // stay undefined until the user types them, so the `undefined` arm covers them naturally.
               const isDefaultEmpty =
                 current === undefined ||
                 current === null ||
