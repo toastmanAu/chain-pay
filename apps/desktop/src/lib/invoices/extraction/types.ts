@@ -17,8 +17,11 @@ export interface Stage0Output {
   pageCount: number;
 }
 
+type PipelineStage = Invoice["extraction"]["pipeline"]["stages"][number];
+
 export interface ExtractionResult {
-  stages: Invoice["extraction"]["pipeline"]["stages"];
+  /** At least one stage entry is always present (non-empty tuple). */
+  stages: [PipelineStage, ...PipelineStage[]];
   body: Partial<Invoice["invoice"]>;
   field_confidences: Record<string, number>;
   warnings: NonNullable<Invoice["extraction"]["warnings"]>;
