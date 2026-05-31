@@ -1,6 +1,7 @@
 /// <reference lib="webworker" />
 
 import Tesseract from "tesseract.js";
+import tesseractPkg from "tesseract.js/package.json";
 import type { PageOcr } from "./types";
 
 type TWorker = Tesseract.Worker;
@@ -56,7 +57,7 @@ self.addEventListener("message", async (e: MessageEvent<Request>) => {
       const out: PageOcr[] = [];
       for (let i = 0; i < req.pages.length; i++) {
         const page = req.pages[i];
-        if (!page) continue;
+        if (!page) throw new Error(`BUG: req.pages[${i}] is undefined — Stage 0 should produce a dense array`);
         const canvas = await bitmapToCanvas(page);
         const { data } = await worker.recognize(canvas);
         const lines: PageOcr["lines"] = (data.lines ?? []).map((l) => ({
@@ -72,7 +73,7 @@ self.addEventListener("message", async (e: MessageEvent<Request>) => {
         jobId: req.jobId,
         pages: out,
         elapsed_ms,
-        version: "5.1.1",
+        version: tesseractPkg.version,
       });
     } catch (err) {
       const reason = err instanceof Error ? err.message : String(err);

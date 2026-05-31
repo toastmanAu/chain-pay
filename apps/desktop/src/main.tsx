@@ -1,3 +1,4 @@
+// Must remain first: sets pdfjs worker URL before any getDocument() call.
 import "@/lib/invoices/extraction/pdfjs-worker-setup";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
