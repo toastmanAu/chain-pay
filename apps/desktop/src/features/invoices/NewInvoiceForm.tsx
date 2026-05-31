@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import type { InvoiceFlow, InvoiceRecord, VendorProfile } from "@chain-pay/shared";
+import { extractionService } from "@/lib/invoices/extraction";
 import { storeBlob } from "@/lib/invoices/file-storage";
 import { useInvoicesStore } from "@/stores/invoices";
 import { usePayeesStore } from "@/stores/payees";
@@ -76,6 +77,7 @@ export function NewInvoiceForm() {
         approval: { status: "draft" },
       };
       addInvoice(invoice);
+      extractionService().enqueue(invoice.id, file);
       navigate(`/invoices/${invoice.id}/review`);
     } finally {
       setSubmitting(false);
