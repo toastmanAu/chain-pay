@@ -23,7 +23,7 @@ describe("kind discriminator + VendorPaymentBatch", () => {
     expectTypeOf<VendorPaymentBatch>().toHaveProperty("line").toEqualTypeOf<VendorPaymentLine>();
   });
 
-  it("VendorPaymentBatch backlinks an invoiceId", () => {
-    expectTypeOf<VendorPaymentBatch>().toHaveProperty("invoiceId").toEqualTypeOf<string>();
+  it("VendorPaymentBatch backlinks an invoiceIds array", () => {
+    expectTypeOf<VendorPaymentBatch>().toHaveProperty("invoiceIds").toEqualTypeOf<string[]>();
   });
 });

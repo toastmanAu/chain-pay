@@ -23,7 +23,7 @@ describe("syncBatchConfirmedToInvoice", () => {
       }] as never,
     });
     usePayrollBatchesStore.setState({
-      batches: [{ kind: "vendor", id: "vb_1", state: "confirmed", pendingTxId: "0xdeadbeef", createdAt: now, updatedAt: now, label: "", treasuryId: "", invoiceId: "inv_1", vendorId: "v_1", fxSnapshot: [], line: { vendorId: "v_1", fiat: { minor: 100n, currency: "AUD" }, crypto: { value: 0n, asset: "CKB", decimals: 8 }, fxRate: "0", feeAllocated: { value: 0n, asset: "CKB", decimals: 8 } } }] as never,
+      batches: [{ kind: "vendor", id: "vb_1", state: "confirmed", pendingTxId: "0xdeadbeef", createdAt: now, updatedAt: now, label: "", treasuryId: "", invoiceIds: ["inv_1"], vendorId: "v_1", fxSnapshot: [], line: { vendorId: "v_1", fiat: { minor: 100n, currency: "AUD" }, crypto: { value: 0n, asset: "CKB", decimals: 8 }, fxRate: "0", feeAllocated: { value: 0n, asset: "CKB", decimals: 8 } } }] as never,
       selectedDraftId: null,
     });
 
@@ -65,7 +65,7 @@ describe("syncBatchConfirmedToInvoice", () => {
       }] as never,
     });
     usePayrollBatchesStore.setState({
-      batches: [{ kind: "vendor", id: "vb_1", state: "confirmed", pendingTxId: "0xdead", createdAt: now, updatedAt: now, label: "", treasuryId: "", invoiceId: "inv_1", vendorId: "v_1", fxSnapshot: [], line: { vendorId: "v_1", fiat: { minor: 100n, currency: "AUD" }, crypto: { value: 0n, asset: "CKB", decimals: 8 }, fxRate: "0", feeAllocated: { value: 0n, asset: "CKB", decimals: 8 } } }] as never,
+      batches: [{ kind: "vendor", id: "vb_1", state: "confirmed", pendingTxId: "0xdead", createdAt: now, updatedAt: now, label: "", treasuryId: "", invoiceIds: ["inv_1"], vendorId: "v_1", fxSnapshot: [], line: { vendorId: "v_1", fiat: { minor: 100n, currency: "AUD" }, crypto: { value: 0n, asset: "CKB", decimals: 8 }, fxRate: "0", feeAllocated: { value: 0n, asset: "CKB", decimals: 8 } } }] as never,
       selectedDraftId: null,
     });
     syncBatchConfirmedToInvoice();

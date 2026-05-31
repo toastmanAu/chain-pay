@@ -65,7 +65,7 @@ describe("routeInvoiceToBatch", () => {
     const batch = routeInvoiceToBatch(inv, treasuryFixture());
     expect(isVendorBatch(batch)).toBe(true);
     if (!isVendorBatch(batch)) throw new Error("type narrowing failed");
-    expect(batch.invoiceId).toBe("inv_1");
+    expect(batch.invoiceIds[0]).toBe("inv_1");
     expect(batch.vendorId).toBe("vendor_1");
     expect(batch.line.fiat.currency).toBe("AUD");
     expect(batch.state).toBe("draft");

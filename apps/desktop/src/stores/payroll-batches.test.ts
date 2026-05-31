@@ -527,7 +527,7 @@ describe("kind discriminator + v1→v2 migration", () => {
       updatedAt: new Date().toISOString(),
       label: "Acme INV-001",
       treasuryId: "tr_1",
-      invoiceId: "inv_1",
+      invoiceIds: ["inv_1"],
       vendorId: "vendor_1",
       fxSnapshot: [],
       line: {
@@ -586,7 +586,7 @@ describe("kind discriminator + v1→v2 migration", () => {
             id: "vb_1",
             label: "X",
             treasuryId: "tr_1",
-            invoiceId: "inv_1",
+            invoiceIds: ["inv_1"],
             vendorId: "v_1",
             fxSnapshot: [],
             line: {

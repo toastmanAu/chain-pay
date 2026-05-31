@@ -75,7 +75,7 @@ function buildVendorPaymentBatch(invoice: InvoiceRecord, treasury: Treasury): Ve
     updatedAt: now,
     label: `${invoice.invoice.payee.display_name} ${invoice.invoice.invoice_number ?? invoice.id}`,
     treasuryId: treasury.id,
-    invoiceId: invoice.id,
+    invoiceIds: [invoice.id],
     vendorId,
     fxSnapshot: [],
     line,

@@ -164,7 +164,7 @@ export interface VendorPaymentBatch extends Identified, Timestamped {
   kind: "vendor";
   label: string;
   treasuryId: string;
-  invoiceId: string;
+  invoiceIds: string[];
   vendorId: string;
   fxSnapshot: FxQuote[];
   line: VendorPaymentLine;
