@@ -16,6 +16,7 @@ const CURRENCY_TOKENS: Array<[RegExp, string]> = [
 ];
 
 const INVOICE_NUMBER_RE = /invoice\s*(?:no\.?|number|#)\s*[:\-]?\s*([A-Z0-9\-_/]+)/i;
+// (?:^|[^a-z]) — with /i flag, [^a-z] becomes [^a-zA-Z], blocking "Subtotal"/"SUBTOTAL".
 const TOTAL_LABEL_RE = /(?:^|[^a-z])total\s*[:\-]?\s*(?:[A-Z]{3}\s*)?([\$£€]?\s*-?[\d,]+(?:\.\d+)?)/i;
 const ISO_DATE_OR_DMY = /(\d{4}-\d{2}-\d{2}|\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4})/;
 const ISSUED_RE = new RegExp("(?:issued|issue\\s*date)\\s*[:\\-]?\\s*" + ISO_DATE_OR_DMY.source, "i");
@@ -26,13 +27,20 @@ const CKB_RE = /\b(ck[bt]1[a-z0-9]{20,})/i;
 const EVM_RE = /\b(0x[0-9a-f]{40})\b/i;
 
 function parseCurrency(s: string): { total?: number; warn?: string } {
-  const cleaned = s.replace(/[\$£€\s]/g, "").replace(/,/g, "");
+  const stripped = s.replace(/[\$£€\s]/g, "");
+  // EU comma-decimal: "250,00" / "1.234,56" — comma followed by exactly 2 digits at end,
+  // and no period after the comma. Stripping the comma silently yields 100x. Warn instead.
+  if (/,\d{2}$/.test(stripped) && !/\.\d/.test(stripped.slice(stripped.lastIndexOf(",")))) {
+    return { warn: "Possible European decimal format — manual review needed" };
+  }
+  const cleaned = stripped.replace(/,/g, "");
   const n = Number(cleaned);
   if (!Number.isFinite(n)) return { warn: "Total looked invalid" };
   if (n < 0) return { warn: "Total looked invalid" };
   return { total: n };
 }
 
+// Assumes dd/mm/yyyy (Australian/European convention). US mm/dd documents will be mis-parsed.
 function parseDate(raw: string): string | undefined {
   if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) return raw;
   const m = raw.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})$/);
@@ -136,7 +144,7 @@ export function extractFields(pages: PageOcr[]): ExtractionResult {
         ...(acct ? { account_number: acct[1] } : {}),
       },
     };
-    if (bsb) field_confidences.bsb = 0.95;
+    if (bsb) field_confidences.bsb = 0.75;
     if (acct) field_confidences.account_number = 0.9;
   }
 

@@ -52,6 +52,14 @@ const CASES: Array<{ name: string; pages: PageOcr[]; expect: (r: ReturnType<type
     },
   },
   {
+    name: "EU comma-decimal with English Total label emits warning, not silent 100x",
+    pages: [page("Total: € 250,00", [{ text: "Total: € 250,00", y: 800 }])],
+    expect: (r) => {
+      expect(r.body.total).toBeUndefined();
+      expect(r.warnings.some((w) => w.field === "total" && /european|decimal|manual review/i.test(w.message))).toBe(true);
+    },
+  },
+  {
     name: "BSB present (AU bank details)",
     pages: [page("BSB 062-001 Account 12345678 Total $200", [
       { text: "BSB 062-001 Account 12345678", y: 600 },
@@ -104,6 +112,15 @@ const CASES: Array<{ name: string; pages: PageOcr[]; expect: (r: ReturnType<type
       expect(r.body.total).toBeUndefined();
       // every field that we tried but couldn't extract gets a low-confidence entry
       expect(r.warnings.length).toBeGreaterThan(0);
+    },
+  },
+  {
+    name: "empty pages — no crash, single stage recorded",
+    pages: [],
+    expect: (r) => {
+      expect(r.body.total).toBeUndefined();
+      expect(r.stages).toHaveLength(1);
+      expect(r.stages[0].name).toBe("schema-extraction");
     },
   },
   {
