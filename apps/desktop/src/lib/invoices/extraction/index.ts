@@ -1,5 +1,6 @@
 import { runPipeline, type OcrFn } from "./pipeline";
-import type { ExtractionResult, Stage0Output } from "./types";
+import type { ExtractionResult, PageOcr, Stage0Output } from "./types";
+import { useInvoicesStore } from "@/stores/invoices";
 
 export interface ExtractionStoreSlice {
   markExtractionRunning: (id: string) => void;
@@ -45,4 +46,55 @@ export class ExtractionService {
     }
     this.running = false;
   }
+}
+
+// ---------------------------------------------------------------------------
+// Real Web Worker wiring — renderer-only singleton
+// ---------------------------------------------------------------------------
+
+interface WorkerDoneMsg { type: "done"; jobId: string; pages: PageOcr[]; elapsed_ms: number; version: string }
+interface WorkerErrMsg { type: "error"; jobId: string; reason: string }
+
+let workerPromise: Promise<Worker> | null = null;
+
+function bootWorker(): Promise<Worker> {
+  if (workerPromise) return workerPromise;
+  workerPromise = (async () => {
+    // Vite worker import — bundles the entrypoint as a Web Worker.
+    const TesseractWorker = (await import("./worker.ts?worker")).default;
+    return new TesseractWorker();
+  })();
+  return workerPromise;
+}
+
+let jobCounter = 0;
+
+const realOcr: OcrFn = async (pages: ImageBitmap[]) => {
+  const worker = await bootWorker();
+  const jobId = `job_${++jobCounter}`;
+  return await new Promise((resolve, reject) => {
+    const onMsg = (e: MessageEvent<WorkerDoneMsg | WorkerErrMsg>) => {
+      if (e.data.jobId !== jobId) return;
+      worker.removeEventListener("message", onMsg as EventListener);
+      if (e.data.type === "done") {
+        resolve({ pages: e.data.pages, elapsed_ms: e.data.elapsed_ms, version: e.data.version });
+      } else {
+        reject(new Error(e.data.reason));
+      }
+    };
+    worker.addEventListener("message", onMsg as EventListener);
+    worker.postMessage({ type: "recognize", jobId, pages }, pages);
+  });
+};
+
+let _singleton: ExtractionService | null = null;
+export function extractionService(): ExtractionService {
+  if (_singleton) return _singleton;
+  const slice: ExtractionStoreSlice = {
+    markExtractionRunning: useInvoicesStore.getState().markExtractionRunning,
+    applyExtraction: useInvoicesStore.getState().applyExtraction,
+    markExtractionFailed: useInvoicesStore.getState().markExtractionFailed,
+  };
+  _singleton = new ExtractionService(slice, { ocr: realOcr });
+  return _singleton;
 }
