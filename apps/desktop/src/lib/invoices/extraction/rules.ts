@@ -22,7 +22,7 @@ const ISSUED_RE = new RegExp("(?:issued|issue\\s*date)\\s*[:\\-]?\\s*" + ISO_DAT
 const DUE_RE = new RegExp("due\\s*(?:date)?\\s*[:\\-]?\\s*" + ISO_DATE_OR_DMY.source, "i");
 const BSB_RE = /\b(\d{3}-\d{3})\b/;
 const ACCOUNT_RE = /account\s*[:\-]?\s*(\d{6,10})/i;
-const CKB_RE = /\b(ck[bt]1[a-z0-9]{4,})/i;
+const CKB_RE = /\b(ck[bt]1[a-z0-9]{20,})/i;
 const EVM_RE = /\b(0x[0-9a-f]{40})\b/i;
 
 function parseCurrency(s: string): { total?: number; warn?: string } {

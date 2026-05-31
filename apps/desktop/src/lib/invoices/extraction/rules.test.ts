@@ -64,7 +64,9 @@ const CASES: Array<{ name: string; pages: PageOcr[]; expect: (r: ReturnType<type
   },
   {
     name: "CKB testnet address present",
-    pages: [page("Pay to: ckt1qyqv... Total $50", [{ text: "Pay to: ckt1qyqv0z2u Total $50", y: 800 }])],
+    pages: [page("Pay to: ckt1qyqdmeuqrsrnm7e5vnrmruzmsp4m9wacf6vsxasryq... Total $50", [
+      { text: "Pay to: ckt1qyqdmeuqrsrnm7e5vnrmruzmsp4m9wacf6vsxasryq Total $50", y: 800 },
+    ])],
     expect: (r) => {
       expect(r.body.payment_details?.ckb_address).toMatch(/^ckt1/);
     },
