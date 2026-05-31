@@ -30,3 +30,21 @@ export interface ExtractionResult {
 export interface ExtractionFailure {
   reason: string;
 }
+
+export type BackendId = "tesseract" | "surya-remote";
+
+export type MapperFn = (pages: PageOcr[]) => ExtractionResult;
+
+export class SuryaInfraError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "SuryaInfraError";
+  }
+}
+
+export class SuryaContentError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "SuryaContentError";
+  }
+}
