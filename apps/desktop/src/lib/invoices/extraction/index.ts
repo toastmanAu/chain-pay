@@ -1,5 +1,6 @@
 import { runPipeline, type OcrFn } from "./pipeline";
 import type { ExtractionResult, PageOcr, Stage0Output } from "./types";
+import { extractFields } from "./rules";
 import { useInvoicesStore } from "@/stores/invoices";
 
 export interface ExtractionStoreSlice {
@@ -11,6 +12,7 @@ export interface ExtractionStoreSlice {
 export interface ExtractionDeps {
   ocr: OcrFn;
   rasterise?: (blob: Blob) => Promise<Stage0Output>;
+  // TODO(3c-task-11): wire from settings
 }
 
 interface QueueEntry { invoiceId: string; blob: Blob; resolve: () => void }
@@ -35,7 +37,8 @@ export class ExtractionService {
     while (this.queue.length > 0) {
       const entry = this.queue.shift()!;
       try {
-        const result = await runPipeline(entry.blob, this.deps);
+        // TODO(3c-task-11): wire from settings
+        const result = await runPipeline(entry.blob, { ...this.deps, mapper: extractFields });
         this.store.applyExtraction(entry.invoiceId, result);
       } catch (err) {
         const reason = err instanceof Error ? err.message : String(err);
