@@ -102,7 +102,9 @@ function diffEdits(before: InvoiceRecord, after: InvoiceRecord): EditEntry[] {
 
 /** Strip ChainPay-local wrapper fields before validating against the durable schema. */
 function toSchemaShape(rec: InvoiceRecord): Omit<InvoiceRecord, "id" | "createdAt" | "updatedAt"> {
-  const { id: _id, createdAt: _c, updatedAt: _u, ...rest } = rec;
+  // Also strip StoredInvoiceRecord-only runtime fields (batchId, extractionStatus,
+  // extractionError) so they don't fail InvoiceSchema's .strict() check.
+  const { id: _id, createdAt: _c, updatedAt: _u, batchId: _b, extractionStatus: _es, extractionError: _ee, ...rest } = rec as InvoiceRecord & { batchId?: unknown; extractionStatus?: unknown; extractionError?: unknown };
   return rest;
 }
 

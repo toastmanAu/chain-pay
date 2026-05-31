@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import type { InvoiceRecord } from "@chain-pay/shared";
+import type { Invoice, InvoiceRecord } from "@chain-pay/shared";
 import { useInvoicesStore } from "./invoices";
 
 function inv(overrides: Partial<InvoiceRecord> = {}): InvoiceRecord {
@@ -101,5 +101,84 @@ describe("useInvoicesStore", () => {
     useInvoicesStore.getState().addInvoice(inv({ id: "b", approval: { status: "in-review" } }));
     useInvoicesStore.getState().addInvoice(inv({ id: "c", approval: { status: "in-review" } }));
     expect(useInvoicesStore.getState().filterByStatus("in-review")).toHaveLength(2);
+  });
+});
+
+describe("invoicesStore.extractionStatus", () => {
+  beforeEach(() => useInvoicesStore.setState({ invoices: [] }));
+
+  it("defaults new invoices to extractionStatus=pending", () => {
+    useInvoicesStore.getState().addInvoice(inv({ id: "inv_1" }));
+    const stored = useInvoicesStore.getState().findById("inv_1");
+    expect(stored?.extractionStatus).toBe("pending");
+  });
+});
+
+const SAMPLE_RESULT: {
+  stages: Invoice["extraction"]["pipeline"]["stages"];
+  body: Partial<Invoice["invoice"]>;
+  field_confidences: Record<string, number>;
+  warnings: NonNullable<Invoice["extraction"]["warnings"]>;
+} = {
+  stages: [
+    { name: "layout-ocr", model: "tesseract.js", version: "5.1.1", elapsed_ms: 4200 },
+    { name: "schema-extraction", model: "rules-v1", version: "0.1.0", elapsed_ms: 12 },
+  ],
+  body: { total: 1234.56, invoice_number: "INV-001" },
+  field_confidences: { total: 0.92, invoice_number: 0.78 },
+  warnings: [],
+};
+
+describe("invoicesStore extraction actions", () => {
+  beforeEach(() => useInvoicesStore.setState({ invoices: [] }));
+
+  it("markExtractionRunning moves pending -> running", () => {
+    const s = useInvoicesStore.getState();
+    s.addInvoice(inv({ id: "inv_1" }));
+    s.markExtractionRunning("inv_1");
+    expect(useInvoicesStore.getState().findById("inv_1")?.extractionStatus).toBe("running");
+  });
+
+  it("applyExtraction populates body, confidences, stages and sets extracted", () => {
+    const s = useInvoicesStore.getState();
+    // Use total: 0 so extraction fills it in
+    s.addInvoice(inv({ id: "inv_1", invoice: { flow: "one-off-vendor", payee: { kind: "vendor", display_name: "Acme" }, currency: "AUD", total: 0 } }));
+    s.applyExtraction("inv_1", SAMPLE_RESULT);
+    const invRecord = useInvoicesStore.getState().findById("inv_1")!;
+    expect(invRecord.extractionStatus).toBe("extracted");
+    expect(invRecord.invoice.total).toBe(1234.56);
+    expect(invRecord.invoice.invoice_number).toBe("INV-001");
+    expect(invRecord.extraction.pipeline.stages).toHaveLength(2);
+    expect(invRecord.extraction.field_confidences).toEqual({ total: 0.92, invoice_number: 0.78 });
+  });
+
+  it("applyExtraction is idempotent — same head signature is a no-op", () => {
+    const s = useInvoicesStore.getState();
+    s.addInvoice(inv({ id: "inv_1", invoice: { flow: "one-off-vendor", payee: { kind: "vendor", display_name: "Acme" }, currency: "AUD", total: 0 } }));
+    s.applyExtraction("inv_1", SAMPLE_RESULT);
+    s.applyExtraction("inv_1", SAMPLE_RESULT);
+    expect(useInvoicesStore.getState().findById("inv_1")?.extraction.pipeline.stages).toHaveLength(2);
+  });
+
+  it("applyExtraction preserves user-typed fields", () => {
+    const s = useInvoicesStore.getState();
+    // Start with total: 0 so extraction would normally fill it
+    s.addInvoice(inv({ id: "inv_1", invoice: { flow: "one-off-vendor", payee: { kind: "vendor", display_name: "Acme" }, currency: "AUD", total: 0 } }));
+    // User types invoice_number manually before extraction runs
+    s.updateInvoice("inv_1", { invoice: { flow: "one-off-vendor", payee: { kind: "vendor", display_name: "Acme" }, currency: "AUD", total: 0, invoice_number: "USER-001" } });
+    s.applyExtraction("inv_1", SAMPLE_RESULT);
+    const invRecord = useInvoicesStore.getState().findById("inv_1")!;
+    // User-typed invoice_number must survive; extraction-filled total must populate
+    expect(invRecord.invoice.invoice_number).toBe("USER-001");
+    expect(invRecord.invoice.total).toBe(1234.56);
+  });
+
+  it("markExtractionFailed sets failed status and error", () => {
+    const s = useInvoicesStore.getState();
+    s.addInvoice(inv({ id: "inv_1" }));
+    s.markExtractionFailed("inv_1", "PDF is password-protected");
+    const invRecord = useInvoicesStore.getState().findById("inv_1")!;
+    expect(invRecord.extractionStatus).toBe("failed");
+    expect(invRecord.extractionError).toBe("PDF is password-protected");
   });
 });

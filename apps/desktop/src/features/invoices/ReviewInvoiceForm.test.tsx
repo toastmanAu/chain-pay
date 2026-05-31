@@ -5,7 +5,7 @@ import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { InvoiceRecord, Treasury } from "@chain-pay/shared";
-import { useInvoicesStore } from "@/stores/invoices";
+import { useInvoicesStore, type StoredInvoiceRecord } from "@/stores/invoices";
 import { useInvoiceDraftsStore } from "@/stores/invoice-drafts";
 import { usePayrollBatchesStore } from "@/stores/payroll-batches";
 import { useTreasuryStore } from "@/stores/treasury";
@@ -24,7 +24,7 @@ vi.mock("pdfjs-dist", () => ({
   GlobalWorkerOptions: { workerSrc: "" },
 }));
 
-function invoiceFixture(): InvoiceRecord {
+function invoiceFixture(): StoredInvoiceRecord {
   const now = new Date().toISOString();
   return {
     id: "inv_1",
@@ -50,6 +50,7 @@ function invoiceFixture(): InvoiceRecord {
     },
     extraction: { pipeline: { stages: [] }, extracted_at: now },
     approval: { status: "draft" },
+    extractionStatus: "pending",
   };
 }
 
