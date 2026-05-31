@@ -20,6 +20,8 @@ describe("rasterise", () => {
     const blob = new Blob([new Uint8Array([0xff, 0xd8, 0xff])], { type: "image/jpeg" });
     const out = await rasterise(blob);
     expect(out.pageCount).toBe(1);
+    expect(out.pages).toHaveLength(1);
+    expect(out.pages[0]).toBe(fakeBitmap);
     vi.unstubAllGlobals();
   });
 

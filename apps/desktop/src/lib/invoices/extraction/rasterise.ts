@@ -20,7 +20,8 @@ async function rasterisePdf(blob: Blob): Promise<Stage0Output> {
     const canvas = new OffscreenCanvas(Math.ceil(viewport.width), Math.ceil(viewport.height));
     const ctx = canvas.getContext("2d");
     if (!ctx) throw new Error("OffscreenCanvas 2D unavailable");
-    // pdfjs-dist v4 RenderParameters uses canvasContext only (no separate canvas property)
+    // OffscreenCanvasRenderingContext2D is structurally compatible with CanvasRenderingContext2D
+    // (same 2D draw API) but TypeScript requires the cast due to nominal typing of the two interfaces.
     await page.render({ canvasContext: ctx as unknown as CanvasRenderingContext2D, viewport }).promise;
     pages.push(canvas.transferToImageBitmap());
   }
