@@ -21,7 +21,7 @@ const STAGE_MODEL = "surya-mapper-v1" as const;
 const STAGE_VERSION = "0.1.0" as const;
 
 const SUBTOTAL_RE = /subtotal\s*[:\-]?\s*[\$£€]?\s*([\d,]+(?:\.\d+)?)/i;
-const TAX_RE = /^(?:tax|gst|vat)\s*(?:\d+%?)?\s*[:\-]?\s*\(?\s*[\$£€]?\s*([\d,]+(?:\.\d+)?)/i;
+const TAX_RE = /^(?:tax|gst|vat)\s*(?:\(?\d+%?\)?)?\s*[:\-]?\s*[\$£€]?\s*([\d,]+(?:\.\d+)?)/i;
 
 type Mut = {
   body: Partial<Invoice["invoice"]>;
@@ -190,6 +190,11 @@ function fillLineItems(blocks: Block[], m: Mut): void {
 
     if (descIdx === -1 || qtyIdx === -1 || unitIdx === -1 || totalIdx === -1) {
       allHeadersFound = false;
+    }
+
+    const presentIdxes = [descIdx, qtyIdx, unitIdx, totalIdx].filter((i) => i >= 0);
+    if (new Set(presentIdxes).size < presentIdxes.length) {
+      allHeadersFound = false; // two regexes bound to the same column (e.g. "Unit Total")
     }
 
     for (const row of t.rows) {

@@ -11,10 +11,15 @@ export function assertWellFormed(html: string): void {
   if (!trimmed.endsWith("</div>") && !trimmed.endsWith("</p>") && !trimmed.endsWith("</table>")) {
     throw new SuryaContentError(`response appears truncated (ends with: ${trimmed.slice(-50)})`);
   }
-  const open = (html.match(/<div\b/g) ?? []).length;
-  const close = (html.match(/<\/div>/g) ?? []).length;
-  if (open !== close) {
-    throw new SuryaContentError(`unbalanced <div>: open=${open}, close=${close}`);
+  const divOpen = (html.match(/<div\b/g) ?? []).length;
+  const divClose = (html.match(/<\/div>/g) ?? []).length;
+  if (divOpen !== divClose) {
+    throw new SuryaContentError(`unbalanced <div>: open=${divOpen}, close=${divClose}`);
+  }
+  const pOpen = (html.match(/<p\b/g) ?? []).length;
+  const pClose = (html.match(/<\/p>/g) ?? []).length;
+  if (pOpen !== pClose) {
+    throw new SuryaContentError(`unbalanced <p>: open=${pOpen}, close=${pClose}`);
   }
 }
 
@@ -29,8 +34,11 @@ async function imageBitmapToPngBlob(bitmap: ImageBitmap): Promise<Blob> {
 async function blobToDataUri(blob: Blob): Promise<string> {
   const buf = await blob.arrayBuffer();
   const bytes = new Uint8Array(buf);
+  const CHUNK = 65536;
   let binary = "";
-  for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]!);
+  for (let i = 0; i < bytes.length; i += CHUNK) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + CHUNK));
+  }
   return `data:${blob.type};base64,${btoa(binary)}`;
 }
 

@@ -66,10 +66,23 @@ describe("mapSuryaPages — edge cases", () => {
     expect(r.body.tax_total).toBeCloseTo(99.05);
   });
 
+  it("tax line with parenthesised rate — captures amount, not rate", () => {
+    const html = `<div data-bbox="0 0 100 20" data-label="Text"><p>GST (10%): $99.05</p></div>`;
+    const r = mapSuryaPages([{ pageIndex: 0, text: html, lines: [] }]);
+    expect(r.body.tax_total).toBeCloseTo(99.05);
+  });
+
   it("subtotal line — fills subtotal field", () => {
     const html = `<div data-bbox="0 0 100 20" data-label="Text"><p>Subtotal: $1,234.56</p></div>`;
     const r = mapSuryaPages([{ pageIndex: 0, text: html, lines: [] }]);
     expect(r.body.subtotal).toBeCloseTo(1234.56);
+  });
+
+  it("table with 'Unit Total' header (collision) — line items at lower confidence", () => {
+    const html = `<div data-bbox="0 0 100 100" data-label="Table"><table><thead><tr><th>Description</th><th>Qty</th><th>Unit Total</th></tr></thead><tbody><tr><td>Widget</td><td>2</td><td>10.00</td></tr></tbody></table></div>`;
+    const r = mapSuryaPages([{ pageIndex: 0, text: html, lines: [] }]);
+    expect(r.body.line_items).toBeDefined();
+    expect(r.field_confidences.line_items).toBeLessThan(0.85);
   });
 
   it("records stage entry with surya-mapper-v1 model name", () => {
