@@ -32,7 +32,7 @@ export function ExtractionSection() {
   const canTest = isSurya && urlValid && !testing;
   const canSave =
     pendingBackend === "tesseract" ||
-    (dirty && urlValid && lastResult === "ok" && pendingUrl === url);
+    (isSurya && urlValid && lastResult === "ok");
 
   async function onTest() {
     if (!canTest) return;

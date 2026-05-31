@@ -83,4 +83,27 @@ describe("ExtractionSection", () => {
     render(<ExtractionSection />);
     expect(screen.getByRole("button", { name: /Save/i })).not.toBeDisabled();
   });
+
+  it("Save re-enables for a fresh URL change after a successful test (regression for canSave deadlock)", async () => {
+    // arrange: user is on surya-remote with one URL successfully tested
+    fetchMock.mockResolvedValue(new Response("OK", { status: 200 }));
+    useExtractionSettingsStore.setState({
+      extractionBackend: "surya-remote",
+      suryaEndpointUrl: "http://old:9991/v1",
+      suryaLastTestResult: "ok",
+      suryaLastTestedAt: "2026-05-31T00:00:00Z",
+    });
+    render(<ExtractionSection />);
+
+    // act: type a new URL, click Test, wait for green
+    const input = screen.getByLabelText(/Surya endpoint URL/i);
+    fireEvent.change(input, { target: { value: "http://new:9991/v1" } });
+    fireEvent.click(screen.getByRole("button", { name: /Test/i }));
+    await waitFor(() => {
+      expect(useExtractionSettingsStore.getState().suryaLastTestResult).toBe("ok");
+    });
+
+    // assert: Save is now enabled
+    expect(screen.getByRole("button", { name: /Save/i })).not.toBeDisabled();
+  });
 });

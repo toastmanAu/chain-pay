@@ -82,6 +82,10 @@ describe("assertWellFormed", () => {
     expect(() => assertWellFormed(`<div><div>nested</div></p>`)).toThrow(SuryaContentError);
   });
 
+  it("throws SuryaContentError when <p> counts are unbalanced (closed div, unclosed p)", () => {
+    expect(() => assertWellFormed(`<div data-bbox="0 0 100 20"><p>text is cut</div>`)).toThrow(SuryaContentError);
+  });
+
   it("accepts trailing whitespace", () => {
     expect(() => assertWellFormed(`<div>ok</div>   \n`)).not.toThrow();
   });
