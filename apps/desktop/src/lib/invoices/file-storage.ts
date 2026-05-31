@@ -22,3 +22,20 @@ export async function readUri(uri: string): Promise<Uint8Array> {
 export async function deleteUri(uri: string): Promise<void> {
   return window.chainpay.invoiceFiles.delete(uri);
 }
+
+/**
+ * Read a previously-stored file URI back as a Blob.
+ * Returns null if the IPC call fails (e.g. file deleted).
+ */
+export async function fileFromStorage(uri: string): Promise<Blob | null> {
+  try {
+    const bytes = await readUri(uri);
+    // Copy into a plain ArrayBuffer to satisfy the Blob constructor's BlobPart
+    // type constraint (Uint8Array's .buffer may be typed as ArrayBufferLike).
+    const ab = new ArrayBuffer(bytes.byteLength);
+    new Uint8Array(ab).set(bytes);
+    return new Blob([ab], { type: "application/pdf" });
+  } catch {
+    return null;
+  }
+}
