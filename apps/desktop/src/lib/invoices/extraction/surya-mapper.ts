@@ -1,8 +1,5 @@
-import type { Invoice } from "@chain-pay/shared";
-import type { ExtractionResult, MapperFn, PageOcr } from "./types";
-import { SuryaContentError } from "./types";
-import { parseBlocks, parseTable, type Block } from "./surya-html";
 import {
+  type Invoice,
   ACCOUNT_RE,
   BSB_RE,
   CKB_RE,
@@ -14,7 +11,10 @@ import {
   TOTAL_LABEL_RE,
   parseCurrency,
   parseDate,
-} from "./regex-shared";
+} from "@chain-pay/shared";
+import type { ExtractionResult, MapperFn, PageOcr } from "./types";
+import { SuryaContentError } from "./types";
+import { parseBlocks, parseTable, type Block } from "./surya-html";
 
 const STAGE_NAME = "schema-extraction" as const;
 const STAGE_MODEL = "surya-mapper-v1" as const;

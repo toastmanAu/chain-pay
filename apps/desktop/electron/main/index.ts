@@ -1,6 +1,8 @@
 import { app, BrowserWindow, ipcMain, session, shell } from "electron";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import fs from "node:fs/promises";
+import path from "node:path";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 import {
@@ -16,11 +18,69 @@ import {
 } from "./comm-transport-service";
 import { registerInvoiceFilesIpc } from "./invoice-files-host";
 import { loadNetworkState, saveNetworkState } from "./network-state-store";
+import {
+  initBiscuit,
+  generateRootKeypair,
+  issueCaptureV1Token,
+  type RootKeypair,
+} from "./pair-server-biscuit";
+import { startPairServer, stopPairServer } from "./pair-server";
+import { addDevice, listDevices, revokeDevice } from "./pair-store";
+import { getSafeStorage } from "./safe-storage";
 import type { CkbNetwork } from "@/lib/light-client/network-configs";
 
 const isDev = !app.isPackaged;
 
 let mainWindow: BrowserWindow | null = null;
+
+let rootKeypairCache: RootKeypair | null = null;
+let rootKeypairPromise: Promise<RootKeypair> | null = null;
+let serverInfoCache: { certFingerprint: string; port: number } | null = null;
+
+const PAIR_TOKEN_LIFETIME_MS = 30 * 86400_000;
+
+async function loadOrCreateRootKeypair(): Promise<RootKeypair> {
+  if (rootKeypairCache) return rootKeypairCache;
+  if (rootKeypairPromise) return rootKeypairPromise;
+  rootKeypairPromise = (async () => {
+    const file = path.join(app.getPath("userData"), "biscuit-root.enc");
+    const safe = getSafeStorage();
+    try {
+      const buf = await fs.readFile(file);
+      const loaded = JSON.parse(safe.decrypt(buf)) as RootKeypair;
+      rootKeypairCache = loaded;
+      return loaded;
+    } catch (e: unknown) {
+      if ((e as NodeJS.ErrnoException).code !== "ENOENT") throw e;
+      const kp = generateRootKeypair();
+      await fs.writeFile(file, safe.encrypt(JSON.stringify(kp)));
+      rootKeypairCache = kp;
+      return kp;
+    }
+  })();
+  try {
+    return await rootKeypairPromise;
+  } finally {
+    rootKeypairPromise = null;
+  }
+}
+
+async function bootPairServer(webContents: Electron.WebContents): Promise<void> {
+  await initBiscuit();
+  const root = await loadOrCreateRootKeypair();
+  // publicInfo() returns PublicIdentity { mlDsaPub, mlKemPub, ... } | null.
+  // The "comm pubkey" exposed for CEMP-PQ (future v2 path) is the ML-KEM key.
+  const info = await commPublicInfo();
+  const started = await startPairServer({
+    port: 8233,
+    rootKeypair: root,
+    appVersion: app.getVersion(),
+    sendToRenderer: webContents,
+    mdns: true,
+    commPubkey: info?.mlKemPub ?? "0x" + "00".repeat(32),
+  });
+  serverInfoCache = { certFingerprint: started.certFingerprint, port: started.port };
+}
 
 // 'wasm-unsafe-eval' is needed for WebAssembly.instantiate.
 // blob: for the ckb-light-client-js workers, which esbuild inlines and spawns via blob URLs.
@@ -151,9 +211,53 @@ app.whenReady().then(async () => {
   // invoice-files handlers
   registerInvoiceFilesIpc();
 
+  // pair-server handlers
+  ipcMain.handle("pair:list", async () => listDevices());
+  ipcMain.handle("pair:revoke", async (_e, tokenId: string) => revokeDevice(tokenId));
+  ipcMain.handle("pair:issue", async (_e, deviceLabel: string) => {
+    const root = await loadOrCreateRootKeypair();
+    const expiresAt = new Date(Date.now() + PAIR_TOKEN_LIFETIME_MS).toISOString();
+    const token = issueCaptureV1Token({ root, deviceLabel, expiresAtRfc3339: expiresAt });
+    await addDevice({
+      tokenId: token.tokenId,
+      deviceLabel,
+      commPubkey: "0x" + "00".repeat(32),
+      capabilities: ['write("invoices")'],
+      issuedAt: Date.now(),
+      expiresAt: Date.parse(expiresAt),
+    });
+    return token;
+  });
+  ipcMain.handle(
+    "pair:setCommPubkey",
+    async (_e, tokenId: string, commPubkey: string): Promise<void> => {
+      const devices = await listDevices();
+      const d = devices.find((x) => x.tokenId === tokenId);
+      if (d) await addDevice({ ...d, commPubkey });
+    },
+  );
+  ipcMain.handle("pair:info", async () => serverInfoCache);
+
+  // Fire-and-forget pair-server boot. Renderer should not block on the HTTPS
+  // listener coming up; the renderer can read window.chainpay.pair.info()
+  // when it needs the cert fingerprint for QR pairing.
+  if (mainWindow) {
+    void bootPairServer(mainWindow.webContents).catch((err: unknown) => {
+      console.error("[pair-server] boot failed:", err);
+    });
+  }
+
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) void createWindow();
   });
+});
+
+let quitting = false;
+app.on("will-quit", (e) => {
+  if (quitting) return;
+  e.preventDefault();
+  quitting = true;
+  stopPairServer().finally(() => app.quit());
 });
 
 app.on("window-all-closed", () => {

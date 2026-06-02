@@ -6,6 +6,7 @@ import { NetworkSection } from "./NetworkSection";
 import { CommChannelSection } from "./CommChannelSection";
 import { PeerBookSection } from "./PeerBookSection";
 import { ExtractionSection } from "./ExtractionSection";
+import { PairingSection } from "./PairingSection";
 
 export function Settings() {
   const broadcastRpcUrl = useNetworkConfigStore((s) => s.broadcastRpcUrl);
@@ -13,10 +14,15 @@ export function Settings() {
   const showClipboard = useDebugSettingsStore((s) => s.showClipboard);
   const setShowClipboard = useDebugSettingsStore((s) => s.setShowClipboard);
   const [draft, setDraft] = useState(broadcastRpcUrl);
+  const [pairInfo, setPairInfo] = useState<{ certFingerprint: string; port: number } | null>(null);
 
   useEffect(() => {
     setDraft(broadcastRpcUrl);
   }, [broadcastRpcUrl]);
+
+  useEffect(() => {
+    void window.chainpay.pair.info().then(setPairInfo);
+  }, []);
 
   function save() {
     setBroadcastRpcUrl(draft);
@@ -104,6 +110,14 @@ export function Settings() {
       </div>
       <CommChannelSection />
       <PeerBookSection />
+
+      {pairInfo && (
+        <PairingSection
+          rpcHost="127.0.0.1"
+          rpcPort={pairInfo.port}
+          certFingerprint={pairInfo.certFingerprint}
+        />
+      )}
 
       <section className="space-y-3 rounded-lg border border-surface-hi bg-surface p-5" aria-label="Debug">
         <header>

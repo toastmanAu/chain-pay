@@ -1,6 +1,5 @@
-import type { Invoice } from "@chain-pay/shared";
-import type { ExtractionResult, PageOcr } from "./types";
 import {
+  type Invoice,
   CURRENCY_TOKENS,
   INVOICE_NUMBER_RE,
   TOTAL_LABEL_RE,
@@ -12,7 +11,8 @@ import {
   EVM_RE,
   parseCurrency,
   parseDate,
-} from "./regex-shared";
+} from "@chain-pay/shared";
+import type { ExtractionResult, PageOcr } from "./types";
 
 const STAGE_NAME = "schema-extraction" as const;
 const STAGE_MODEL = "rules-v1" as const;

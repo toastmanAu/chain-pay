@@ -1,4 +1,5 @@
 import { contextBridge, ipcRenderer } from "electron";
+import type { PairedDevice } from "../main/pair-store";
 
 const platformApi = {
   platform: process.platform,
@@ -75,6 +76,24 @@ const chainpayApi = {
       ipcRenderer.invoke("invoice-files:read", uri),
     delete: (uri: string): Promise<void> =>
       ipcRenderer.invoke("invoice-files:delete", uri),
+  },
+  pair: {
+    list: (): Promise<PairedDevice[]> => ipcRenderer.invoke("pair:list"),
+    revoke: (tokenId: string): Promise<void> =>
+      ipcRenderer.invoke("pair:revoke", tokenId),
+    issue: (deviceLabel: string): Promise<{ token: string; tokenId: string }> =>
+      ipcRenderer.invoke("pair:issue", deviceLabel),
+    setCommPubkey: (tokenId: string, commPubkey: string): Promise<void> =>
+      ipcRenderer.invoke("pair:setCommPubkey", tokenId, commPubkey),
+    info: (): Promise<{ certFingerprint: string; port: number } | null> =>
+      ipcRenderer.invoke("pair:info"),
+    onInvoiceReceived: (cb: (payload: unknown) => void): (() => void) => {
+      const listener = (_e: unknown, p: unknown): void => cb(p);
+      ipcRenderer.on("mobile-invoice:received", listener);
+      return () => {
+        ipcRenderer.removeListener("mobile-invoice:received", listener);
+      };
+    },
   },
 };
 
