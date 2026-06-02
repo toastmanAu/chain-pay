@@ -5,6 +5,7 @@ import { lightClient } from "@/lib/light-client/client";
 import { NetworkSection } from "./NetworkSection";
 import { CommChannelSection } from "./CommChannelSection";
 import { PeerBookSection } from "./PeerBookSection";
+import { ExtractionSection } from "./ExtractionSection";
 
 export function Settings() {
   const broadcastRpcUrl = useNetworkConfigStore((s) => s.broadcastRpcUrl);
@@ -30,6 +31,8 @@ export function Settings() {
       <h1 className="text-2xl font-semibold">Settings</h1>
 
       <NetworkSection />
+
+      <ExtractionSection />
 
       <section className="space-y-3 rounded-lg border border-surface-hi bg-surface p-5">
         <header>

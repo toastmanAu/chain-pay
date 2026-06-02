@@ -1,6 +1,10 @@
 import { runPipeline, type OcrFn } from "./pipeline";
-import type { ExtractionResult, PageOcr, Stage0Output } from "./types";
+import type { ExtractionResult, MapperFn, PageOcr, Stage0Output } from "./types";
+import { extractFields } from "./rules";
+import { mapSuryaPages } from "./surya-mapper";
+import { makeSuryaOcr } from "./surya-ocr";
 import { useInvoicesStore } from "@/stores/invoices";
+import { useExtractionSettingsStore } from "@/stores/extraction-settings";
 
 export interface ExtractionStoreSlice {
   markExtractionRunning: (id: string) => void;
@@ -10,6 +14,7 @@ export interface ExtractionStoreSlice {
 
 export interface ExtractionDeps {
   ocr: OcrFn;
+  mapper: MapperFn;
   rasterise?: (blob: Blob) => Promise<Stage0Output>;
 }
 
@@ -18,8 +23,15 @@ interface QueueEntry { invoiceId: string; blob: Blob; resolve: () => void }
 export class ExtractionService {
   private queue: QueueEntry[] = [];
   private running = false;
+  private deps: ExtractionDeps;
 
-  constructor(private store: ExtractionStoreSlice, private deps: ExtractionDeps) {}
+  constructor(private store: ExtractionStoreSlice, deps: ExtractionDeps) {
+    this.deps = deps;
+  }
+
+  setDeps(deps: ExtractionDeps): void {
+    this.deps = deps;
+  }
 
   enqueue(invoiceId: string, blob: Blob): Promise<void> {
     this.store.markExtractionRunning(invoiceId);
@@ -88,13 +100,26 @@ const realOcr: OcrFn = async (pages: ImageBitmap[]) => {
 };
 
 let _singleton: ExtractionService | null = null;
+
+function buildBackendPair(): { ocr: OcrFn; mapper: MapperFn } {
+  const settings = useExtractionSettingsStore.getState();
+  if (settings.extractionBackend === "surya-remote") {
+    return { ocr: makeSuryaOcr(settings.suryaEndpointUrl), mapper: mapSuryaPages };
+  }
+  return { ocr: realOcr, mapper: extractFields };
+}
+
 export function extractionService(): ExtractionService {
-  if (_singleton) return _singleton;
+  const pair = buildBackendPair();
+  if (_singleton) {
+    _singleton.setDeps(pair);
+    return _singleton;
+  }
   const slice: ExtractionStoreSlice = {
     markExtractionRunning: useInvoicesStore.getState().markExtractionRunning,
     applyExtraction: useInvoicesStore.getState().applyExtraction,
     markExtractionFailed: useInvoicesStore.getState().markExtractionFailed,
   };
-  _singleton = new ExtractionService(slice, { ocr: realOcr });
+  _singleton = new ExtractionService(slice, pair);
   return _singleton;
 }
