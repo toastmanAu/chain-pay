@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import "@testing-library/jest-dom/vitest";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -8,7 +8,13 @@ import { useInvoicesStore } from "@/stores/invoices";
 import { useVendorsStore } from "@/stores/vendors";
 import { NewInvoiceForm } from "./NewInvoiceForm";
 
+const enqueueMock = vi.fn();
+vi.mock("@/lib/invoices/extraction", () => ({
+  extractionService: () => ({ enqueue: enqueueMock }),
+}));
+
 beforeEach(() => {
+  enqueueMock.mockClear();
   useInvoicesStore.setState({ invoices: [] });
   useVendorsStore.setState({ vendors: [] });
   globalThis.localStorage?.clear();
@@ -80,7 +86,7 @@ describe("NewInvoiceForm (Stage A)", () => {
     expect(screen.getByRole("button", { name: /continue/i })).toBeEnabled();
   });
 
-  it("Continue creates InvoiceRecord, calls storeBlob, and navigates to Stage B", async () => {
+  it("Continue creates InvoiceRecord, calls storeBlob, enqueues extraction, and navigates to Stage B", async () => {
     const user = userEvent.setup();
     useVendorsStore.getState().addVendor({
       id: "v1",
@@ -96,6 +102,13 @@ describe("NewInvoiceForm (Stage A)", () => {
     await user.click(await screen.findByRole("button", { name: /Acme/i }));
     await user.click(screen.getByRole("button", { name: /continue/i }));
     expect(useInvoicesStore.getState().invoices).toHaveLength(1);
+    await waitFor(() => {
+      expect(enqueueMock).toHaveBeenCalledTimes(1);
+      expect(enqueueMock).toHaveBeenCalledWith(
+        expect.stringMatching(/^inv_/),
+        expect.any(File),
+      );
+    });
     expect(await screen.findByText(/REVIEW STAGE/)).toBeInTheDocument();
   });
 });

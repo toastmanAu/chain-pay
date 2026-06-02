@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { Link } from "react-router-dom";
 import type { InvoiceApprovalStatus } from "@chain-pay/shared";
 import { useInvoicesStore } from "@/stores/invoices";
@@ -12,6 +13,9 @@ interface Section {
   label: string;
   action: (id: string, batchId?: string) => SectionAction;
 }
+
+/** Status values that display a multi-select checkbox. */
+const BUNDLE_ELIGIBLE_STATUSES: ReadonlySet<InvoiceApprovalStatus> = new Set(["in-review"]);
 
 const SECTION_ORDER: Section[] = [
   {
@@ -36,13 +40,30 @@ const SECTION_ORDER: Section[] = [
   },
 ];
 
-export function InvoiceList() {
+interface InvoiceListProps {
+  onSelectionChange?: (selected: Set<string>) => void;
+}
+
+export function InvoiceList({ onSelectionChange }: InvoiceListProps = {}) {
   const invoices = useInvoicesStore((s) => s.invoices);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+
+  function toggle(id: string) {
+    const next = new Set(selected);
+    if (next.has(id)) {
+      next.delete(id);
+    } else {
+      next.add(id);
+    }
+    setSelected(next);
+    onSelectionChange?.(next);
+  }
 
   return (
     <div className="invoice-list">
       {SECTION_ORDER.map((section) => {
         const items = invoices.filter((i) => i.approval.status === section.status);
+        const selectable = BUNDLE_ELIGIBLE_STATUSES.has(section.status);
         return (
           <section key={section.status}>
             <h3>
@@ -53,6 +74,14 @@ export function InvoiceList() {
                 const a = section.action(i.id, i.batchId);
                 return (
                   <li key={i.id}>
+                    {selectable && (
+                      <input
+                        type="checkbox"
+                        aria-label={`Select invoice ${i.id}`}
+                        checked={selected.has(i.id)}
+                        onChange={() => toggle(i.id)}
+                      />
+                    )}
                     <span>{i.invoice.invoice_number ?? "—"}</span>
                     <span>{i.invoice.payee.display_name}</span>
                     <span>

@@ -19,11 +19,11 @@ describe("kind discriminator + VendorPaymentBatch", () => {
     expectTypeOf<VendorPaymentBatch["state"]>().toEqualTypeOf<PayrollBatchState>();
   });
 
-  it("VendorPaymentBatch has a single line, not an array", () => {
-    expectTypeOf<VendorPaymentBatch>().toHaveProperty("line").toEqualTypeOf<VendorPaymentLine>();
+  it("VendorPaymentBatch has a lines array (one per invoice)", () => {
+    expectTypeOf<VendorPaymentBatch>().toHaveProperty("lines").toEqualTypeOf<VendorPaymentLine[]>();
   });
 
-  it("VendorPaymentBatch backlinks an invoiceId", () => {
-    expectTypeOf<VendorPaymentBatch>().toHaveProperty("invoiceId").toEqualTypeOf<string>();
+  it("VendorPaymentBatch backlinks an invoiceIds array", () => {
+    expectTypeOf<VendorPaymentBatch>().toHaveProperty("invoiceIds").toEqualTypeOf<string[]>();
   });
 });

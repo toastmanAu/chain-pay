@@ -6,6 +6,11 @@ import { approveAndQueue } from "@/lib/invoices/approve-and-queue";
 import { useInvoicesStore } from "@/stores/invoices";
 import { useTreasuryStore } from "@/stores/treasury";
 import { useInvoiceDraft } from "./hooks/useInvoiceDraft";
+import { useExtractionLive } from "./hooks/useExtractionLive";
+import { extractionService } from "@/lib/invoices/extraction";
+import { fileFromStorage } from "@/lib/invoices/file-storage";
+
+const CONFIDENCE_THRESHOLD = 0.85;
 
 interface FormShape {
   vendor: string;
@@ -102,7 +107,9 @@ function diffEdits(before: InvoiceRecord, after: InvoiceRecord): EditEntry[] {
 
 /** Strip ChainPay-local wrapper fields before validating against the durable schema. */
 function toSchemaShape(rec: InvoiceRecord): Omit<InvoiceRecord, "id" | "createdAt" | "updatedAt"> {
-  const { id: _id, createdAt: _c, updatedAt: _u, ...rest } = rec;
+  // Also strip StoredInvoiceRecord-only runtime fields (batchId, extractionStatus,
+  // extractionError) so they don't fail InvoiceSchema's .strict() check.
+  const { id: _id, createdAt: _c, updatedAt: _u, batchId: _b, extractionStatus: _es, extractionError: _ee, ...rest } = rec as InvoiceRecord & { batchId?: unknown; extractionStatus?: unknown; extractionError?: unknown };
   return rest;
 }
 
@@ -125,6 +132,27 @@ export function ReviewInvoiceForm() {
   const [rejecting, setRejecting] = useState(false);
   const [rejectReason, setRejectReason] = useState("");
   const [submitError, setSubmitError] = useState<string | null>(null);
+
+  const live = useExtractionLive(id ?? "");
+  const isExtracting = live.status === "running" || live.status === "pending";
+  const isFailed = live.status === "failed";
+
+  async function onRetry() {
+    if (!invoice) return;
+    const file = await fileFromStorage(invoice.intake.raw_file.storage_uri);
+    if (!file) return;
+    extractionService().enqueue(id ?? "", file);
+  }
+
+  function chipFor(field: string) {
+    const c = live.confidences[field];
+    if (c === undefined || c >= CONFIDENCE_THRESHOLD) return null;
+    return (
+      <span className="text-xs text-amber-600 ml-2">
+        Low confidence — please check
+      </span>
+    );
+  }
 
   const form = useForm<FormShape>(
     invoice ? { defaultValues: fromInvoice(invoice) } : {},
@@ -197,24 +225,42 @@ export function ReviewInvoiceForm() {
       <div className="pdf-preview">
         <p>PDF: {invoice.intake.raw_file.filename}</p>
       </div>
+
+      {isExtracting && (
+        <div className="rounded bg-blue-50 p-2 text-sm">Extracting…</div>
+      )}
+      {isFailed && (
+        <div className="rounded bg-red-50 p-2 text-sm">
+          Auto-extraction failed: {live.error ?? "unknown error"}.{" "}
+          <button type="button" onClick={onRetry} className="underline">
+            Retry
+          </button>
+        </div>
+      )}
+
       <form onSubmit={form.handleSubmit(onApprove)}>
         <label>
-          Vendor <input {...form.register("vendor")} />
+          Vendor {chipFor("payee_display_name")}
+          <input {...form.register("vendor")} />
         </label>
         <label>
           Tax ID <input {...form.register("taxId")} />
         </label>
         <label>
-          Invoice # <input {...form.register("invoiceNumber")} />
+          Invoice # {chipFor("invoice_number")}
+          <input {...form.register("invoiceNumber")} />
         </label>
         <label>
-          Issue date <input type="date" {...form.register("issueDate")} />
+          Issue date {chipFor("issue_date")}
+          <input type="date" {...form.register("issueDate")} />
         </label>
         <label>
-          Due date <input type="date" {...form.register("dueDate")} />
+          Due date {chipFor("due_date")}
+          <input type="date" {...form.register("dueDate")} />
         </label>
         <label>
-          Currency <input {...form.register("currency")} />
+          Currency {chipFor("currency")}
+          <input {...form.register("currency")} />
         </label>
         <label>
           Subtotal{" "}
@@ -233,7 +279,7 @@ export function ReviewInvoiceForm() {
           />
         </label>
         <label>
-          Total{" "}
+          Total {chipFor("total")}
           <input
             type="number"
             step="0.01"

@@ -5,11 +5,28 @@ import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { InvoiceRecord, Treasury } from "@chain-pay/shared";
-import { useInvoicesStore } from "@/stores/invoices";
+import { useInvoicesStore, type StoredInvoiceRecord } from "@/stores/invoices";
 import { useInvoiceDraftsStore } from "@/stores/invoice-drafts";
 import { usePayrollBatchesStore } from "@/stores/payroll-batches";
 import { useTreasuryStore } from "@/stores/treasury";
 import { ReviewInvoiceForm } from "./ReviewInvoiceForm";
+
+// ---------------------------------------------------------------------------
+// Extraction service mock — hoisted so vi.mock factory can capture enqueueMock
+// ---------------------------------------------------------------------------
+const enqueueMock = vi.fn();
+vi.mock("@/lib/invoices/extraction", () => ({
+  extractionService: () => ({ enqueue: enqueueMock }),
+}));
+
+// fileFromStorage mock — returns a dummy Blob so the Retry path works without IPC
+vi.mock("@/lib/invoices/file-storage", async (importOriginal) => {
+  const original = await importOriginal<typeof import("@/lib/invoices/file-storage")>();
+  return {
+    ...original,
+    fileFromStorage: vi.fn().mockResolvedValue(new Blob(["pdf"], { type: "application/pdf" })),
+  };
+});
 
 vi.mock("pdfjs-dist", () => ({
   getDocument: () => ({
@@ -24,7 +41,7 @@ vi.mock("pdfjs-dist", () => ({
   GlobalWorkerOptions: { workerSrc: "" },
 }));
 
-function invoiceFixture(): InvoiceRecord {
+function invoiceFixture(): StoredInvoiceRecord {
   const now = new Date().toISOString();
   return {
     id: "inv_1",
@@ -50,6 +67,7 @@ function invoiceFixture(): InvoiceRecord {
     },
     extraction: { pipeline: { stages: [] }, extracted_at: now },
     approval: { status: "draft" },
+    extractionStatus: "pending",
   };
 }
 
@@ -77,6 +95,7 @@ function treasuryFixture(): Treasury {
 
 beforeEach(() => {
   globalThis.localStorage?.clear();
+  enqueueMock.mockClear();
   useInvoicesStore.setState({ invoices: [invoiceFixture()] });
   useInvoiceDraftsStore.setState({ drafts: {} });
   usePayrollBatchesStore.setState({ batches: [], selectedDraftId: null });
@@ -98,6 +117,74 @@ function renderWithRouter() {
     </MemoryRouter>,
   );
 }
+
+describe("ReviewInvoiceForm — extraction states", () => {
+  it("shows 'Extracting…' banner while running and form remains editable", () => {
+    useInvoicesStore.setState({
+      invoices: [{ ...invoiceFixture(), extractionStatus: "running" }],
+    });
+    renderWithRouter();
+    expect(screen.getByText(/Extracting…/)).toBeInTheDocument();
+    // Form must remain editable — vendor input is not disabled
+    expect(screen.getByDisplayValue("Acme")).not.toBeDisabled();
+  });
+
+  it("shows amber chip on fields with confidence < 0.85", () => {
+    const inv = invoiceFixture();
+    // Inject field_confidences into the extraction record
+    const invWithConfidences: StoredInvoiceRecord = {
+      ...inv,
+      extractionStatus: "extracted",
+      extraction: {
+        ...inv.extraction,
+        field_confidences: {
+          total: 0.5,          // below threshold → chip expected
+          invoice_number: 0.9, // above threshold → no chip
+        },
+      },
+    };
+    useInvoicesStore.setState({ invoices: [invWithConfidences] });
+    renderWithRouter();
+    // Low-confidence chip for 'total'
+    const chips = screen.getAllByText(/Low confidence — please check/i);
+    expect(chips.length).toBeGreaterThanOrEqual(1);
+    // Find the label containing "Total" chip by finding all labels, then the one
+    // whose text starts with "Total"
+    const allLabels = document.querySelectorAll("label");
+    const totalLabel = Array.from(allLabels).find(
+      (l) => l.textContent?.trim().startsWith("Total"),
+    );
+    expect(totalLabel).toBeDefined();
+    expect(totalLabel).toHaveTextContent(/Low confidence — please check/i);
+    // Invoice number label should NOT have a chip
+    const invNumLabel = Array.from(allLabels).find((l) =>
+      l.textContent?.trim().startsWith("Invoice #"),
+    );
+    expect(invNumLabel).toBeDefined();
+    expect(invNumLabel).not.toHaveTextContent(/Low confidence — please check/i);
+  });
+
+  it("shows 'Auto-extraction failed' banner with Retry on failed", async () => {
+    const user = userEvent.setup();
+    useInvoicesStore.setState({
+      invoices: [
+        {
+          ...invoiceFixture(),
+          extractionStatus: "failed",
+          extractionError: "WASM init failed",
+        },
+      ],
+    });
+    renderWithRouter();
+    // Banner present
+    expect(screen.getByText(/Auto-extraction failed/i)).toBeInTheDocument();
+    expect(screen.getByText(/WASM init failed/i)).toBeInTheDocument();
+    // Click Retry
+    await user.click(screen.getByRole("button", { name: /retry/i }));
+    expect(enqueueMock).toHaveBeenCalledOnce();
+    expect(enqueueMock).toHaveBeenCalledWith("inv_1", expect.any(Blob));
+  });
+});
 
 describe("ReviewInvoiceForm (Stage B)", () => {
   it("renders the invoice fields pre-populated", () => {

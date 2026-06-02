@@ -38,6 +38,7 @@
     "react-router-dom": "^7.0.0",
     "recharts": "^2.13.0",
     "tailwind-merge": "^2.5.0",
+    "tesseract.js": "^5.1.1",
     "viem": "^2.21.0",
     "wagmi": "^2.13.0",
     "zod": "^3.23.0",

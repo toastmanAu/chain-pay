@@ -1,12 +1,25 @@
 import { create } from "zustand";
 import { createJSONStorage, persist, type StateStorage } from "zustand/middleware";
-import type { InvoiceApprovalStatus, InvoiceRecord } from "@chain-pay/shared";
+import type { Invoice, InvoiceApprovalStatus, InvoiceRecord } from "@chain-pay/shared";
 import { assertCanTransitionInvoice } from "@/lib/invoices/state-machine";
 
-/** Local-only wrapper field — backlink to the linked PayrollBatch or VendorPaymentBatch id. */
+/**
+ * Runtime-only extraction lifecycle status.
+ * Existing persisted records that pre-date this field will have `undefined` here;
+ * downstream consumers (Task 12 hook) treat `undefined` as equivalent to "pending"
+ * (i.e. no extraction has been attempted yet). No backfill migration is applied —
+ * adding a default-undefined field to persisted records is safe.
+ */
+export type ExtractionStatus = "pending" | "running" | "extracted" | "failed";
+
+/** Local-only wrapper fields — runtime state that is NOT part of the durable schema. */
 export interface StoredInvoiceRecord extends InvoiceRecord {
   /** Set when approval.status transitions to "queued-for-signing". */
   batchId?: string;
+  /** Tracks where this record is in the OCR/extraction pipeline. */
+  extractionStatus: ExtractionStatus;
+  /** Human-readable error message when extractionStatus === "failed". */
+  extractionError?: string;
 }
 
 interface InvoicesStore {
@@ -26,6 +39,17 @@ interface InvoicesStore {
   ) => void;
   findById: (id: string) => StoredInvoiceRecord | undefined;
   filterByStatus: (status: InvoiceApprovalStatus) => StoredInvoiceRecord[];
+  markExtractionRunning: (id: string) => void;
+  markExtractionFailed: (id: string, error: string) => void;
+  applyExtraction: (
+    id: string,
+    result: {
+      stages: Invoice["extraction"]["pipeline"]["stages"];
+      body: Partial<Invoice["invoice"]>;
+      field_confidences: Record<string, number>;
+      warnings: NonNullable<Invoice["extraction"]["warnings"]>;
+    },
+  ) => void;
 }
 
 function bigintReplacer(_key: string, value: unknown): unknown {
@@ -66,7 +90,9 @@ export const useInvoicesStore = create<InvoicesStore>()(
       invoices: [],
       addInvoice: (i) =>
         set((s) =>
-          s.invoices.some((x) => x.id === i.id) ? s : { invoices: [...s.invoices, i] },
+          s.invoices.some((x) => x.id === i.id)
+            ? s
+            : { invoices: [...s.invoices, { ...i, extractionStatus: "pending" as const }] },
         ),
       updateInvoice: (id, patch) =>
         set((s) => ({
@@ -139,6 +165,90 @@ export const useInvoicesStore = create<InvoicesStore>()(
             };
           }),
         })),
+      markExtractionRunning: (id) =>
+        set((s) => ({
+          invoices: s.invoices.map((i) =>
+            i.id === id
+              ? { ...i, extractionStatus: "running" as const, updatedAt: new Date().toISOString() }
+              : i,
+          ),
+        })),
+
+      markExtractionFailed: (id, error) =>
+        set((s) => ({
+          invoices: s.invoices.map((i) =>
+            i.id === id
+              ? {
+                  ...i,
+                  extractionStatus: "failed" as const,
+                  extractionError: error,
+                  updatedAt: new Date().toISOString(),
+                }
+              : i,
+          ),
+        })),
+
+      // Contract: `result` is a complete atomic result from one pipeline invocation —
+      // not an incremental partial. The idempotency guard compares only the head (last)
+      // stage signature, which is sufficient when the caller never sends partial runs.
+      // Retries land a fresh `result` and append a new run to the stages history.
+      applyExtraction: (id, result) =>
+        set((s) => ({
+          invoices: s.invoices.map((i) => {
+            if (i.id !== id) return i;
+            // Idempotency: skip if the head stage signature already matches incoming head.
+            const existingTop = i.extraction.pipeline.stages.at(-1);
+            const incomingTop = result.stages.at(-1);
+            if (
+              existingTop &&
+              incomingTop &&
+              existingTop.name === incomingTop.name &&
+              existingTop.model === incomingTop.model &&
+              existingTop.version === incomingTop.version &&
+              existingTop.elapsed_ms === incomingTop.elapsed_ms
+            ) {
+              return i;
+            }
+            // User-typed-preserve merge: only fill fields that are still at the default-empty
+            // shape (undefined, null, empty string, or total===0). Fields the user has already
+            // set are left untouched.
+            const merged: Invoice["invoice"] = { ...i.invoice };
+            for (const [k, v] of Object.entries(result.body) as [
+              keyof Invoice["invoice"],
+              unknown,
+            ][]) {
+              const current = merged[k];
+              // `total` is required + numeric and coerced to 0 at form-init by ReviewInvoiceForm.fromInvoice,
+              // so 0 is the "not yet typed" sentinel for it. `subtotal` and `tax_total` are optional and
+              // stay undefined until the user types them, so the `undefined` arm covers them naturally.
+              const isDefaultEmpty =
+                current === undefined ||
+                current === null ||
+                current === "" ||
+                (k === "total" && current === 0);
+              if (isDefaultEmpty) {
+                (merged as Record<string, unknown>)[k] = v;
+              }
+            }
+            return {
+              ...i,
+              invoice: merged,
+              extraction: {
+                ...i.extraction,
+                pipeline: { stages: [...i.extraction.pipeline.stages, ...result.stages] },
+                field_confidences: {
+                  ...(i.extraction.field_confidences ?? {}),
+                  ...result.field_confidences,
+                },
+                warnings: [...(i.extraction.warnings ?? []), ...result.warnings],
+                extracted_at: new Date().toISOString(),
+              },
+              extractionStatus: "extracted" as const,
+              updatedAt: new Date().toISOString(),
+            };
+          }),
+        })),
+
       findById: (id) => get().invoices.find((i) => i.id === id),
       filterByStatus: (status) => get().invoices.filter((i) => i.approval.status === status),
     }),

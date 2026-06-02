@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import type { InvoiceRecord, Treasury } from "@chain-pay/shared";
 import { isPayrollBatch, isVendorBatch } from "@chain-pay/shared";
-import { routeInvoiceToBatch } from "./route-to-batch";
+import type { StoredInvoiceRecord } from "@/stores/invoices";
+import { routeInvoiceToBatch, routeInvoicesToBatch } from "./route-to-batch";
 
 function invoiceFixture(overrides: Partial<InvoiceRecord> = {}): InvoiceRecord {
   const now = new Date().toISOString();
@@ -65,9 +66,9 @@ describe("routeInvoiceToBatch", () => {
     const batch = routeInvoiceToBatch(inv, treasuryFixture());
     expect(isVendorBatch(batch)).toBe(true);
     if (!isVendorBatch(batch)) throw new Error("type narrowing failed");
-    expect(batch.invoiceId).toBe("inv_1");
+    expect(batch.invoiceIds[0]).toBe("inv_1");
     expect(batch.vendorId).toBe("vendor_1");
-    expect(batch.line.fiat.currency).toBe("AUD");
+    expect(batch.lines[0]?.fiat.currency).toBe("AUD");
     expect(batch.state).toBe("draft");
   });
 
@@ -133,5 +134,95 @@ describe("routeInvoiceToBatch", () => {
       },
     });
     expect(() => routeInvoiceToBatch(inv, treasuryFixture())).toThrow(/payee id required/i);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Plural builder
+// ---------------------------------------------------------------------------
+
+function storedInvoiceFixture(
+  id: string,
+  overrides: Partial<InvoiceRecord["invoice"]> = {},
+): StoredInvoiceRecord {
+  const now = new Date().toISOString();
+  return {
+    id,
+    createdAt: now,
+    updatedAt: now,
+    schema_version: "0.1.0",
+    intake: {
+      source: "manual-upload",
+      received_at: now,
+      raw_file: {
+        sha256: "a".repeat(64),
+        mime_type: "application/pdf",
+        byte_size: 1,
+        filename: `${id}.pdf`,
+        storage_uri: `file:///${id}`,
+      },
+    },
+    invoice: {
+      flow: "one-off-vendor",
+      payee: { kind: "vendor", id: `vendor_${id}`, display_name: `Vendor ${id}` },
+      currency: "AUD",
+      total: 100,
+      payment_details: { ckb_address: `ckt1${id}` },
+      ...overrides,
+    },
+    extraction: { pipeline: { stages: [] }, extracted_at: now },
+    approval: { status: "in-review" },
+    extractionStatus: "extracted",
+  };
+}
+
+describe("routeInvoicesToBatch", () => {
+  it("produces one batch with N invoiceIds preserving input order", () => {
+    const invA = storedInvoiceFixture("a");
+    const invB = storedInvoiceFixture("b");
+    const batch = routeInvoicesToBatch([invA, invB], treasuryFixture());
+    expect(isVendorBatch(batch)).toBe(true);
+    expect(batch.invoiceIds).toEqual(["a", "b"]);
+    expect(batch.kind).toBe("vendor");
+    expect(batch.state).toBe("draft");
+    expect(batch.treasuryId).toBe("tr_1");
+  });
+
+  it("produces one line per invoice with correct per-vendor amounts (no consolidation)", () => {
+    const invA = storedInvoiceFixture("a", { total: 200, currency: "AUD" });
+    const invB = storedInvoiceFixture("b", { total: 350, currency: "AUD" });
+    const batch = routeInvoicesToBatch([invA, invB], treasuryFixture());
+    expect(batch.lines).toHaveLength(2);
+    // lines[0] corresponds to invoiceIds[0] (invA)
+    expect(batch.lines[0]?.vendorId).toBe("vendor_a");
+    expect(batch.lines[0]?.fiat.minor).toBe(20000n);
+    expect(batch.lines[0]?.fiat.currency).toBe("AUD");
+    // lines[1] corresponds to invoiceIds[1] (invB)
+    expect(batch.lines[1]?.vendorId).toBe("vendor_b");
+    expect(batch.lines[1]?.fiat.minor).toBe(35000n);
+    expect(batch.lines[1]?.fiat.currency).toBe("AUD");
+  });
+
+  it("uses the first invoice's vendorId on batch.vendorId", () => {
+    const invA = storedInvoiceFixture("a");
+    const invB = storedInvoiceFixture("b");
+    const batch = routeInvoicesToBatch([invA, invB], treasuryFixture());
+    // batch-level vendorId stays the first invoice's vendorId for label/display purposes
+    expect(batch.vendorId).toBe("vendor_a");
+    // per-line vendorIds are distinct
+    expect(batch.lines[0]?.vendorId).toBe("vendor_a");
+    expect(batch.lines[1]?.vendorId).toBe("vendor_b");
+  });
+
+  it("throws when any invoice lacks a payee id", () => {
+    const invA = storedInvoiceFixture("a");
+    const invB = storedInvoiceFixture("b", {
+      payee: { kind: "vendor", display_name: "No ID Vendor" },
+    });
+    expect(() => routeInvoicesToBatch([invA, invB], treasuryFixture())).toThrow(/payee id required/i);
+  });
+
+  it("throws when the invoices array is empty", () => {
+    expect(() => routeInvoicesToBatch([], treasuryFixture())).toThrow(/at least one invoice/i);
   });
 });

@@ -527,16 +527,18 @@ describe("kind discriminator + v1→v2 migration", () => {
       updatedAt: new Date().toISOString(),
       label: "Acme INV-001",
       treasuryId: "tr_1",
-      invoiceId: "inv_1",
+      invoiceIds: ["inv_1"],
       vendorId: "vendor_1",
       fxSnapshot: [],
-      line: {
-        vendorId: "vendor_1",
-        fiat: { minor: 100n, currency: "AUD" },
-        crypto: { value: 1_000_000n, asset: "CKB", decimals: 8 },
-        fxRate: "1",
-        feeAllocated: { value: 0n, asset: "CKB", decimals: 8 },
-      },
+      lines: [
+        {
+          vendorId: "vendor_1",
+          fiat: { minor: 100n, currency: "AUD" },
+          crypto: { value: 1_000_000n, asset: "CKB", decimals: 8 },
+          fxRate: "1",
+          feeAllocated: { value: 0n, asset: "CKB", decimals: 8 },
+        },
+      ],
       state: "draft",
     };
     usePayrollBatchesStore.getState().addBatch(vb);
@@ -586,16 +588,18 @@ describe("kind discriminator + v1→v2 migration", () => {
             id: "vb_1",
             label: "X",
             treasuryId: "tr_1",
-            invoiceId: "inv_1",
+            invoiceIds: ["inv_1"],
             vendorId: "v_1",
             fxSnapshot: [],
-            line: {
-              vendorId: "v_1",
-              fiat: { minor: "100n", currency: "AUD" },
-              crypto: { value: "1000000n", asset: "CKB", decimals: 8 },
-              fxRate: "1",
-              feeAllocated: { value: "0n", asset: "CKB", decimals: 8 },
-            },
+            lines: [
+              {
+                vendorId: "v_1",
+                fiat: { minor: "100n", currency: "AUD" },
+                crypto: { value: "1000000n", asset: "CKB", decimals: 8 },
+                fxRate: "1",
+                feeAllocated: { value: "0n", asset: "CKB", decimals: 8 },
+              },
+            ],
             state: "draft",
             createdAt: "2026-01-01T00:00:00Z",
             updatedAt: "2026-01-01T00:00:00Z",
