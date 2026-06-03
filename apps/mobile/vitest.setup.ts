@@ -36,3 +36,7 @@ vi.mock("expo-file-system", () => ({
   deleteAsync: vi.fn(),
   EncodingType: { Base64: "base64" },
 }));
+
+vi.mock("@/modules/expo-tls-pin/src", () => ({
+  ExpoTlsPin: { request: vi.fn() },
+}));

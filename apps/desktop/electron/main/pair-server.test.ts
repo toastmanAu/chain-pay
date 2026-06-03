@@ -10,6 +10,7 @@ const { resetSafeStorageForTests } = await import("./safe-storage");
 const { initBiscuit, generateRootKeypair, issueCaptureV1Token } = await import("./pair-server-biscuit");
 const { _setPairStoreFileForTests, addDevice } = await import("./pair-store");
 const { startPairServer, stopPairServer } = await import("./pair-server");
+const { _setTlsCertFileForTests, _resetTlsCertCacheForTests, loadOrCreateTlsCert } = await import("./tls-cert-store");
 
 const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "pair-server-test-"));
 const storeFile = path.join(tmpDir, "paired-devices.enc");
@@ -42,6 +43,10 @@ beforeAll(async () => {
     issuedAt: 0,
     expiresAt: 4102444800000,
   });
+  const tlsTmpFile = path.join(tmpDir, "tls-cert.enc");
+  _setTlsCertFileForTests(tlsTmpFile);
+  _resetTlsCertCacheForTests();
+  const tlsCert = await loadOrCreateTlsCert();
   const started = await startPairServer({
     port: 0,
     rootKeypair,
@@ -49,6 +54,7 @@ beforeAll(async () => {
     sendToRenderer: { send: rendererSend } as unknown as Electron.WebContents,
     mdns: false,
     commPubkey: "0x" + "ff".repeat(32),
+    tlsCert: { key: tlsCert.key, cert: tlsCert.cert },
   });
   baseUrl = `https://127.0.0.1:${started.port}`;
   certFingerprint = started.certFingerprint;
@@ -176,5 +182,26 @@ describe("pair-server routes", () => {
       body: JSON.stringify({ phone_comm_pubkey: "0x" + "00".repeat(32), device_label: "x" }),
     });
     expect(r.status).toBe(501);
+  });
+
+  it("restartWithCert hot-swaps the cert and exposes a new fingerprint", async () => {
+    const { rotateTlsCert } = await import("./tls-cert-store");
+    const newCert = await rotateTlsCert();
+    const { restartWithCert } = await import("./pair-server");
+    const started = await restartWithCert({ key: newCert.key, cert: newCert.cert });
+    expect(started.certFingerprint).toBe(newCert.fingerprint);
+    expect(started.certFingerprint).not.toBe(certFingerprint);
+
+    // health still works at the new fingerprint
+    const newDispatcher = new Agent({ connect: { ca: started.certPem } });
+    try {
+      const r = await fetch(`https://127.0.0.1:${started.port}/health`, {
+        // @ts-expect-error — undici dispatcher
+        dispatcher: newDispatcher,
+      });
+      expect(r.status).toBe(200);
+    } finally {
+      await newDispatcher.close();
+    }
   });
 });

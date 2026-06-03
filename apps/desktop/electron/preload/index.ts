@@ -87,6 +87,10 @@ const chainpayApi = {
       ipcRenderer.invoke("pair:setCommPubkey", tokenId, commPubkey),
     info: (): Promise<{ certFingerprint: string; port: number } | null> =>
       ipcRenderer.invoke("pair:info"),
+    rotateCert: (): Promise<
+      | { ok: true; fingerprint: string; port: number }
+      | { ok: false; reason: string }
+    > => ipcRenderer.invoke("pair:rotateCert"),
     onInvoiceReceived: (cb: (payload: unknown) => void): (() => void) => {
       const listener = (_e: unknown, p: unknown): void => cb(p);
       ipcRenderer.on("mobile-invoice:received", listener);

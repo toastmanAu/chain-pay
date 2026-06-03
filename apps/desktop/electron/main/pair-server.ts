@@ -1,14 +1,13 @@
 import https from "node:https";
-import { createHash } from "node:crypto";
 import { Buffer } from "node:buffer";
 import os from "node:os";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import Bonjour from "bonjour-service";
-import selfsigned from "selfsigned";
 import { MobileInvoicePayloadSchema, MOBILE_ROUTES } from "@chain-pay/shared";
 import { verifyToken, type RootKeypair } from "./pair-server-biscuit";
 import { getDeviceByTokenId, isRevoked } from "./pair-store";
 import { receiveMobileInvoice } from "./invoice-receiver";
+import { tlsFingerprint } from "./tls-fingerprint";
 
 const BODY_LIMIT_BYTES = 16 * 1024 * 1024;
 
@@ -19,6 +18,7 @@ interface StartArgs {
   sendToRenderer: Electron.WebContents;
   mdns: boolean;
   commPubkey: string;
+  tlsCert: { key: string; cert: string };
 }
 
 interface StartResult {
@@ -33,34 +33,12 @@ interface BonjourLike {
   destroy(cb?: () => void): void;
 }
 
-let serverHandle: { server: https.Server; bonjour: BonjourLike | null } | null = null;
+let serverHandle: { server: https.Server; bonjour: BonjourLike | null; args: StartArgs } | null = null;
 
 export async function startPairServer(args: StartArgs): Promise<StartResult> {
-  const attrs = [{ name: "commonName", value: os.hostname() || "chainpay" }];
-  // selfsigned defaults algorithm to sha1; force sha256 so the certificate
-  // signature matches the SHA-256 fingerprint we expose for QR pairing.
-  // Include subjectAltName for localhost + 127.0.0.1 + the hostname so
-  // TLS hostname verification succeeds on the same machine and over LAN.
-  const extensions = [
-    {
-      name: "subjectAltName",
-      altNames: [
-        { type: 2, value: "localhost" },
-        { type: 2, value: os.hostname() || "chainpay" },
-        { type: 7, ip: "127.0.0.1" },
-        { type: 7, ip: "::1" },
-      ],
-    },
-  ];
-  const pems = selfsigned.generate(attrs, {
-    keySize: 2048,
-    days: 365,
-    algorithm: "sha256",
-    extensions,
-  });
-  const fingerprint = sha256Fingerprint(pems.cert);
+  const fingerprint = tlsFingerprint(args.tlsCert.cert);
 
-  const server = https.createServer({ key: pems.private, cert: pems.cert }, (req, res) => {
+  const server = https.createServer({ key: args.tlsCert.key, cert: args.tlsCert.cert }, (req, res) => {
     routeRequest(req, res, args).catch(() => {
       sendJson(res, 500, { error: "internal" });
     });
@@ -82,8 +60,10 @@ export async function startPairServer(args: StartArgs): Promise<StartResult> {
     bonjour = inst;
   }
 
-  serverHandle = { server, bonjour };
-  return { port, certFingerprint: fingerprint, certPem: pems.cert };
+  // NOTE: args is held by reference. Don't mutate it after start — restartWithCert
+  // will inherit the mutated value. Currently no caller does so.
+  serverHandle = { server, bonjour, args };
+  return { port, certFingerprint: fingerprint, certPem: args.tlsCert.cert };
 }
 
 export async function stopPairServer(): Promise<void> {
@@ -96,10 +76,20 @@ export async function stopPairServer(): Promise<void> {
       });
     });
   }
+  // Drop keep-alive sockets so close() resolves promptly even if a mobile
+  // client is holding an idle connection (e.g. during restartWithCert).
+  server.closeAllConnections();
   await new Promise<void>((resolve, reject) =>
     server.close((err) => (err ? reject(err) : resolve())),
   );
   serverHandle = null;
+}
+
+export async function restartWithCert(tlsCert: { key: string; cert: string }): Promise<StartResult> {
+  if (!serverHandle) throw new Error("pair-server not running");
+  const previousArgs = serverHandle.args;
+  await stopPairServer();
+  return startPairServer({ ...previousArgs, tlsCert });
 }
 
 async function routeRequest(
@@ -240,13 +230,4 @@ function sendJson(res: ServerResponse, status: number, body: unknown): void {
   res.statusCode = status;
   res.setHeader("Content-Type", "application/json");
   res.end(JSON.stringify(body));
-}
-
-function sha256Fingerprint(pem: string): string {
-  const body = pem.replace(/-----BEGIN CERTIFICATE-----|-----END CERTIFICATE-----|\s+/g, "");
-  const der = Buffer.from(body, "base64");
-  const hex = createHash("sha256").update(der).digest("hex").toUpperCase();
-  const pairs = hex.match(/.{2}/g);
-  if (!pairs) throw new Error("sha256Fingerprint: regex match failed");
-  return pairs.join(":");
 }

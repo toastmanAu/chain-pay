@@ -71,4 +71,23 @@ describe("pairing store", () => {
     expect(usePairingStore.getState().pairing).toBeNull();
     expect(mockedSecureStore.deleteItemAsync).toHaveBeenCalled();
   });
+
+  it("clearPairing with reason 'tls-mismatch' sets wasAutoCleared", async () => {
+    await usePairingStore.getState().savePairing({
+      rpc_url: "https://d:1/", auth_token: "t", cert_fingerprint: "AB",
+      desktop_comm_pubkey: "0x" + "11".repeat(32),
+    });
+    await usePairingStore.getState().clearPairing("tls-mismatch");
+    expect(usePairingStore.getState().wasAutoCleared).toBe(true);
+  });
+
+  it("savePairing clears the wasAutoCleared flag", async () => {
+    await usePairingStore.getState().clearPairing("tls-mismatch");
+    expect(usePairingStore.getState().wasAutoCleared).toBe(true);
+    await usePairingStore.getState().savePairing({
+      rpc_url: "https://d:1/", auth_token: "t", cert_fingerprint: "AB",
+      desktop_comm_pubkey: "0x" + "22".repeat(32),
+    });
+    expect(usePairingStore.getState().wasAutoCleared).toBe(false);
+  });
 });

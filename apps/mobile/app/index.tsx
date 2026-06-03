@@ -7,6 +7,7 @@ import { useDrainQueue } from "@/lib/useDrainQueue";
 
 export default function Home() {
   const pairing = usePairingStore((s) => s.pairing);
+  const wasAutoCleared = usePairingStore((s) => s.wasAutoCleared);
   const loadPairing = usePairingStore((s) => s.loadPairing);
   const items = useSyncQueue((s) => s.items);
 
@@ -19,8 +20,8 @@ export default function Home() {
     return (
       <View style={styles.center}>
         <Text style={styles.title}>ChainPay Mobile</Text>
-        <Text>No desktop paired.</Text>
-        <Button title="Pair desktop" onPress={() => router.push("/pair")} />
+        <Text>{wasAutoCleared ? "Desktop identity changed — re-pair to reconnect." : "No desktop paired."}</Text>
+        <Button title={wasAutoCleared ? "Re-pair desktop" : "Pair desktop"} onPress={() => router.push("/pair")} />
       </View>
     );
   }

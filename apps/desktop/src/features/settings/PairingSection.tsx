@@ -7,18 +7,22 @@ interface PairingSectionProps {
   rpcHost: string;
   rpcPort: number;
   certFingerprint: string;
+  onCertRotated?: (info: { fingerprint: string; port: number }) => void;
 }
 
 export function PairingSection({
   rpcHost,
   rpcPort,
   certFingerprint,
+  onCertRotated,
 }: PairingSectionProps) {
   const [devices, setDevices] = useState<PairedDevice[]>([]);
   const [label, setLabel] = useState("");
   const [uri, setUri] = useState<string | null>(null);
   const [issuing, setIssuing] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [confirmingRotate, setConfirmingRotate] = useState(false);
+  const [rotating, setRotating] = useState(false);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
 
   const refresh = useCallback(async () => {
@@ -70,6 +74,26 @@ export function PairingSection({
       await refresh();
     } catch (e) {
       setErrorMsg(e instanceof Error ? e.message : "Failed to revoke");
+    }
+  };
+
+  const onRotateCert = async (): Promise<void> => {
+    setErrorMsg(null);
+    setRotating(true);
+    try {
+      const result = await window.chainpay.pair.rotateCert();
+      if (!result.ok) {
+        setErrorMsg(result.reason);
+      } else {
+        onCertRotated?.({ fingerprint: result.fingerprint, port: result.port });
+        setUri(null);
+        await refresh();
+      }
+    } catch (e) {
+      setErrorMsg(e instanceof Error ? e.message : "Failed to rotate cert");
+    } finally {
+      setRotating(false);
+      setConfirmingRotate(false);
     }
   };
 
@@ -155,6 +179,48 @@ export function PairingSection({
             </li>
           ))}
         </ul>
+      )}
+
+      <div className="pt-2">
+        <button
+          type="button"
+          onClick={() => setConfirmingRotate(true)}
+          className="rounded-md border border-surface-hi px-3 py-1 text-xs text-fg hover:bg-surface-hi"
+        >
+          Rotate TLS cert
+        </button>
+      </div>
+      {confirmingRotate && (
+        <div
+          role="dialog"
+          aria-label="Confirm rotate"
+          className="rounded-md border border-surface-hi bg-bg p-3 text-sm"
+        >
+          <p>
+            Rotate TLS cert? All currently paired phones ({devices.length}) will
+            stop working until they re-scan a new QR.
+          </p>
+          <div className="mt-2 flex gap-2">
+            <button
+              type="button"
+              onClick={() => setConfirmingRotate(false)}
+              disabled={rotating}
+              className="rounded-md border border-surface-hi px-3 py-1 text-xs text-fg hover:bg-surface-hi disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                void onRotateCert();
+              }}
+              disabled={rotating}
+              className="rounded-md bg-accent px-3 py-1 text-xs font-medium text-accent-fg hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              Rotate
+            </button>
+          </div>
+        </div>
       )}
     </section>
   );

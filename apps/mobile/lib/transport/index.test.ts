@@ -52,4 +52,10 @@ describe("runDrainOnce", () => {
     const out = await runDrainOnce({ item, pairing, buildPayload });
     expect(out).toEqual({ kind: "retry", error: "boom" });
   });
+
+  it("returns 'tls-mismatch' when ip-client reports it", async () => {
+    vi.mocked(ip.sendInvoiceViaIp).mockResolvedValue({ ok: false, kind: "tls-mismatch" });
+    const out = await runDrainOnce({ item, pairing, buildPayload });
+    expect(out).toEqual({ kind: "tls-mismatch" });
+  });
 });

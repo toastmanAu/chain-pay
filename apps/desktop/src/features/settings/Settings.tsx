@@ -116,6 +116,9 @@ export function Settings() {
           rpcHost="127.0.0.1"
           rpcPort={pairInfo.port}
           certFingerprint={pairInfo.certFingerprint}
+          onCertRotated={(info) =>
+            setPairInfo({ certFingerprint: info.fingerprint, port: info.port })
+          }
         />
       )}
 

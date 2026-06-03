@@ -17,6 +17,9 @@ const { initBiscuit, generateRootKeypair, issueCaptureV1Token } = await import(
 );
 const { _setPairStoreFileForTests, addDevice } = await import("./pair-store");
 const { startPairServer, stopPairServer } = await import("./pair-server");
+const { _setTlsCertFileForTests, _resetTlsCertCacheForTests, loadOrCreateTlsCert } = await import(
+  "./tls-cert-store"
+);
 
 const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "e2e-"));
 const rendererSend = vi.fn();
@@ -43,6 +46,9 @@ beforeAll(async () => {
     expiresAt: 4102444800000,
   });
 
+  _setTlsCertFileForTests(path.join(tmpDir, "tls-cert.enc"));
+  _resetTlsCertCacheForTests();
+  const tlsCert = await loadOrCreateTlsCert();
   const started = await startPairServer({
     port: 0,
     rootKeypair: root,
@@ -50,6 +56,7 @@ beforeAll(async () => {
     sendToRenderer: { send: rendererSend } as unknown as Electron.WebContents,
     mdns: false,
     commPubkey: "0x" + "ff".repeat(32),
+    tlsCert: { key: tlsCert.key, cert: tlsCert.cert },
   });
 
   baseUri = createFiberConnectUri({
@@ -104,5 +111,44 @@ describe("pair-server end-to-end", () => {
       expect(res.status).toBe(201);
     }
     expect(rendererSend).toHaveBeenCalledTimes(3);
+  });
+
+  it("rotates cert + verifies old dispatcher rejected + new dispatcher works", async () => {
+    const { rotateTlsCert } = await import("./tls-cert-store");
+    const { restartWithCert } = await import("./pair-server");
+
+    const oldDispatcher = dispatcher;
+    const rotated = await rotateTlsCert();
+    const restarted = await restartWithCert({ key: rotated.key, cert: rotated.cert });
+
+    // Old dispatcher's CA no longer matches → handshake fails.
+    let oldError: unknown;
+    try {
+      await fetch(`https://127.0.0.1:${restarted.port}/health`, {
+        // @ts-expect-error — undici dispatcher
+        dispatcher: oldDispatcher,
+      });
+    } catch (err) {
+      oldError = err;
+    }
+    expect(oldError).toBeDefined();
+    const causeMsg =
+      (oldError as { cause?: { message?: string; code?: string } })?.cause?.message ??
+      (oldError as { cause?: { code?: string } })?.cause?.code ??
+      (oldError as Error)?.message ??
+      "";
+    expect(causeMsg).toMatch(/certificate|self-signed|altname|unable|CERT|TLS/i);
+
+    // New dispatcher with the new CA succeeds.
+    const newDispatcher = new Agent({ connect: { ca: restarted.certPem } });
+    try {
+      const res = await fetch(`https://127.0.0.1:${restarted.port}/health`, {
+        // @ts-expect-error
+        dispatcher: newDispatcher,
+      });
+      expect(res.status).toBe(200);
+    } finally {
+      await newDispatcher.close();
+    }
   });
 });

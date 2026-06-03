@@ -2,6 +2,13 @@
 
 Run after every Phase 4 task that touches end-to-end flow. Same shape as `docs/phase-3c-smoke-playbook.md`.
 
+## Resolved in v1.1 (2026-06-03)
+
+- TLS cert pinning on mobile: wired via the `expo-tls-pin` local Expo module (SHA-256 verifier in `URLSession`/`OkHttp`). Mobile `pinned-fetch` rejects connections whose cert fingerprint doesn't match the value stored in the pairing record.
+- Comm-pubkey TOFU: closed as a side effect of pinning — `/comm-pubkey` now travels through the pinned channel.
+- Fail-open empty `cert_fingerprint`: closed at the scanner — `pair.tsx` rejects any QR missing a non-empty fingerprint.
+- Image cache purge: wired in `useDrainQueue` (`removeSynced(24h)` on mount + every hour, plus a 500MB hard cap that evicts everything synced when exceeded).
+
 ## Pre-flight
 
 - [ ] Desktop builds: `cd apps/desktop && npm run dev` boots without errors
@@ -40,13 +47,30 @@ Run after every Phase 4 task that touches end-to-end flow. Same shape as `docs/p
 - [ ] Within ~10s: queue item moves to "rejected" with reason mentioning "unauthorized" / "re-pair required"
 - [ ] Re-pair → new captures work
 
-## 5. Cert change
+## 5a. Cert rotation triggered by user
 
-- [ ] Stop desktop, delete `~/.config/chain-pay/biscuit-root.enc` AND restart (forces new cert)
-- [ ] Mobile: try to capture → expect hard-fail modal "Desktop identity changed — re-pair?"
-- [ ] Re-pair → recovery
+- [ ] Settings → Pair mobile → Rotate TLS cert → confirm modal shows paired-device count
+- [ ] Within ~1s of confirming: QR display refreshes with a visibly different code
+- [ ] Paired mobile: next sync attempt within 30s triggers TLS-mismatch → pairing auto-clears
+- [ ] Home shows "Desktop identity changed — re-pair to reconnect" + the button text changes to "Re-pair desktop"
+- [ ] Re-scan new QR → pairing restored → captures sync against the new cert
+
+## 5b. Cert rotation triggered by desktop quit/restart
+
+- [ ] Stop desktop. Inspect that `~/.config/chain-pay/tls-cert.enc` exists (on Linux; the macOS/Windows equivalents are under `~/Library/Application Support/chain-pay/` and `%APPDATA%\chain-pay\` respectively).
+- [ ] Restart desktop. Mobile: capture an invoice → expect successful sync (cert persisted, same fingerprint)
+- [ ] Delete `~/.config/chain-pay/tls-cert.enc` (or equivalent) AND restart → cert regenerated → mobile sees TLS-mismatch → auto-re-pair flow as above
+- [ ] **Recovery from rotation failure:** Simulate `restartWithCert` failure (e.g. briefly bind port 8233 from another process) right before clicking Rotate → expect an error message in PairingSection. Quit + restart the desktop → server should come back on port 8233 with the new fingerprint (the cert was already persisted; the restart picks it up cleanly).
+
+## 5c. TLS pin enforcement (negative test)
+
+- [ ] On the desktop, temporarily edit `tls-cert-store.ts` to return a freshly-generated cert each call (or rotate without phone re-pairing)
+- [ ] Mobile: trigger sync → expect TLS-mismatch outcome → queue items go to `rejected` with reason "tls-mismatch — re-pair required"
+- [ ] Restore the cert (or re-pair) → drain resumes normally
 
 ## 6. Image cache cap
+
+> **Wired in v1.1** — `useDrainQueue` now calls `removeSynced(24h)` on mount + every hour, plus a 500MB hard cap that evicts all synced items when exceeded.
 
 - [ ] Capture 50+ images
 - [ ] Verify `apps/mobile` cache dir purges oldest synced after total exceeds 500MB
@@ -54,26 +78,6 @@ Run after every Phase 4 task that touches end-to-end flow. Same shape as `docs/p
 ## 7. CEMP-PQ cellular fallback — DEFERRED to v2
 
 This step removed from v1 smoke per the scoping update at the top of `docs/superpowers/specs/2026-06-02-mobile-companion-design.md`. CEMP-PQ on phone deferred until v2 (requires CCC bundled + remote CKB RPC + ML-KEM encap + tx construction).
-
-## Known v1.1 Deferrals
-
-The following items in this playbook **will not pass cleanly on v1** and are tracked for v1.1:
-
-### TLS cert pinning on mobile
-
-Section 1 (pairing) and any subsequent HTTPS call from the mobile app uses platform-default certificate validation. The desktop's self-signed cert will be rejected by iOS and may be inconsistent on Android, even though the `cert_fingerprint` is stored in the pairing record. **v1.1 must wire a React Native TLS verifier** (e.g., `react-native-ssl-pinning` or a custom native module) before this passes on a physical device. Workaround for v1 smoke: manually import the desktop cert into the device trust store, or skip TLS by running an HTTP-only dev mode (not for production).
-
-### Image cache purge (`removeSynced`)
-
-Section 6 (500 MB cap) will not trigger in v1. The `removeSynced` method exists in `useSyncQueue` but is never called from any drain path or screen. **v1.1 must wire a periodic `removeSynced(24 * 3600 * 1000)` call** from the Home screen mount or the drain hook, plus a hard cap check against `Paths.cache` size before each capture.
-
-### Comm-pubkey trust-on-first-use
-
-`apps/mobile/app/pair.tsx` fetches `desktop_comm_pubkey` over the same unauthenticated HTTPS channel that #1 (cert pinning) will eventually protect. Until pinning lands, a network MITM can substitute the desktop's comm pubkey, which would matter the moment CEMP-PQ on phone is wired up. **Practical exploitability in v1 = zero** because CEMP-PQ on mobile is deferred to v2 — the stored `desktop_comm_pubkey` is read by no code path today. **v1.1 fix lands automatically when TLS pinning lands** (the channel becomes authenticated). Alternative if pinning slips: bind `desktop_comm_pubkey` into the FiberConnect QR payload so it travels in-band rather than being fetched.
-
-### Fail-open empty `cert_fingerprint`
-
-`pair.tsx` accepts `cert_fingerprint: parsed.cert_fingerprint ?? ""` on QR scan. A hand-crafted QR with no fingerprint silently writes an empty string to SecureStore. **In practice this never fires** for QRs generated by our own desktop pair-server (T7 always populates from `pems.cert`), but defense-in-depth says reject. **v1.1 fix:** make `cert_fingerprint` required in `normalizeFiberConnectPayload` (or hard-fail in `pair.tsx`) — small change once TLS pinning is being wired anyway.
 
 ## Sign-off
 

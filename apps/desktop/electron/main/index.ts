@@ -24,7 +24,8 @@ import {
   issueCaptureV1Token,
   type RootKeypair,
 } from "./pair-server-biscuit";
-import { startPairServer, stopPairServer } from "./pair-server";
+import { restartWithCert, startPairServer, stopPairServer } from "./pair-server";
+import { loadOrCreateTlsCert, rotateTlsCert } from "./tls-cert-store";
 import { addDevice, listDevices, revokeDevice } from "./pair-store";
 import { getSafeStorage } from "./safe-storage";
 import type { CkbNetwork } from "@/lib/light-client/network-configs";
@@ -71,6 +72,7 @@ async function bootPairServer(webContents: Electron.WebContents): Promise<void> 
   // publicInfo() returns PublicIdentity { mlDsaPub, mlKemPub, ... } | null.
   // The "comm pubkey" exposed for CEMP-PQ (future v2 path) is the ML-KEM key.
   const info = await commPublicInfo();
+  const tlsCert = await loadOrCreateTlsCert();
   const started = await startPairServer({
     port: 8233,
     rootKeypair: root,
@@ -78,6 +80,7 @@ async function bootPairServer(webContents: Electron.WebContents): Promise<void> 
     sendToRenderer: webContents,
     mdns: true,
     commPubkey: info?.mlKemPub ?? "0x" + "00".repeat(32),
+    tlsCert: { key: tlsCert.key, cert: tlsCert.cert },
   });
   serverInfoCache = { certFingerprint: started.certFingerprint, port: started.port };
 }
@@ -237,6 +240,22 @@ app.whenReady().then(async () => {
     },
   );
   ipcMain.handle("pair:info", async () => serverInfoCache);
+  // Partial-failure recovery: if rotateTlsCert succeeds but restartWithCert
+  // throws (port conflict, OS error), the new cert is persisted on disk but
+  // the server is down. The handler surfaces this to the renderer via
+  // {ok: false, reason}; the user can quit + restart the desktop, after
+  // which bootPairServer's loadOrCreateTlsCert reads the rotated cert and
+  // the server comes back on the same port cleanly.
+  ipcMain.handle("pair:rotateCert", async () => {
+    try {
+      const newCert = await rotateTlsCert();
+      const started = await restartWithCert({ key: newCert.key, cert: newCert.cert });
+      serverInfoCache = { certFingerprint: started.certFingerprint, port: started.port };
+      return { ok: true as const, fingerprint: started.certFingerprint, port: started.port };
+    } catch (e: unknown) {
+      return { ok: false as const, reason: e instanceof Error ? e.message : "rotate failed" };
+    }
+  });
 
   // Fire-and-forget pair-server boot. Renderer should not block on the HTTPS
   // listener coming up; the renderer can read window.chainpay.pair.info()

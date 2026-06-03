@@ -16,15 +16,20 @@ export default function PairScreen() {
     setBusy(true);
     try {
       const parsed = parseFiberConnectUri(data);
+      if (!parsed.cert_fingerprint || parsed.cert_fingerprint.trim() === "") {
+        Alert.alert("Invalid QR", "Pairing QR is missing the TLS certificate fingerprint.");
+        setBusy(false);
+        return;
+      }
       const pairing = {
         rpc_url: parsed.rpc_url,
         auth_token: parsed.auth_token,
-        cert_fingerprint: parsed.cert_fingerprint ?? "",
+        cert_fingerprint: parsed.cert_fingerprint,
         desktop_comm_pubkey: "0x" + "00".repeat(32),
       };
       const healthy = await healthCheck(pairing);
       if (!healthy) {
-        Alert.alert("Cannot reach desktop", "Make sure desktop ChainPay is running on this network.");
+        Alert.alert("Cannot reach desktop", "Make sure desktop ChainPay is running on this network, or that the certificate matches this pairing code.");
         setBusy(false);
         return;
       }

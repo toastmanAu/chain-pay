@@ -12,27 +12,29 @@ export interface PairingPayload {
 
 interface PairingState {
   pairing: PairingPayload | null;
+  wasAutoCleared: boolean;
   savePairing: (p: PairingPayload) => Promise<void>;
-  clearPairing: () => Promise<void>;
+  clearPairing: (reason?: "user" | "tls-mismatch") => Promise<void>;
   loadPairing: () => Promise<void>;
 }
 
 export const usePairingStore = create<PairingState>((set) => ({
   pairing: null,
+  wasAutoCleared: false,
   savePairing: async (p) => {
     try {
       await SecureStore.setItemAsync(KEY, JSON.stringify(p));
-      set({ pairing: p });
+      set({ pairing: p, wasAutoCleared: false });
     } catch (e) {
       set({ pairing: null });
       throw e;
     }
   },
-  clearPairing: async () => {
+  clearPairing: async (reason = "user") => {
     try {
       await SecureStore.deleteItemAsync(KEY);
     } finally {
-      set({ pairing: null });
+      set({ pairing: null, wasAutoCleared: reason === "tls-mismatch" });
     }
   },
   loadPairing: async () => {
@@ -64,5 +66,5 @@ export const usePairingStore = create<PairingState>((set) => ({
 }));
 
 export function _resetPairingStoreForTests(): void {
-  usePairingStore.setState({ pairing: null });
+  usePairingStore.setState({ pairing: null, wasAutoCleared: false });
 }

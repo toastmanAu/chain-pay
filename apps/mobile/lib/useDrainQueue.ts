@@ -1,11 +1,15 @@
 import { useEffect, useRef } from "react";
 import NetInfo from "@react-native-community/netinfo";
-import { File, Paths } from "expo-file-system";
+import { File, Directory, Paths } from "expo-file-system";
 import { Buffer } from "buffer";
 import { IMAGE_CHUNK_BYTES, type MobileInvoicePayload } from "@chain-pay/shared";
 import { useSyncQueue, backoffMs, type QueueItem } from "@/stores/sync-queue";
 import { usePairingStore } from "@/stores/pairing";
 import { runDrainOnce } from "@/lib/transport";
+
+const IMAGE_CACHE_RETENTION_MS = 24 * 3600 * 1000;
+const IMAGE_CACHE_LIMIT_BYTES = 500 * 1024 * 1024;
+const PURGE_INTERVAL_MS = 60 * 60 * 1000;
 
 async function buildPayload(item: QueueItem): Promise<MobileInvoicePayload> {
   const file = new File(Paths.cache, item.imageRef);
@@ -24,10 +28,30 @@ async function buildPayload(item: QueueItem): Promise<MobileInvoicePayload> {
   };
 }
 
+function deleteImagesFromCache(filenames: string[]): void {
+  for (const name of filenames) {
+    try {
+      new File(Paths.cache, name).delete();
+    } catch {
+      // Best-effort; missing files are fine.
+    }
+  }
+}
+
+function cacheBytes(): number {
+  try {
+    const info = new Directory(Paths.cache).info();
+    return info.size ?? 0;
+  } catch {
+    return 0;
+  }
+}
+
 export function useDrainQueue(): void {
   const items = useSyncQueue((s) => s.items);
   const pairing = usePairingStore((s) => s.pairing);
   const queue = useSyncQueue;
+  const pairingStore = usePairingStore;
   const running = useRef(false);
 
   useEffect(() => {
@@ -48,6 +72,26 @@ export function useDrainQueue(): void {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [items.length, pairing?.auth_token]);
 
+  // Periodic + capacity-driven cache purge.
+  useEffect(() => {
+    const purge = (): void => {
+      const refs = queue.getState().removeSynced(IMAGE_CACHE_RETENTION_MS);
+      deleteImagesFromCache(refs);
+      if (cacheBytes() > IMAGE_CACHE_LIMIT_BYTES) {
+        // Force-evict everything else that's synced regardless of age.
+        const allSynced = queue.getState().items.filter((i) => i.status === "synced");
+        if (allSynced.length > 0) {
+          const moreRefs = queue.getState().removeSynced(0);
+          deleteImagesFromCache(moreRefs);
+        }
+      }
+    };
+    purge();
+    const id = setInterval(purge, PURGE_INTERVAL_MS);
+    return () => clearInterval(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   async function tick(): Promise<void> {
     if (running.current || !pairing) return;
     const item = queue.getState().nextDrainCandidate();
@@ -62,6 +106,9 @@ export function useDrainQueue(): void {
         queue.getState().markRejected(item.id, outcome.error);
       } else if (outcome.kind === "unauthorized") {
         queue.getState().markRejected(item.id, "unauthorized - re-pair required");
+      } else if (outcome.kind === "tls-mismatch") {
+        queue.getState().markRejected(item.id, "tls-mismatch - re-pair required");
+        await pairingStore.getState().clearPairing("tls-mismatch");
       } else {
         queue.getState().markFailed(item.id, outcome.error);
       }

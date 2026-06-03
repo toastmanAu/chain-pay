@@ -59,6 +59,18 @@ describe("sync-queue", () => {
     expect(useSyncQueue.getState().nextDrainCandidate()?.id).toBe(a);
   });
 
+  it("removeSynced returns image refs for items older than threshold", () => {
+    const now = Date.now();
+    const oldId = useSyncQueue.getState().enqueue({ ...sample, capturedAt: now - 48 * 3600 * 1000, imageRef: "old.jpg" });
+    const recentId = useSyncQueue.getState().enqueue({ ...sample, capturedAt: now, imageRef: "recent.jpg" });
+    useSyncQueue.getState().markSynced(oldId, "inv_old");
+    useSyncQueue.getState().markSynced(recentId, "inv_recent");
+    const purged = useSyncQueue.getState().removeSynced(24 * 3600 * 1000);
+    expect(purged).toEqual(["old.jpg"]);
+    expect(useSyncQueue.getState().findById(oldId)).toBeUndefined();
+    expect(useSyncQueue.getState().findById(recentId)).toBeDefined();
+  });
+
   it("applyEdits merges fields into extraction.body", () => {
     const id = useSyncQueue.getState().enqueue(sample);
     useSyncQueue.getState().applyEdits(id, { invoice_number: "EDITED-001", total: 99 });
