@@ -17,7 +17,10 @@ async function buildPayload(item: QueueItem): Promise<MobileInvoicePayload> {
   const buf = Buffer.from(b64, "base64");
   const chunks: string[] = [];
   for (let off = 0; off < buf.length; off += IMAGE_CHUNK_BYTES) {
-    chunks.push(buf.subarray(off, off + IMAGE_CHUNK_BYTES).toString("base64"));
+    // RN's `buffer` polyfill returns a Uint8Array from `subarray`, not a Buffer,
+    // so .toString("base64") silently falls through to Uint8Array.toString()
+    // which returns comma-joined decimal byte values. Wrap in Buffer.from to fix.
+    chunks.push(Buffer.from(buf.subarray(off, off + IMAGE_CHUNK_BYTES)).toString("base64"));
   }
   return {
     id: item.id,

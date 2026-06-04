@@ -1,6 +1,11 @@
 import { create } from "zustand";
-import { ulid } from "ulid";
+import { monotonicFactory } from "ulid";
 import { createMMKV } from "react-native-mmkv";
+
+// Hermes doesn't expose crypto.getRandomValues globally, so ulid's auto-detect
+// throws PRNG_DETECT. Queue IDs only need collision-resistance (not unpredictability),
+// so Math.random is sufficient — the ULID time prefix carries most of the entropy.
+const ulid = monotonicFactory(() => Math.random());
 
 const storage = createMMKV();
 const KEY = "chainpay.queue.v1";

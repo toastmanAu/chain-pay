@@ -2,12 +2,15 @@ import { defineConfig } from "electron-vite";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 import { nodePolyfills } from "vite-plugin-node-polyfills";
+import wasm from "vite-plugin-wasm";
+import topLevelAwait from "vite-plugin-top-level-await";
 import { resolve } from "node:path";
 
 export default defineConfig({
   main: {
     build: {
       outDir: "out/main",
+      target: "node20",
       rollupOptions: {
         input: { index: resolve(__dirname, "electron/main/index.ts") },
       },
@@ -15,6 +18,7 @@ export default defineConfig({
     resolve: {
       alias: { "@shared": resolve(__dirname, "../../packages/shared/src") },
     },
+    plugins: [wasm()],
   },
   preload: {
     build: {

@@ -171,6 +171,7 @@ async function handleInvoices(
   }
   const parsed = MobileInvoicePayloadSchema.safeParse(bodyResult.body);
   if (!parsed.success) {
+    console.warn("[pair-server] invoice payload rejected:", JSON.stringify(parsed.error.flatten(), null, 2));
     sendJson(res, 400, { error: "invalid payload" });
     return;
   }

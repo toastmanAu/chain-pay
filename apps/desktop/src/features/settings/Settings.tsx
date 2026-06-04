@@ -113,7 +113,7 @@ export function Settings() {
 
       {pairInfo && (
         <PairingSection
-          rpcHost="127.0.0.1"
+          rpcHost="192.168.68.102"
           rpcPort={pairInfo.port}
           certFingerprint={pairInfo.certFingerprint}
           onCertRotated={(info) =>
