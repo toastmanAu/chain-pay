@@ -15,6 +15,7 @@ import javax.net.ssl.TrustManager
 import javax.net.ssl.X509TrustManager
 import java.security.cert.CertificateException
 import java.io.IOException
+import java.util.concurrent.TimeUnit
 
 class ExpoTlsPinModule : Module() {
   override fun definition() = ModuleDefinition {
@@ -37,15 +38,23 @@ class ExpoTlsPinModule : Module() {
         val client = OkHttpClient.Builder()
           .sslSocketFactory(sslContext.socketFactory, trustManager)
           .hostnameVerifier { _, _ -> true } // We pin by cert hash; CN/SAN check is separate.
+          // Match iOS URLSession timeouts (see docs/phase-4-1-ios-prep.md H2).
+          .connectTimeout(30, TimeUnit.SECONDS)
+          .readTimeout(30, TimeUnit.SECONDS)
+          .writeTimeout(30, TimeUnit.SECONDS)
           .build()
 
         val reqBuilder = Request.Builder().url(url)
         headers.forEach { (k, v) -> reqBuilder.addHeader(k, v) }
         val requestBody = body?.toRequestBody("application/json".toMediaTypeOrNull())
+        // Empty body fallback so POST/PUT with null body matches iOS (which sends
+        // body-less request rather than crashing). See docs/phase-4-1-ios-prep.md M2.
+        val effectiveBody = requestBody
+          ?: ByteArray(0).toRequestBody(null, 0, 0)
         when (method.uppercase()) {
           "GET" -> reqBuilder.get()
-          "POST" -> reqBuilder.post(requestBody!!)
-          "PUT" -> reqBuilder.put(requestBody!!)
+          "POST" -> reqBuilder.post(effectiveBody)
+          "PUT" -> reqBuilder.put(effectiveBody)
           "DELETE" -> if (requestBody != null) reqBuilder.delete(requestBody) else reqBuilder.delete()
           else -> reqBuilder.method(method, requestBody)
         }
