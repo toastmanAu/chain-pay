@@ -71,6 +71,25 @@ describe("sync-queue", () => {
     expect(useSyncQueue.getState().findById(recentId)).toBeDefined();
   });
 
+  it("clearRejected removes rejected items and returns their image refs", () => {
+    const rejectedId = useSyncQueue.getState().enqueue({ ...sample, imageRef: "rejected-1.jpg" });
+    const pendingId = useSyncQueue.getState().enqueue({ ...sample, imageRef: "pending-1.jpg" });
+    const syncedId = useSyncQueue.getState().enqueue({ ...sample, imageRef: "synced-1.jpg" });
+    useSyncQueue.getState().markRejected(rejectedId, "schema mismatch");
+    useSyncQueue.getState().markSynced(syncedId, "inv_synced");
+    const purged = useSyncQueue.getState().clearRejected();
+    expect(purged).toEqual(["rejected-1.jpg"]);
+    expect(useSyncQueue.getState().findById(rejectedId)).toBeUndefined();
+    expect(useSyncQueue.getState().findById(pendingId)).toBeDefined();
+    expect(useSyncQueue.getState().findById(syncedId)).toBeDefined();
+  });
+
+  it("clearRejected with no rejected items is a no-op returning []", () => {
+    useSyncQueue.getState().enqueue(sample);
+    expect(useSyncQueue.getState().clearRejected()).toEqual([]);
+    expect(useSyncQueue.getState().items).toHaveLength(1);
+  });
+
   it("applyEdits merges fields into extraction.body", () => {
     const id = useSyncQueue.getState().enqueue(sample);
     useSyncQueue.getState().applyEdits(id, { invoice_number: "EDITED-001", total: 99 });
