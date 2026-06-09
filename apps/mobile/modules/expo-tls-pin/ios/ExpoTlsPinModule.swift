@@ -26,9 +26,16 @@ public class ExpoTlsPinModule: Module {
       let delegate = PinningDelegate(
         expectedFingerprint: fingerprint.replacingOccurrences(of: ":", with: "").uppercased()
       )
-      let session = URLSession(configuration: .ephemeral, delegate: delegate, delegateQueue: nil)
+      // Match Android OkHttp timeouts (see docs/phase-4-1-ios-prep.md H2).
+      let config = URLSessionConfiguration.ephemeral
+      config.timeoutIntervalForRequest = 30
+      config.timeoutIntervalForResource = 30
+      let session = URLSession(configuration: config, delegate: delegate, delegateQueue: nil)
 
       let task = session.dataTask(with: request) { data, response, error in
+        // URLSession retains its delegate until invalidation; without this every
+        // request leaks a session + PinningDelegate (Apple docs warn explicitly).
+        defer { session.finishTasksAndInvalidate() }
         if let err = error as NSError? {
           if delegate.didMismatch {
             promise.resolve(["ok": false, "kind": "tls-mismatch", "detail": err.localizedDescription])
@@ -82,6 +89,9 @@ class PinningDelegate: NSObject, URLSessionDelegate {
     let digest = SHA256.hash(data: der)
     let hex = digest.map { String(format: "%02X", $0) }.joined()
     if hex == expectedFingerprint {
+      // We pin by cert hash. SAN/CN check is bypassed because the desktop cert
+      // is generated per-user with arbitrary CN; the SHA-256 fingerprint in the
+      // pair QR is the identity. (Mirrors Android's hostnameVerifier { true }.)
       completionHandler(.useCredential, URLCredential(trust: serverTrust))
     } else {
       didMismatch = true
