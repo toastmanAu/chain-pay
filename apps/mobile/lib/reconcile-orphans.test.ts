@@ -34,7 +34,7 @@ vi.mock("@/stores/sync-queue", () => ({
   useSyncQueue: { getState: () => ({ items: queueState.items }) },
 }));
 
-import { File } from "expo-file-system";
+import { File, Directory } from "expo-file-system";
 import { reconcileOrphanImages, ORPHAN_MIN_AGE_MS } from "./reconcile-orphans";
 
 const NOW = 1_700_000_000_000;
@@ -73,6 +73,7 @@ describe("reconcileOrphanImages", () => {
     const noMtime = makeEntry("capture-4.jpg", undefined);
     mockState.entries = [noMtime];
     expect(reconcileOrphanImages(NOW)).toEqual([]);
+    expect((noMtime as unknown as { deleted: boolean }).deleted).toBe(false);
   });
 
   it("ignores non-capture files", () => {
@@ -80,5 +81,11 @@ describe("reconcileOrphanImages", () => {
     mockState.entries = [other];
     expect(reconcileOrphanImages(NOW)).toEqual([]);
     expect((other as unknown as { deleted: boolean }).deleted).toBe(false);
+  });
+
+  it("skips Directory entries (only processes File instances)", () => {
+    const dir = new (Directory as unknown as new () => InstanceType<typeof Directory>)();
+    mockState.entries = [dir];
+    expect(reconcileOrphanImages(NOW)).toEqual([]);
   });
 });
