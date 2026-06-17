@@ -31,7 +31,7 @@ async function buildPayload(item: QueueItem): Promise<MobileInvoicePayload> {
   };
 }
 
-function deleteImagesFromCache(filenames: string[]): void {
+export function deleteImagesFromCache(filenames: string[]): void {
   for (const name of filenames) {
     try {
       new File(Paths.cache, name).delete();

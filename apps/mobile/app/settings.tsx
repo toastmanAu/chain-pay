@@ -2,10 +2,13 @@ import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from "react-nati
 import { SafeAreaView } from "react-native-safe-area-context";
 import { router } from "expo-router";
 import { usePairingStore } from "@/stores/pairing";
+import { useSyncQueue } from "@/stores/sync-queue";
+import { deleteImagesFromCache } from "@/lib/useDrainQueue";
 
 export default function SettingsScreen() {
   const pairing = usePairingStore((s) => s.pairing);
   const clearPairing = usePairingStore((s) => s.clearPairing);
+  const rejectedCount = useSyncQueue((s) => s.items.filter((i) => i.status === "rejected").length);
 
   const onUnpair = (): void => {
     Alert.alert("Unpair desktop?", "You'll need to scan the desktop QR again to capture invoices.", [
@@ -18,6 +21,25 @@ export default function SettingsScreen() {
         },
       },
     ]);
+  };
+
+  const onClearRejected = (): void => {
+    const label = rejectedCount === 1 ? "1 rejected capture" : `${rejectedCount} rejected captures`;
+    Alert.alert(
+      "Clear rejected captures?",
+      `Remove ${label} from the queue and delete the stored images. Synced and pending items are kept.`,
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Clear",
+          style: "destructive",
+          onPress: () => {
+            const refs = useSyncQueue.getState().clearRejected();
+            deleteImagesFromCache(refs);
+          },
+        },
+      ],
+    );
   };
 
   return (
@@ -41,6 +63,18 @@ export default function SettingsScreen() {
             </Pressable>
           </View>
         )}
+
+        <Text style={styles.section}>Queue</Text>
+        <View style={styles.card}>
+          <Row label="Rejected captures" value={String(rejectedCount)} />
+          {rejectedCount > 0 ? (
+            <Pressable onPress={onClearRejected} style={({ pressed }) => [styles.danger, pressed && styles.pressed]}>
+              <Text style={styles.dangerLabel}>Clear rejected captures</Text>
+            </Pressable>
+          ) : (
+            <Text style={styles.muted}>Nothing to clear.</Text>
+          )}
+        </View>
 
         <Text style={styles.section}>About</Text>
         <View style={styles.card}>

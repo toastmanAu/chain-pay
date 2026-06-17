@@ -35,6 +35,7 @@ interface QueueState {
   findById: (id: string) => QueueItem | undefined;
   nextDrainCandidate: () => QueueItem | undefined;
   removeSynced: (olderThanMs: number) => string[];
+  clearRejected: () => string[];
   applyEdits: (id: string, edits: Record<string, unknown>) => void;
 }
 
@@ -103,6 +104,14 @@ export const useSyncQueue = create<QueueState>((set, get) => ({
     const cutoff = Date.now() - olderThanMs;
     const toRemove = get().items.filter((i) => i.status === "synced" && i.capturedAt < cutoff);
     const items = get().items.filter((i) => !toRemove.includes(i));
+    save(items);
+    set({ items });
+    return toRemove.map((i) => i.imageRef);
+  },
+
+  clearRejected: () => {
+    const toRemove = get().items.filter((i) => i.status === "rejected");
+    const items = get().items.filter((i) => i.status !== "rejected");
     save(items);
     set({ items });
     return toRemove.map((i) => i.imageRef);

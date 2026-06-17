@@ -33,7 +33,9 @@
     "vitest": "^4.1.6"
   },
   "scripts": {
-    "start": "expo start",
+    "start": "expo start --host lan",
+    "start:tunnel": "expo start --host tunnel",
+    "start:localhost": "expo start --host localhost",
     "android": "expo run:android",
     "ios": "expo run:ios",
     "web": "expo start --web"

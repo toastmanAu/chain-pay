@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { Alert, Button, StyleSheet, Text, View } from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
 import { CameraView, useCameraPermissions } from "expo-camera";
 import { router } from "expo-router";
 import { parseFiberConnectUri } from "@chain-pay/shared";
@@ -44,17 +45,19 @@ export default function PairScreen() {
 
   if (!permission?.granted) {
     return (
-      <View style={styles.center}>
+      <SafeAreaView style={styles.center} edges={["top", "bottom"]}>
         <Text>Camera permission required to pair.</Text>
         <Button title="Grant permission" onPress={requestPermission} />
-      </View>
+      </SafeAreaView>
     );
   }
 
   return (
     <View style={styles.full}>
       <CameraView style={styles.full} barcodeScannerSettings={{ barcodeTypes: ["qr"] }} onBarcodeScanned={onScan} />
-      <Text style={styles.hint}>Point at the QR shown by ChainPay desktop</Text>
+      <SafeAreaView edges={["bottom"]} style={styles.hintWrap} pointerEvents="box-none">
+        <Text style={styles.hint}>Point at the QR shown by ChainPay desktop</Text>
+      </SafeAreaView>
     </View>
   );
 }
@@ -62,5 +65,13 @@ export default function PairScreen() {
 const styles = StyleSheet.create({
   full: { flex: 1 },
   center: { flex: 1, alignItems: "center", justifyContent: "center", padding: 16 },
-  hint: { position: "absolute", bottom: 24, alignSelf: "center", color: "white", backgroundColor: "rgba(0,0,0,0.5)", padding: 8, borderRadius: 6 },
+  hintWrap: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    bottom: 0,
+    alignItems: "center",
+    paddingBottom: 24,
+  },
+  hint: { color: "white", backgroundColor: "rgba(0,0,0,0.5)", padding: 8, borderRadius: 6 },
 });
