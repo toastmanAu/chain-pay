@@ -1,10 +1,12 @@
 import { describe, it, expect } from "vitest";
 import {
+  buildBatchJournal,
   buildPaymentLines,
   type PaymentJournalInput,
   type JournalAccounts,
 } from "./accounting";
 import type { JournalEntry } from "./payroll";
+import * as shared from "./index";
 
 const accounts: JournalAccounts = {
   networkFeeExpense: "Network Fee Expense",
@@ -96,9 +98,6 @@ describe("buildPaymentLines", () => {
   });
 });
 
-import { buildBatchJournal } from "./accounting";
-import * as shared from "./index";
-
 describe("buildBatchJournal", () => {
   it("multi-payment batch: aggregate balanced, each group balanced, order preserved", () => {
     const payments: PaymentJournalInput[] = [
@@ -109,6 +108,10 @@ describe("buildBatchJournal", () => {
     const preview = buildBatchJournal("BATCH-1", payments, accounts);
     expect(preview.batchId).toBe("BATCH-1");
     assertBalanced(preview.entries); // aggregate
+    // per-group balance: P1 = 4 lines, P2 = 4 lines, P3 = 3 lines
+    assertBalanced(preview.entries.slice(0, 4));   // P1 group
+    assertBalanced(preview.entries.slice(4, 8));   // P2 group
+    assertBalanced(preview.entries.slice(8, 11));  // P3 group
     // entry count: P1 4 + P2 4 + P3 3 = 11
     expect(preview.entries).toHaveLength(11);
     // order preserved: first line is P1's salary debit
