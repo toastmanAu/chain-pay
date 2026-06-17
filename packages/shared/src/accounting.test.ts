@@ -96,6 +96,23 @@ describe("buildPaymentLines", () => {
       buildPaymentLines(payment({ crypto: { asset: "CKB", value: -1n, decimals: 8 } }), accounts),
     ).toThrow();
   });
+
+  it("negative obligation still balances", () => {
+    const lines = buildPaymentLines(
+      payment({ obligation: fiat(-100_000n), carryingCost: fiat(-90_000n) }),
+      accounts,
+    );
+    assertBalanced(lines);
+  });
+
+  it("zero-everything payment yields 2 balanced lines", () => {
+    const lines = buildPaymentLines(
+      payment({ obligation: fiat(0n), feeFiat: fiat(0n), carryingCost: fiat(0n) }),
+      accounts,
+    );
+    expect(lines).toHaveLength(2);
+    assertBalanced(lines);
+  });
 });
 
 describe("buildBatchJournal", () => {

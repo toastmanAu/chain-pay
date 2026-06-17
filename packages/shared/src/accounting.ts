@@ -52,10 +52,10 @@ export function buildPaymentLines(
 
   const memo = memoFor(p);
   const lines: JournalEntry[] = [
-    { account: p.salaryAccount, debit: p.obligation, memo },
+    { account: p.salaryAccount, debit: { ...p.obligation }, memo },
     {
       account: p.treasuryAccount,
-      credit: p.carryingCost,
+      credit: { ...p.carryingCost },
       crypto: {
         chain: p.chain,
         asset: p.crypto.asset,
@@ -67,7 +67,7 @@ export function buildPaymentLines(
   ];
 
   if (p.feeFiat.minor !== 0n) {
-    lines.push({ account: accounts.networkFeeExpense, debit: p.feeFiat, memo });
+    lines.push({ account: accounts.networkFeeExpense, debit: { ...p.feeFiat }, memo });
   }
 
   const gainLoss = p.obligation.minor + p.feeFiat.minor - p.carryingCost.minor;
