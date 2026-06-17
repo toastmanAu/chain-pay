@@ -5,6 +5,7 @@ import { router } from "expo-router";
 import { usePairingStore } from "@/stores/pairing";
 import { useSyncQueue } from "@/stores/sync-queue";
 import { useDrainQueue } from "@/lib/useDrainQueue";
+import { useDesktopReachability } from "@/lib/useDesktopReachability";
 
 export default function Home() {
   const pairing = usePairingStore((s) => s.pairing);
@@ -18,14 +19,16 @@ export default function Home() {
   useDrainQueue();
 
   const paired = pairing !== null;
+  const reachable = useDesktopReachability(pairing);
+  const offline = paired && reachable === false;
   const pendingCount = items.filter((i) => i.status === "pending" || i.status === "pending-cellular").length;
   const desktopHost = pairing ? safeHost(pairing.rpc_url) : null;
 
   return (
     <SafeAreaView style={styles.root} edges={["bottom"]}>
       <ScrollView contentContainerStyle={styles.content}>
-        <View style={[styles.statusCard, paired ? styles.statusOk : styles.statusWarn]}>
-          <Text style={styles.statusBadge}>{paired ? "Connected" : wasAutoCleared ? "Re-pair required" : "Not paired"}</Text>
+        <View style={[styles.statusCard, paired && !offline ? styles.statusOk : styles.statusWarn]}>
+          <Text style={styles.statusBadge}>{paired ? (offline ? "Desktop offline" : "Connected") : wasAutoCleared ? "Re-pair required" : "Not paired"}</Text>
           <Text style={styles.statusDetail}>
             {paired ? desktopHost : wasAutoCleared ? "Desktop identity changed" : "Pair a desktop to start capturing"}
           </Text>
