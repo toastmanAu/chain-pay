@@ -95,3 +95,45 @@ describe("buildPaymentLines", () => {
     ).toThrow();
   });
 });
+
+import { buildBatchJournal } from "./accounting";
+import * as shared from "./index";
+
+describe("buildBatchJournal", () => {
+  it("multi-payment batch: aggregate balanced, each group balanced, order preserved", () => {
+    const payments: PaymentJournalInput[] = [
+      payment({ payeeId: "P1" }), // gain
+      payment({ payeeId: "P2", carryingCost: fiat(110_000n) }), // loss
+      payment({ payeeId: "P3", carryingCost: fiat(100_050n) }), // zero g/l
+    ];
+    const preview = buildBatchJournal("BATCH-1", payments, accounts);
+    expect(preview.batchId).toBe("BATCH-1");
+    assertBalanced(preview.entries); // aggregate
+    // entry count: P1 4 + P2 4 + P3 3 = 11
+    expect(preview.entries).toHaveLength(11);
+    // order preserved: first line is P1's salary debit
+    expect(preview.entries[0]!.account).toBe("Salary Expense");
+    expect(preview.entries[0]!.memo).toContain("P1");
+  });
+
+  it("empty batch returns no entries", () => {
+    expect(buildBatchJournal("EMPTY", [], accounts)).toEqual({ batchId: "EMPTY", entries: [] });
+  });
+
+  it("throws on mixed fiat currency across payments", () => {
+    const payments: PaymentJournalInput[] = [
+      payment({ payeeId: "P1" }),
+      payment({
+        payeeId: "P2",
+        obligation: fiat(100_000n, "EUR"),
+        feeFiat: fiat(50n, "EUR"),
+        carryingCost: fiat(90_000n, "EUR"),
+      }),
+    ];
+    expect(() => buildBatchJournal("BATCH-X", payments, accounts)).toThrow();
+  });
+
+  it("is re-exported from the package index", () => {
+    expect(typeof shared.buildBatchJournal).toBe("function");
+  });
+});

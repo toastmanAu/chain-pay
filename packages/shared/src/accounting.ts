@@ -1,7 +1,7 @@
 import type { ChainId } from "./chainIds";
 import type { TransactionHash } from "./types";
 import type { FiatAmount, Money } from "./money";
-import type { JournalEntry } from "./payroll";
+import type { JournalEntry, AccountingJournalPreview } from "./payroll";
 
 export interface PaymentJournalInput {
   payeeId: string;
@@ -78,4 +78,29 @@ export function buildPaymentLines(
   }
 
   return lines;
+}
+
+/**
+ * Maps a confirmed batch's payments to a flat, balanced set of journal lines
+ * (per-payment groups in input order). Throws if payments disagree on fiat
+ * currency. An empty batch returns no entries.
+ */
+export function buildBatchJournal(
+  batchId: string,
+  payments: PaymentJournalInput[],
+  accounts: JournalAccounts,
+): AccountingJournalPreview {
+  if (payments.length > 0) {
+    const currency = payments[0]!.obligation.currency;
+    for (const p of payments) {
+      if (p.obligation.currency !== currency) {
+        throw new Error(
+          `buildBatchJournal: batch mixes fiat currencies ` +
+            `(${currency} vs ${p.obligation.currency} for payee ${p.payeeId})`,
+        );
+      }
+    }
+  }
+  const entries = payments.flatMap((p) => buildPaymentLines(p, accounts));
+  return { batchId, entries };
 }
