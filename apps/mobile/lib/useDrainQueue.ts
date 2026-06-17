@@ -6,6 +6,7 @@ import { IMAGE_CHUNK_BYTES, type MobileInvoicePayload } from "@chain-pay/shared"
 import { useSyncQueue, backoffMs, type QueueItem } from "@/stores/sync-queue";
 import { usePairingStore } from "@/stores/pairing";
 import { runDrainOnce } from "@/lib/transport";
+import { reconcileOrphanImages } from "@/lib/reconcile-orphans";
 
 const IMAGE_CACHE_RETENTION_MS = 24 * 3600 * 1000;
 const IMAGE_CACHE_LIMIT_BYTES = 500 * 1024 * 1024;
@@ -88,6 +89,7 @@ export function useDrainQueue(): void {
           deleteImagesFromCache(moreRefs);
         }
       }
+      reconcileOrphanImages();
     };
     purge();
     const id = setInterval(purge, PURGE_INTERVAL_MS);
