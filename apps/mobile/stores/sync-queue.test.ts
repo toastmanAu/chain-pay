@@ -97,4 +97,15 @@ describe("sync-queue", () => {
     expect(item.extraction.body.invoice_number).toBe("EDITED-001");
     expect(item.extraction.body.total).toBe(99);
   });
+
+  it("markSynced clears stale lastError but keeps attempts", () => {
+    const id = useSyncQueue.getState().enqueue(sample);
+    useSyncQueue.getState().markFailed(id, "Failed to connect");
+    useSyncQueue.getState().markSynced(id, "inv_ok");
+    const item = useSyncQueue.getState().findById(id)!;
+    expect(item.status).toBe("synced");
+    expect(item.syncedInvoiceId).toBe("inv_ok");
+    expect(item.lastError).toBeUndefined();
+    expect(item.attempts).toBe(1);
+  });
 });

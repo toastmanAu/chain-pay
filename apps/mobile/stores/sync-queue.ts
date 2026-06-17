@@ -68,7 +68,9 @@ export const useSyncQueue = create<QueueState>((set, get) => ({
 
   markSynced: (id, invoiceId) => {
     const items = get().items.map((i) =>
-      i.id === id ? { ...i, status: "synced" as const, syncedInvoiceId: invoiceId } : i,
+      i.id === id
+        ? { ...i, status: "synced" as const, syncedInvoiceId: invoiceId, lastError: undefined }
+        : i,
     );
     save(items);
     set({ items });
