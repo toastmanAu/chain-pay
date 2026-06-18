@@ -39,6 +39,12 @@ coverage/
 *.tsbuildinfo
 debug/
 
+# Python (crypto_payroll Frappe app)
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+
 release/
 *.app
 *.dmg
