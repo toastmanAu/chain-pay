@@ -1,5 +1,7 @@
 # Phase 5 / Slice B — slim ERPNext dev stack for the accounting bridge.
 # Official prebuilt frappe/erpnext image; crypto_payroll bind-mounted editable.
+name: chainpay-backend
+
 x-backend-defaults: &backend_defaults
   image: ${ERPNEXT_IMAGE:-frappe/erpnext:version-15}
   restart: unless-stopped
