@@ -15,6 +15,13 @@ for i in $(seq 1 30); do
 done
 [ "$status" = "healthy" ] || { echo "DB did not become healthy"; exit 1; }
 
+log "Ensuring crypto_payroll editable install is registered in venv (idempotent)"
+dc exec -T -u root backend bash -lc 'cd /home/frappe/frappe-bench && ./env/bin/pip install -q -e apps/crypto_payroll'
+# bench serve (PID 1) starts before the bind-mount is pip-installed; restart it
+# so the fresh .pth is picked up before any bench commands run.
+dc restart backend
+sleep 3
+
 log "Configuring bench service hosts (idempotent)"
 bench_exec set-config -g db_host db || true
 bench_exec set-config -gp db_port 3306 || true
@@ -53,16 +60,5 @@ bench_site migrate
 log "Seeding test Company + GL accounts"
 bench_site execute crypto_payroll.setup.seed.run
 
-log "ERPNext install confirmed"
-bench_site list-apps
-
-log "Smoke-checking HTTP endpoint"
-# bench serve routes by Host header — use --resolve so it works without an /etc/hosts entry.
-PING_URL="http://${SITE_NAME}:${BACKEND_PORT}/api/method/ping"
-HTTP_CODE="$(curl -s -o /dev/null -w '%{http_code}' --resolve "${SITE_NAME}:${BACKEND_PORT}:127.0.0.1" "$PING_URL")"
-if [ "$HTTP_CODE" = "200" ]; then
-  log "HTTP ping OK (200)"
-else
-  echo "WARNING: HTTP ping returned $HTTP_CODE — backend may still be starting up."
-  echo "Re-run: curl -s --resolve ${SITE_NAME}:${BACKEND_PORT}:127.0.0.1 $PING_URL"
-fi
+log "Running smoke checks"
+"$REPO_ROOT/scripts/backend-smoke.sh"
