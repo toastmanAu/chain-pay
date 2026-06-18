@@ -20,6 +20,9 @@ ACCOUNTS = [
 def _ensure_warehouse_type(name: str) -> None:
     """ERPNext's Company.create_default_warehouses references 'Transit' Warehouse Type.
     In a fresh test environment this record doesn't exist yet, so we create it first.
+
+    ignore_permissions=True: this reconstructs an ERPNext-internal default (mirroring
+    ERPNext's own create_default_* helpers); it is infrastructure, not user data.
     """
     if not frappe.db.exists("Warehouse Type", name):
         frappe.get_doc({"doctype": "Warehouse Type", "name": name}).insert(ignore_permissions=True)

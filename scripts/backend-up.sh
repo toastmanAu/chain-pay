@@ -47,11 +47,11 @@ if bench_site list-apps | grep -qw crypto_payroll; then
   log "crypto_payroll already installed — running migrate"
 else
   log "Installing editable crypto_payroll"
-  # app source is bind-mounted at apps/crypto_payroll; register it in the env + apps.txt
+  # app source is bind-mounted at apps/crypto_payroll; the pip -e registration
+  # already ran above (root, every boot), so here we only register it in apps.txt.
   dc exec -T backend bash -lc '
     set -e
     grep -qxF crypto_payroll sites/apps.txt || printf "\ncrypto_payroll\n" >> sites/apps.txt
-    ./env/bin/pip install -e apps/crypto_payroll
   '
   bench_site install-app crypto_payroll
 fi

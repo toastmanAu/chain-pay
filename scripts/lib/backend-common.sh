@@ -7,7 +7,11 @@ ENV_FILE="$REPO_ROOT/docker/.env"
 COMPOSE_FILE="$REPO_ROOT/docker/docker-compose.yml"
 
 # Load SITE_NAME / ADMIN_PASSWORD / MARIADB_ROOT_PASSWORD / BACKEND_PORT from docker/.env
-set -a; [ -f "$ENV_FILE" ] && . "$ENV_FILE"; set +a
+if [ -f "$ENV_FILE" ]; then
+  set -a; . "$ENV_FILE"; set +a
+else
+  echo "WARNING: $ENV_FILE not found — using built-in defaults (Administrator/admin, db root frappe). Run: cp .env.example docker/.env" >&2
+fi
 SITE_NAME="${SITE_NAME:-chainpay.localhost}"
 ADMIN_PASSWORD="${ADMIN_PASSWORD:-admin}"
 MARIADB_ROOT_PASSWORD="${MARIADB_ROOT_PASSWORD:-frappe}"
