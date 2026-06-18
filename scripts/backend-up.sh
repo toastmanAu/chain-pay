@@ -36,6 +36,20 @@ fi
 # Set currentsite.txt so bench serve routes Host: chainpay.localhost correctly.
 bench_exec use "$SITE_NAME"
 
+if bench_site list-apps | grep -qw crypto_payroll; then
+  log "crypto_payroll already installed — running migrate"
+else
+  log "Installing editable crypto_payroll"
+  # app source is bind-mounted at apps/crypto_payroll; register it in the env + apps.txt
+  dc exec -T backend bash -lc '
+    set -e
+    grep -qxF crypto_payroll sites/apps.txt || printf "\ncrypto_payroll\n" >> sites/apps.txt
+    ./env/bin/pip install -e apps/crypto_payroll
+  '
+  bench_site install-app crypto_payroll
+fi
+bench_site migrate
+
 log "ERPNext install confirmed"
 bench_site list-apps
 

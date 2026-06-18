@@ -20,7 +20,6 @@
     { "fieldname": "notes",      "fieldtype": "Small Text",  "label": "Notes" }
   ],
   "permissions": [
-    { "role": "System Manager", "read": 1, "write": 1, "create": 1, "delete": 1 },
-    { "role": "HR Manager",     "read": 1 }
+    { "role": "System Manager", "read": 1, "write": 1, "create": 1, "delete": 1 }
   ]
 }
