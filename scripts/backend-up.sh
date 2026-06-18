@@ -50,6 +50,9 @@ else
 fi
 bench_site migrate
 
+log "Seeding test Company + GL accounts"
+bench_site execute crypto_payroll.setup.seed.run
+
 log "ERPNext install confirmed"
 bench_site list-apps
 
