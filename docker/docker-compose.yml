@@ -49,8 +49,9 @@ services:
     <<: *backend_defaults
     container_name: chainpay-backend
     ports:
-      - "8000:8000"
-    # `bench serve` runs the werkzeug app server on 8000 against the default site.
+      - "${BACKEND_PORT:-8000}:8000"
+    # `bench serve` runs the werkzeug app server on 8000.
+    # Site is resolved from currentsite.txt (written by backend-up.sh via bench use).
     command: ["bench", "serve", "--port", "8000"]
     depends_on:
       db:
