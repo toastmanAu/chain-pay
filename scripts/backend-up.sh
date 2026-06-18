@@ -7,6 +7,7 @@ dc pull
 dc up -d
 
 log "Waiting for MariaDB to be healthy"
+status=starting
 for i in $(seq 1 30); do
   status="$(docker inspect --format '{{.State.Health.Status}}' chainpay-db 2>/dev/null || echo starting)"
   [ "$status" = "healthy" ] && break
