@@ -564,6 +564,47 @@ describe("accounting-post lifecycle (markPosting / markPosted / markPostFailed)"
   });
 });
 
+// ── Phase 5 Slice C: kind guard — vendor batches immune to accounting-post actions ──
+
+describe("accounting-post kind guard — vendor batch is never mutated", () => {
+  it("markPosting called with a vendor batch id is a no-op (state stays confirmed, no jeName/postError)", async () => {
+    const { usePayrollBatchesStore } = await import("./payroll-batches");
+    const store = usePayrollBatchesStore.getState();
+
+    const vendorBatch: VendorPaymentBatch = {
+      kind: "vendor",
+      id: "vb-guard-1",
+      createdAt: "2026-06-25T00:00:00Z",
+      updatedAt: "2026-06-25T00:00:00Z",
+      label: "Acme INV-002",
+      treasuryId: "tr_1",
+      invoiceIds: ["inv_2"],
+      vendorId: "vendor_1",
+      fxSnapshot: [],
+      lines: [
+        {
+          vendorId: "vendor_1",
+          fiat: { minor: 200n, currency: "AUD" },
+          crypto: { value: 2_000_000n, asset: "CKB", decimals: 8 },
+          fxRate: "1",
+          feeAllocated: { value: 0n, asset: "CKB", decimals: 8 },
+        },
+      ],
+      state: "confirmed",
+    };
+
+    store.addBatch(vendorBatch);
+    store.markPosting("vb-guard-1");
+
+    const got = store.findById("vb-guard-1")!;
+    expect(got.kind).toBe("vendor");
+    expect(got.state).toBe("confirmed");
+    // PayrollBatch-only fields must not have been written onto the vendor batch
+    expect((got as unknown as Record<string, unknown>)["jeName"]).toBeUndefined();
+    expect((got as unknown as Record<string, unknown>)["postError"]).toBeUndefined();
+  });
+});
+
 // ── 3a-T11: kind discriminator + v1→v2 migration ────────────────────────────
 
 describe("kind discriminator + v1→v2 migration", () => {

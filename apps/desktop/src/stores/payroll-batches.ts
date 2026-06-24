@@ -317,9 +317,9 @@ export const usePayrollBatchesStore = create<PayrollBatchesStore>()(
         set((s) => ({
           batches: s.batches.map((b) => {
             if (b.id !== batchId) return b;
+            if (b.kind !== "payroll") return b;
             assertCanTransition(b.state, "posting");
-            const pb = b as PayrollBatch;
-            const { postError: _drop, ...rest } = pb;
+            const { postError: _drop, ...rest } = b;
             return { ...rest, state: "posting" as PayrollBatchState, updatedAt: new Date().toISOString() };
           }),
         }));
@@ -328,8 +328,9 @@ export const usePayrollBatchesStore = create<PayrollBatchesStore>()(
         set((s) => ({
           batches: s.batches.map((b) => {
             if (b.id !== batchId) return b;
+            if (b.kind !== "payroll") return b;
             assertCanTransition(b.state, "posted");
-            return { ...(b as PayrollBatch), state: "posted" as PayrollBatchState, jeName, updatedAt: new Date().toISOString() };
+            return { ...b, state: "posted" as PayrollBatchState, jeName, updatedAt: new Date().toISOString() };
           }),
         }));
       },
@@ -337,8 +338,9 @@ export const usePayrollBatchesStore = create<PayrollBatchesStore>()(
         set((s) => ({
           batches: s.batches.map((b) => {
             if (b.id !== batchId) return b;
+            if (b.kind !== "payroll") return b;
             assertCanTransition(b.state, "post_failed");
-            return { ...(b as PayrollBatch), state: "post_failed" as PayrollBatchState, postError: error, updatedAt: new Date().toISOString() };
+            return { ...b, state: "post_failed" as PayrollBatchState, postError: error, updatedAt: new Date().toISOString() };
           }),
         }));
       },
