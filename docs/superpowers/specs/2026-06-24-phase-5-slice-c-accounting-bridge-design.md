@@ -148,8 +148,26 @@ placeholder until a dedicated lot-tracking slice. `feeFiat` is derived from the 
 - Frappe API key/secret live only in the Electron **main** process (env). The renderer never
   receives them.
 - Endpoint is `@frappe.whitelist()` with `allow_guest=False` — authenticated API user only.
+- Endpoint is **role-gated** via `frappe.only_for(["Accounts Manager", "Accounts User"])`; the
+  desktop's API user must hold an Accounts role. (Note: `frappe.only_for` is a no-op under
+  `in_test=True`, so the negative role test forces the flag off.)
+- Account existence checks are **company-bound** (`{"name": account, "company": COMPANY}`) so a
+  caller cannot reference accounts outside the configured company.
 - Input validation on both boundaries (zod renderer/main; `frappe.throw` server-side).
 - No secrets logged. Error messages surfaced to the UI carry no credentials or internal paths.
+
+### Known residual — trust-the-client (closes in Slice E)
+
+The `post_journal` endpoint currently **trusts the caller-supplied `preview`** (accounts and
+amounts). It is bounded by the role gate + company-bound account checks, but amounts are **not**
+verified against a server-side source of truth, because batches are not persisted in ERPNext
+until Slice E. A privileged caller could therefore post a balanced-but-incorrect JE.
+
+**Slice E hard prerequisite:** once `Crypto Payment Batch` records are persisted, the endpoint
+MUST verify each `preview` entry (account, amount, currency) against the persisted, `confirmed`
+batch before posting — or derive the JE from the persisted batch directly and treat `preview` as
+advisory. This verification is a **blocker before any real-money / production use** and is
+recorded here and in a code comment at the trust boundary in `api/__init__.py`.
 
 ## Testing
 
@@ -177,3 +195,5 @@ placeholder until a dedicated lot-tracking slice. `feeFiat` is derived from the 
 - Configurable account mapping (per chain / per department) — Slice D/E.
 - Lot-based cost basis and real FX gain/loss — dedicated future slice.
 - Persisting `Crypto Payment Batch` records in ERPNext — Slice E.
+- **Server-side verification of `preview` against the persisted batch — Slice E (security blocker
+  before production use; see "Known residual" above).**
