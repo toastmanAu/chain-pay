@@ -99,6 +99,13 @@ const chainpayApi = {
       };
     },
   },
+  accounting: {
+    postJournal: (
+      batchId: string,
+      preview: unknown,
+    ): Promise<{ jeName: string; idempotent: boolean }> =>
+      ipcRenderer.invoke("accounting:postJournal", batchId, preview),
+  },
 };
 
 contextBridge.exposeInMainWorld("chainpay", chainpayApi);
