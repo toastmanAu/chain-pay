@@ -5,6 +5,7 @@ import { isPayrollBatch } from "@chain-pay/shared";
 import { usePayrollBatchesStore } from "@/stores/payroll-batches";
 import { useTreasuryStore } from "@/stores/treasury";
 import { nextStates, isTerminal } from "@/lib/payroll/state-machine";
+import { postBatchJournal } from "@/lib/accounting/post-batch-journal";
 
 const inputCls =
   "w-full rounded-md border border-surface-hi bg-bg px-3 py-2 text-sm text-fg placeholder:text-fg-muted/60";
@@ -259,6 +260,24 @@ function BatchCard({
             .join(" · ")}
         </div>
       ) : null}
+      {batch.state === "posting" ? (
+        <p className="text-xs text-fg-muted">Posting to accounting…</p>
+      ) : null}
+      {batch.state === "posted" ? (
+        <p className="text-xs text-accent">Posted · {batch.jeName}</p>
+      ) : null}
+      {batch.state === "post_failed" ? (
+        <div className="flex items-center gap-2">
+          <p className="text-xs text-danger">{batch.postError}</p>
+          <button
+            type="button"
+            onClick={() => void postBatchJournal(batch.id)}
+            className="rounded-md border border-surface-hi bg-bg px-2 py-1 text-xs text-fg-muted hover:text-fg"
+          >
+            Retry
+          </button>
+        </div>
+      ) : null}
       {error ? <p className="text-xs text-danger">{error}</p> : null}
     </li>
   );
@@ -298,7 +317,7 @@ function stateTone(state: PayrollBatchState): string {
     case "posting":
       return "bg-accent/60 text-accent-fg";
     case "posted":
-      return "bg-success text-success-fg";
+      return "bg-accent/80 text-accent-fg";
     case "post_failed":
       return "bg-danger/20 text-danger";
     case "failed":
