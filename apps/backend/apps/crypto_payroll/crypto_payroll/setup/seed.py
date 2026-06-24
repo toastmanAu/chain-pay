@@ -1,9 +1,11 @@
 """Idempotent seed for the ChainPay accounting bridge dev/test env.
 
-Creates one test Company and the four GL accounts the accounting model
-(docs/accounting-model.md) requires. Safe to run repeatedly.
+Creates one test Company, the four GL accounts the accounting model
+(docs/accounting-model.md) requires, a Fiscal Year for the current
+calendar year, and the Main cost center tree. Safe to run repeatedly.
 """
 import frappe
+from frappe.utils import today, getdate
 
 COMPANY = "ChainPay Test"
 ABBR = "CPT"
@@ -68,7 +70,68 @@ def _ensure_account(account_name: str, root_type: str, parent_group: str) -> str
     return doc.name
 
 
+def ensure_fiscal_year() -> None:
+    """Create a Fiscal Year for the current calendar year if one doesn't exist."""
+    year = getdate(today()).year
+    fy_name = str(year)
+    if not frappe.db.exists("Fiscal Year", fy_name):
+        fy = frappe.get_doc(
+            {
+                "doctype": "Fiscal Year",
+                "year": fy_name,
+                "year_start_date": f"{year}-01-01",
+                "year_end_date": f"{year}-12-31",
+                "companies": [{"company": COMPANY}],
+            }
+        )
+        fy.insert(ignore_permissions=True)
+        frappe.db.commit()
+
+
+def ensure_cost_center() -> str:
+    """Return a leaf cost center for the company, creating the tree if absent.
+
+    Mirrors ERPNext's Company.create_default_cost_center exactly, including
+    the ignore_mandatory flag required to insert the parentless root node.
+    """
+    main_cc = f"Main - {ABBR}"
+    if frappe.db.exists("Cost Center", main_cc):
+        return main_cc
+
+    root_cc = f"{COMPANY} - {ABBR}"
+    if not frappe.db.exists("Cost Center", root_cc):
+        root = frappe.get_doc(
+            {
+                "doctype": "Cost Center",
+                "cost_center_name": COMPANY,
+                "company": COMPANY,
+                "is_group": 1,
+                "parent_cost_center": None,
+            }
+        )
+        root.flags.ignore_permissions = True
+        root.flags.ignore_mandatory = True
+        root.insert()
+        frappe.db.commit()
+
+    main = frappe.get_doc(
+        {
+            "doctype": "Cost Center",
+            "cost_center_name": "Main",
+            "company": COMPANY,
+            "is_group": 0,
+            "parent_cost_center": root_cc,
+        }
+    )
+    main.flags.ignore_permissions = True
+    main.insert()
+    frappe.db.commit()
+    return main_cc
+
+
 def run() -> dict:
     _ensure_company()
+    ensure_fiscal_year()
+    cost_center = ensure_cost_center()
     names = [_ensure_account(a, rt, pg) for a, rt, pg in ACCOUNTS]
-    return {"company": COMPANY, "accounts": names}
+    return {"company": COMPANY, "accounts": names, "cost_center": cost_center}
