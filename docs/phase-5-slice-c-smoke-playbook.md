@@ -27,6 +27,11 @@ bash scripts/backend-up.sh
 - A Fiscal Year covering today and a leaf Cost Center are present.
 - The 5 smoke checks pass (`ALL SMOKE CHECKS PASSED`).
 
+> **Self-healing on every call:** the `post_journal` endpoint itself calls
+> `ensure_fiscal_year()` and `ensure_cost_center()` before inserting a Journal
+> Entry, so even if the seed step was skipped or the Fiscal Year rolled over,
+> the endpoint re-creates the required records on demand.
+
 ERPNext is at `http://chainpay.localhost:${BACKEND_PORT}` (default port 8000).
 Login: **Administrator** / the `ADMIN_PASSWORD` in `docker/.env` (default: `admin`).
 
@@ -36,15 +41,17 @@ Login: **Administrator** / the `ADMIN_PASSWORD` in `docker/.env` (default: `admi
 
 The `post_journal` endpoint is role-gated: `frappe.only_for(["Accounts Manager",
 "Accounts User"])`. The API user whose key and secret the desktop sends **must**
-hold one of those roles — a call from a plain Administrator account without the
-role assignment will be rejected.
+hold one of those roles.
 
-### 2a — Create (or reuse) a user and grant the role
+> **Administrator short-cut for local dev:** The built-in Administrator account
+> is a Frappe superuser and already holds all roles. `frappe.only_for` never
+> rejects it, so you can use Administrator's API key/secret for local-dev smoke
+> without any extra role grant. For a dedicated service account (recommended for
+> staging/production) follow 2a below.
 
-You can use the built-in **Administrator** account (which already has all roles),
-or create a dedicated service account:
+### 2a — Create (or reuse) a service account and grant the role
 
-**Via the ERPNext UI:**
+**Via the ERPNext UI (primary):**
 
 1. Open `http://chainpay.localhost:${BACKEND_PORT}` and log in as Administrator.
 2. Navigate to **User** (search "User" in the top bar or go to
@@ -57,12 +64,18 @@ or create a dedicated service account:
 
 ```bash
 docker compose -f docker/docker-compose.yml exec backend \
-  bench --site chainpay.localhost execute frappe.client.set_value \
-  --kwargs '{"dt":"User","dn":"Administrator","fieldname":"enabled","value":1}'
+  bench --site chainpay.localhost console
 ```
 
-For adding roles programmatically use Frappe's `add_roles` helper — or simply
-use the UI, which is faster.
+Then in the interactive Python console:
+
+```python
+user = frappe.get_doc("User", "service@example.com")
+user.add_roles("Accounts Manager")
+frappe.db.commit()
+```
+
+Replace `service@example.com` with the actual user e-mail.
 
 ### 2b — Generate an API key and secret
 
