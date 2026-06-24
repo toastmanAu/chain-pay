@@ -515,6 +515,55 @@ describe("2.7c auto-broadcast state transitions", () => {
   });
 });
 
+// ── Phase 5 Slice C: accounting-post lifecycle ───────────────────────────────
+
+describe("accounting-post lifecycle (markPosting / markPosted / markPostFailed)", () => {
+  it("drives the accounting-post lifecycle", async () => {
+    const { usePayrollBatchesStore } = await import("./payroll-batches");
+    const store = usePayrollBatchesStore.getState();
+    const addConfirmedBatch = (id: string) =>
+      store.addBatch({ ...sampleBatch, id, state: "confirmed" });
+    const get = (id: string) => store.findById(id) as PayrollBatch;
+
+    addConfirmedBatch("pbX");
+    store.markPosting("pbX");
+    expect(get("pbX").state).toBe("posting");
+    store.markPosted("pbX", "ACC-JV-0009");
+    expect(get("pbX").state).toBe("posted");
+    expect(get("pbX").jeName).toBe("ACC-JV-0009");
+  });
+
+  it("records a post failure with the error and allows retry", async () => {
+    const { usePayrollBatchesStore } = await import("./payroll-batches");
+    const store = usePayrollBatchesStore.getState();
+    const addConfirmedBatch = (id: string) =>
+      store.addBatch({ ...sampleBatch, id, state: "confirmed" });
+    const get = (id: string) => store.findById(id) as PayrollBatch;
+
+    addConfirmedBatch("pbY");
+    store.markPosting("pbY");
+    store.markPostFailed("pbY", "boom");
+    expect(get("pbY").state).toBe("post_failed");
+    expect(get("pbY").postError).toBe("boom");
+    store.markPosting("pbY"); // retry: post_failed → posting
+    expect(get("pbY").state).toBe("posting");
+  });
+
+  it("markPosting clears postError from a previous failure", async () => {
+    const { usePayrollBatchesStore } = await import("./payroll-batches");
+    const store = usePayrollBatchesStore.getState();
+    const addConfirmedBatch = (id: string) =>
+      store.addBatch({ ...sampleBatch, id, state: "confirmed" });
+    const get = (id: string) => store.findById(id) as PayrollBatch;
+
+    addConfirmedBatch("pbZ");
+    store.markPosting("pbZ");
+    store.markPostFailed("pbZ", "transient error");
+    store.markPosting("pbZ"); // retry
+    expect(get("pbZ").postError).toBeUndefined();
+  });
+});
+
 // ── 3a-T11: kind discriminator + v1→v2 migration ────────────────────────────
 
 describe("kind discriminator + v1→v2 migration", () => {
