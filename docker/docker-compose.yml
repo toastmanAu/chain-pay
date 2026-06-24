@@ -1,48 +1,82 @@
-# Phase 4 — Frappe + ERPNext + Frappe HR + crypto_payroll
-# Not used in Phase 0/1/2/3. Stand up only when wiring the accounting bridge.
+# Phase 5 / Slice B — slim ERPNext dev stack for the accounting bridge.
+# Official prebuilt frappe/erpnext image; crypto_payroll bind-mounted editable.
+name: chainpay-backend
+
+x-backend-defaults: &backend_defaults
+  image: ${ERPNEXT_IMAGE:-frappe/erpnext:version-15}
+  restart: unless-stopped
+  volumes:
+    - sites:/home/frappe/frappe-bench/sites
+    # editable custom app — installed at site-setup time, not baked
+    - ../apps/backend/apps/crypto_payroll/crypto_payroll:/home/frappe/frappe-bench/apps/crypto_payroll/crypto_payroll
+    - ../apps/backend/apps/crypto_payroll/setup.py:/home/frappe/frappe-bench/apps/crypto_payroll/setup.py:ro
+    - ../apps/backend/apps/crypto_payroll/requirements.txt:/home/frappe/frappe-bench/apps/crypto_payroll/requirements.txt:ro
+    - ../apps/backend/apps/crypto_payroll/MANIFEST.in:/home/frappe/frappe-bench/apps/crypto_payroll/MANIFEST.in:ro
 
 services:
-  frappe:
-    build:
-      context: .
-      dockerfile: frappe.Dockerfile
-    container_name: chainpay-frappe
-    ports:
-      - "8000:8000"
-    volumes:
-      - frappe-bench:/workspace/frappe-bench
-      - ../apps/backend/apps:/workspace/apps:ro
-    environment:
-      MARIADB_HOST: mariadb
-      REDIS_CACHE: redis://redis:6379/0
-      REDIS_QUEUE: redis://redis:6379/1
-      REDIS_SOCKETIO: redis://redis:6379/2
-    depends_on:
-      - mariadb
-      - redis
-
-  mariadb:
-    image: mariadb:11
-    container_name: chainpay-mariadb
+  db:
+    image: mariadb:10.6
+    container_name: chainpay-db
     restart: unless-stopped
     environment:
       MARIADB_ROOT_PASSWORD: ${MARIADB_ROOT_PASSWORD:-frappe}
-      MARIADB_DATABASE: frappe
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+      - --skip-character-set-client-handshake
     volumes:
-      - mariadb-data:/var/lib/mysql
-    command: >
-      --character-set-server=utf8mb4
-      --collation-server=utf8mb4_unicode_ci
-      --skip-character-set-client-handshake
+      - db-data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 5s
+      retries: 20
 
-  redis:
-    image: redis:7-alpine
-    container_name: chainpay-redis
+  redis-cache:
+    image: redis:6.2-alpine
+    container_name: chainpay-redis-cache
     restart: unless-stopped
     volumes:
-      - redis-data:/data
+      - redis-cache-data:/data
+
+  redis-queue:
+    image: redis:6.2-alpine
+    container_name: chainpay-redis-queue
+    restart: unless-stopped
+    volumes:
+      - redis-queue-data:/data
+
+  backend:
+    <<: *backend_defaults
+    container_name: chainpay-backend
+    ports:
+      - "${BACKEND_PORT:-8000}:8000"
+    # `bench serve` runs the werkzeug app server on 8000.
+    # Site is resolved from currentsite.txt (written by backend-up.sh via bench use).
+    command: ["bench", "serve", "--port", "8000"]
+    depends_on:
+      db:
+        condition: service_healthy
+      redis-cache:
+        condition: service_started
+      redis-queue:
+        condition: service_started
+
+  scheduler:
+    <<: *backend_defaults
+    container_name: chainpay-scheduler
+    command: ["bench", "schedule"]
+    depends_on:
+      - backend
+
+  queue-default:
+    <<: *backend_defaults
+    container_name: chainpay-queue-default
+    command: ["bench", "worker", "--queue", "short,default,long"]
+    depends_on:
+      - backend
 
 volumes:
-  frappe-bench:
-  mariadb-data:
-  redis-data:
+  sites:
+  db-data:
+  redis-cache-data:
+  redis-queue-data:

@@ -19,7 +19,6 @@
   ],
   "permissions": [
     { "role": "System Manager", "read": 1, "write": 1, "create": 1 },
-    { "role": "HR Manager",     "read": 1, "write": 1, "create": 1 },
     { "role": "Employee",       "read": 1, "write": 1, "if_owner": 1 }
   ]
 }
