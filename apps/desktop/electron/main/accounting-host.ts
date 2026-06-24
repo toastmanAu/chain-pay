@@ -34,7 +34,10 @@ export async function postJournalToFrappe(
     // MUST be the site host (http://chainpay.localhost:PORT), so fetch derives the
     // correct Host automatically. chainpay.localhost resolves to 127.0.0.1 on the
     // host where Electron main runs.
-    body: JSON.stringify({ batch_id: batchId, preview }),
+    body: JSON.stringify(
+      { batch_id: batchId, preview },
+      (_key, value) => (typeof value === "bigint" ? value.toString() : value),
+    ),
   });
   if (!res.ok) {
     const detail = await res.text();
