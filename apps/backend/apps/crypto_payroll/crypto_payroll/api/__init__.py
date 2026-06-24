@@ -24,6 +24,11 @@ def post_journal(batch_id: str, preview: dict) -> dict:
     Returns {"je_name": str, "idempotent": bool}. Raises frappe.ValidationError on
     a malformed, unbalanced, or unknown-account payload.
     """
+    # Fix 1 (CRITICAL — privilege escalation): role-gate before any work.
+    # ignore_permissions=True on the insert below is intentional and safe because
+    # this gate ensures only callers holding an Accounts role can reach it.
+    frappe.only_for(["Accounts Manager", "Accounts User"])
+
     preview = frappe.parse_json(preview) if isinstance(preview, str) else preview
     if not batch_id:
         frappe.throw("batch_id is required")
@@ -41,9 +46,15 @@ def post_journal(batch_id: str, preview: dict) -> dict:
     accounts = []
     total_debit = 0.0
     total_credit = 0.0
+    # SECURITY (Slice C residual): `preview` (accounts + amounts) is caller-supplied
+    # and trusted here. It is bounded by role-gating (above) + company-bound account
+    # checks, but amounts are NOT verified against a persisted source of truth.
+    # Slice E persists Crypto Payment Batch records; server-side verification of
+    # preview entries against the persisted batch is a HARD PREREQUISITE before any
+    # real-money/production use. Tracked as a Slice E blocker.
     for e in entries:
         account = e.get("account")
-        if not account or not frappe.db.exists("Account", account):
+        if not account or not frappe.db.exists("Account", {"name": account, "company": COMPANY}):
             frappe.throw(f"unknown account: {account!r}")
         row = {"account": account}
         if e.get("debit"):
