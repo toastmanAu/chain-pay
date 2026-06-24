@@ -16,7 +16,8 @@ import type { PayrollBatchState } from "@chain-pay/shared";
  *     └──► cancelled ◄─┴──◄──── approved
  *
  *   broadcasted cannot revert to anything (the tx is in flight; chain decides).
- *   confirmed/cancelled/failed are terminal.
+ *   confirmed → posting → posted (terminal) | post_failed → posting (retry).
+ *   posted/cancelled/failed are terminal; confirmed is NOT terminal.
  */
 const TRANSITIONS: Record<PayrollBatchState, PayrollBatchState[]> = {
   draft: ["calculated", "cancelled"],
@@ -26,12 +27,15 @@ const TRANSITIONS: Record<PayrollBatchState, PayrollBatchState[]> = {
   broadcast_initiating: ["broadcasted", "broadcast_failed"],
   broadcast_failed: ["approved", "cancelled"],
   broadcasted: ["confirmed", "failed"],
-  confirmed: [],
+  confirmed: ["posting"],
+  posting: ["posted", "post_failed"],
+  post_failed: ["posting"],
+  posted: [],
   failed: [],
   cancelled: [],
 };
 
-export const terminalStates: readonly PayrollBatchState[] = ["confirmed", "failed", "cancelled"];
+export const terminalStates: readonly PayrollBatchState[] = ["posted", "failed", "cancelled"];
 
 export function canTransition(from: PayrollBatchState, to: PayrollBatchState): boolean {
   if (from === to) return false;

@@ -295,6 +295,12 @@ function stateTone(state: PayrollBatchState): string {
       return "bg-accent/40 text-accent-fg";
     case "confirmed":
       return "bg-accent text-accent-fg";
+    case "posting":
+      return "bg-accent/60 text-accent-fg";
+    case "posted":
+      return "bg-success text-success-fg";
+    case "post_failed":
+      return "bg-danger/20 text-danger";
     case "failed":
       return "bg-danger/30 text-danger";
     case "cancelled":
