@@ -40,9 +40,13 @@ describe("FundableAccount adapters", () => {
 
   it("maps a Treasury to a multisig FundableAccount that can co-sign", () => {
     const f = treasuryAsFundable(treasury);
-    expect(f.id).toBe("t1");
-    expect(f.address).toBe("ckt1qmultisig...");
-    expect(f.lockKind).toBe("ckb-multisig");
-    expect(f.capabilities.coSign).toBe(true);
+    expect(f).toEqual({
+      id: "t1",
+      label: "Main treasury",
+      chain: "ckb:testnet",
+      address: "ckt1qmultisig...",
+      lockKind: "ckb-multisig",
+      capabilities: { coSign: true },
+    });
   });
 });
