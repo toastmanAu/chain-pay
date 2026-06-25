@@ -35,6 +35,9 @@ function transition(
   to: SendState,
   patch: (s: SendRecord) => SendRecord,
 ): SendRecord[] {
+  if (!sends.find((s) => s.id === id)) {
+    throw new Error(`send not found: ${id}`);
+  }
   return sends.map((s) => {
     if (s.id !== id) return s;
     assertCanTransition(s.state, to);

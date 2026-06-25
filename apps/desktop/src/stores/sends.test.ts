@@ -70,8 +70,41 @@ describe("useSendsStore", () => {
     st.markConfirmed("z");
     st.markPosting("z");
     st.markPostFailed("z", "backend down");
-    expect(useSendsStore.getState().sends.find((r) => r.id === "z")!.state).toBe("post_failed");
+    const s = useSendsStore.getState().sends.find((r) => r.id === "z")!;
+    expect(s.state).toBe("post_failed");
+    expect(s.postError).toBe("backend down");
     useSendsStore.getState().markPosting("z");
     expect(useSendsStore.getState().sends.find((r) => r.id === "z")!.state).toBe("posting");
+  });
+
+  it("exercises markBackToBuilt from signing state", async () => {
+    const { useSendsStore } = await import("./sends");
+    useSendsStore.setState({ sends: [] });
+    const st = useSendsStore.getState();
+    st.addSend(makeSend("w"));
+    st.markBuilt("w", 1200n);
+    st.markSigning("w");
+    st.markBackToBuilt("w");
+    expect(useSendsStore.getState().sends.find((r) => r.id === "w")!.state).toBe("built");
+  });
+
+  it("throws when markBackToBuilt is called from illegal starting state", async () => {
+    const { useSendsStore } = await import("./sends");
+    useSendsStore.setState({ sends: [] });
+    const st = useSendsStore.getState();
+    st.addSend(makeSend("v"));
+    st.markBuilt("v", 1200n);
+    // broadcasted state cannot go back to built
+    st.markSigning("v");
+    st.markBroadcasted("v", "0xabc");
+    expect(() => st.markBackToBuilt("v")).toThrow(/invalid send transition/);
+  });
+
+  it("throws when transitioning with unknown send id", async () => {
+    const { useSendsStore } = await import("./sends");
+    useSendsStore.setState({ sends: [] });
+    const st = useSendsStore.getState();
+    st.addSend(makeSend("known"));
+    expect(() => st.markBuilt("unknown", 1200n)).toThrow(/send not found: unknown/);
   });
 });
