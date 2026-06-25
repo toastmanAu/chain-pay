@@ -40,4 +40,10 @@ describe("buildSendJournal", () => {
     delete s.txHash;
     expect(() => buildSendJournal(s, DEFAULT_SEND_ACCOUNT_MAP)).toThrow(/no txHash/);
   });
+
+  it("all journal entry memos start with 'Send ' (not 'Payroll')", () => {
+    const preview = buildSendJournal(confirmedSend(), DEFAULT_SEND_ACCOUNT_MAP);
+    const memos = preview.entries.map((e) => e.memo);
+    expect(memos.every((m) => m?.startsWith("Send "))).toBe(true);
+  });
 });

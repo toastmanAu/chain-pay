@@ -24,10 +24,11 @@ export interface PaymentJournalInput {
 export interface JournalAccounts {
   networkFeeExpense: string;
   fxGainLoss: string;
+  memoLabel?: string;
 }
 
-function memoFor(p: PaymentJournalInput): string {
-  return `Payroll ${p.payeeId} · ${p.txHash.slice(0, 10)}…`;
+function memoFor(p: PaymentJournalInput, label: string = "Payroll"): string {
+  return `${label} ${p.payeeId} · ${p.txHash.slice(0, 10)}…`;
 }
 
 /**
@@ -50,7 +51,7 @@ export function buildPaymentLines(
     throw new Error(`buildPaymentLines: negative crypto amount for payee ${p.payeeId}`);
   }
 
-  const memo = memoFor(p);
+  const memo = memoFor(p, accounts.memoLabel ?? "Payroll");
   const lines: JournalEntry[] = [
     { account: p.salaryAccount, debit: { ...p.obligation }, memo },
     {

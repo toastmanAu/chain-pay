@@ -44,6 +44,7 @@ export function buildSendJournal(send: SendRecord, map: SendAccountMap): Account
   return buildBatchJournal(send.id, payments, {
     networkFeeExpense: map.networkFeeExpense,
     fxGainLoss: map.fxGainLoss,
+    memoLabel: "Send",
   });
 }
 

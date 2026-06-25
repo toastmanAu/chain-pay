@@ -156,4 +156,25 @@ describe("buildBatchJournal", () => {
   it("is re-exported from the package index", () => {
     expect(typeof shared.buildBatchJournal).toBe("function");
   });
+
+  it("default memoLabel (undefined) produces 'Payroll' prefix, unchanged from before", () => {
+    const payments = [payment({ payeeId: "P1" })];
+    const preview = buildBatchJournal("BATCH-1", payments, {
+      networkFeeExpense: "Network Fee Expense",
+      fxGainLoss: "FX Gain/Loss",
+    });
+    const memos = preview.entries.map((e) => e.memo);
+    expect(memos.every((m) => m?.startsWith("Payroll P1"))).toBe(true);
+  });
+
+  it("memoLabel: 'Send' produces 'Send' prefix on all lines", () => {
+    const payments = [payment({ payeeId: "vendor-1" })];
+    const preview = buildBatchJournal("SEND-1", payments, {
+      networkFeeExpense: "Network Fee Expense",
+      fxGainLoss: "FX Gain/Loss",
+      memoLabel: "Send",
+    });
+    const memos = preview.entries.map((e) => e.memo);
+    expect(memos.every((m) => m?.startsWith("Send vendor-1"))).toBe(true);
+  });
 });
