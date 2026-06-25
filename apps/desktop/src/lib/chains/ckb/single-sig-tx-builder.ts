@@ -6,10 +6,10 @@ import {
   hexFrom,
   Script,
   Transaction,
+  WitnessArgs,
 } from "@ckb-ccc/core";
 import { minCapacityForLock } from "./tx-builder";
 
-const SHANNONS_PER_BYTE = 100_000_000n;
 const TX_SIZE_OVERHEAD_BYTES = 4n;
 
 /**
@@ -61,8 +61,12 @@ export function buildSingleSigSend(input: SingleSigSendInput): SingleSigSendSkel
   }
   const totalOut = input.recipients.reduce((s, r) => s + r.capacity, 0n);
 
-  // JoyID witness placeholder before fee estimation (zeros; JoyID fills it).
-  tx.setWitnessAt(0, hexFrom(new Uint8Array(JOYID_WITNESS_PLACEHOLDER_BYTES)));
+  // Wrap the JoyID placeholder in WitnessArgs so the `lock` field is the
+  // JoyID-fillable slot. Signers expect to fill WitnessArgs.lock, not overwrite
+  // raw bytes. Must be set BEFORE input selection so fee estimation accounts for
+  // the full witness size.
+  const placeholder = WitnessArgs.from({ lock: hexFrom(new Uint8Array(JOYID_WITNESS_PLACEHOLDER_BYTES)) });
+  tx.setWitnessAt(0, hexFrom(placeholder.toBytes()));
 
   const { selected, totalIn } = selectInputs(input.availableCells, totalOut);
   for (const c of selected) {

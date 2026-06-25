@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { Cell, CellDep, Script, hexFrom } from "@ckb-ccc/core";
+import { Cell, CellDep, Script, hexFrom, WitnessArgs, bytesFrom } from "@ckb-ccc/core";
 import {
   buildSingleSigSend,
   JOYID_WITNESS_PLACEHOLDER_BYTES,
@@ -62,8 +62,14 @@ describe("buildSingleSigSend", () => {
   it("pre-pads witness[0] for the JoyID lock before fee estimation", () => {
     const { tx } = buildSingleSigSend(baseInput());
     const w0 = tx.witnesses[0];
+    // WitnessArgs wrapping makes the witness larger than raw 1000 bytes.
     // hex string of >= JOYID_WITNESS_PLACEHOLDER_BYTES bytes (2 hex chars/byte + 0x)
     expect(w0.length).toBeGreaterThanOrEqual(2 + JOYID_WITNESS_PLACEHOLDER_BYTES * 2);
+    // Verify it is a structurally valid WitnessArgs with the lock field filled.
+    const parsed = WitnessArgs.fromBytes(bytesFrom(w0));
+    expect(parsed.lock).toBeDefined();
+    // lock field hex encodes the 1000-byte placeholder (2 hex chars/byte + "0x")
+    expect(parsed.lock!.length).toBe(2 + JOYID_WITNESS_PLACEHOLDER_BYTES * 2);
   });
 
   it("rejects a recipient below min cell capacity", () => {
