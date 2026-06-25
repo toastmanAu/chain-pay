@@ -10,3 +10,4 @@ export * from "./biscuit-capabilities";
 export * from "./mobile-protocol";
 export * from "./invoice-regex";
 export * from "./accounting";
+export * from "./funding";
