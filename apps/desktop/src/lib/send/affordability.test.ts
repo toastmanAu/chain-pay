@@ -13,7 +13,7 @@ describe("sendAffordability", () => {
     const balance = 20_000_000_000n; // 200 CKB
     const result = sendAffordability(outputsTotal, feeReserve, balance);
     expect(result.affordable).toBe(true);
-    expect(result.shortfallShannons === 0n).toBe(true);
+    expect(result.shortfallShannons).toBe(0n);
   });
 
   it("returns affordable=true and shortfall=0n at exact boundary (balance === outputs + reserve)", () => {
@@ -23,7 +23,7 @@ describe("sendAffordability", () => {
     const balance = outputsTotal + feeReserve; // exactly 62 CKB
     const result = sendAffordability(outputsTotal, feeReserve, balance);
     expect(result.affordable).toBe(true);
-    expect(result.shortfallShannons === 0n).toBe(true);
+    expect(result.shortfallShannons).toBe(0n);
   });
 
   it("returns affordable=false and exact shortfall when balance < outputs + reserve", () => {
@@ -34,6 +34,6 @@ describe("sendAffordability", () => {
     const expectedShortfall = outputsTotal + feeReserve - balance; // 100_000_000n = 1 CKB
     const result = sendAffordability(outputsTotal, feeReserve, balance);
     expect(result.affordable).toBe(false);
-    expect(result.shortfallShannons === expectedShortfall).toBe(true);
+    expect(result.shortfallShannons).toBe(100_000_000n);
   });
 });

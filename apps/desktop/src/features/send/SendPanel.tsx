@@ -10,6 +10,7 @@ import {
   SEND_FEE_RESERVE_SHANNONS,
   type Affordability,
 } from "@/lib/send";
+import { ckbStringToShannons, shannonsToCkbString } from "@/lib/send/ckb-amount";
 
 const SHANNONS_PER_CKB = 100_000_000n;
 /** Minimum cell capacity: 61 CKB for a secp recipient cell. */
@@ -56,8 +57,9 @@ export function SendPanel() {
 
   /** Recompute the outputs total in shannons from the current rows. */
   const outputsTotalShannons = rows.reduce<bigint>((acc, r) => {
-    const ckb = parseFloat(r.amountCkb);
-    return acc + (isNaN(ckb) || ckb <= 0 ? 0n : BigInt(Math.round(ckb * 1e8)));
+    const shannons = ckbStringToShannons(r.amountCkb);
+    // null (invalid/empty) or 0n rows contribute nothing to the total
+    return acc + (shannons !== null && shannons > 0n ? shannons : 0n);
   }, 0n);
 
   useEffect(() => {
@@ -116,9 +118,9 @@ export function SendPanel() {
   function validateRows(): string | null {
     for (const r of rows) {
       if (!r.address.trim()) return "Each payee must have an address.";
-      const ckb = parseFloat(r.amountCkb);
-      if (isNaN(ckb) || ckb <= 0) return "Each payee must have a positive CKB amount.";
-      if (BigInt(Math.round(ckb * 1e8)) < MIN_RECIPIENT_CKB * SHANNONS_PER_CKB) {
+      const shannons = ckbStringToShannons(r.amountCkb);
+      if (shannons === null || shannons <= 0n) return "Each payee must have a positive CKB amount.";
+      if (shannons < MIN_RECIPIENT_CKB * SHANNONS_PER_CKB) {
         return `Minimum send per payee is ${MIN_RECIPIENT_CKB} CKB (minimum cell capacity).`;
       }
     }
@@ -149,7 +151,8 @@ export function SendPanel() {
         payeeAddress: r.address.trim(),
         amount: {
           asset: "CKB",
-          value: BigInt(Math.round(parseFloat(r.amountCkb) * 1e8)),
+          // ckbStringToShannons returns non-null here: validateRows() passed above
+          value: ckbStringToShannons(r.amountCkb) ?? 0n,
           decimals: 8,
         },
         fiat: {
@@ -316,9 +319,7 @@ export function SendPanel() {
             <div>
               Total:{" "}
               <span className="font-medium text-fg tabular-nums">
-                {rows
-                  .reduce((acc, r) => acc + (parseFloat(r.amountCkb) || 0), 0)
-                  .toFixed(4)}{" "}
+                {shannonsToCkbString(outputsTotalShannons)}{" "}
                 CKB
               </span>
             </div>
@@ -329,7 +330,7 @@ export function SendPanel() {
             ) : affordability !== null && !affordability.affordable ? (
               <div className="font-medium text-danger">
                 Insufficient balance — short by{" "}
-                {(Number(affordability.shortfallShannons) / 1e8).toFixed(4)} CKB
+                {shannonsToCkbString(affordability.shortfallShannons)} CKB
               </div>
             ) : null}
           </div>
@@ -345,6 +346,8 @@ export function SendPanel() {
             <button
               type="button"
               onClick={() => void handleSend()}
+              // Fail-open intent: affordability===null (balance fetch failed or rows empty)
+              // does NOT block send — graceful degrade. Only explicit affordable===false blocks.
               disabled={sending || !source || affordability?.affordable === false}
               className="rounded-md bg-accent px-5 py-2 text-sm font-medium text-accent-fg hover:opacity-90 disabled:opacity-50"
             >
