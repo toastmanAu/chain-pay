@@ -3,6 +3,7 @@ export * from "./chainIds";
 export * from "./money";
 export * from "./treasury";
 export * from "./payroll";
+export * from "./send";
 export * from "./invoices";
 export * from "./vendors";
 export * from "./fiberConnect";
