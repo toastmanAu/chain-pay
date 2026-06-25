@@ -1,7 +1,8 @@
 // apps/desktop/src/lib/send/build-and-send.test.ts
 import { describe, it, expect, vi } from "vitest";
-import { Cell, CellDep, Script, ScriptInfo, hexFrom } from "@ckb-ccc/core";
+import { Cell, Script, ScriptInfo, hexFrom } from "@ckb-ccc/core";
 import type { SendRecord, Source, Hex20 } from "@chain-pay/shared";
+import type { CkbTxSigner } from "@/lib/signers/ckb-tx-signer";
 import { MockCkbTxSigner } from "@/lib/signers/mock-ckb-tx-signer";
 import { buildAndSend, type SendDeps } from "./build-and-send";
 
@@ -62,6 +63,18 @@ describe("buildAndSend", () => {
   it("returns the send to built and rethrows on broadcast failure", async () => {
     const d = deps({ broadcast: vi.fn(async () => { throw new Error("pool rejected"); }) });
     await expect(buildAndSend(send(), source(), new MockCkbTxSigner(), 1200n, d)).rejects.toThrow(/pool rejected/);
+    expect(d.markBackToBuilt).toHaveBeenCalledWith("snd1");
+    expect(d.markBroadcasted).not.toHaveBeenCalled();
+  });
+
+  it("returns the send to built and rethrows when signing fails", async () => {
+    const d = deps();
+    const failingSigner: CkbTxSigner = {
+      kind: "joyid" as const,
+      connect: async () => ({ address: "ckt1qmocksource", lockArgs: "0x" + "11".repeat(20) }),
+      signTransaction: async () => { throw new Error("user rejected in JoyID"); },
+    };
+    await expect(buildAndSend(send(), source(), failingSigner, 1200n, d)).rejects.toThrow(/user rejected/);
     expect(d.markBackToBuilt).toHaveBeenCalledWith("snd1");
     expect(d.markBroadcasted).not.toHaveBeenCalled();
   });
