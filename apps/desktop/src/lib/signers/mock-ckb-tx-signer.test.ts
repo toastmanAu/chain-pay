@@ -19,14 +19,16 @@ describe("MockCkbTxSigner", () => {
   it("connects to a deterministic address", async () => {
     const signer = new MockCkbTxSigner();
     const { address, lockArgs } = await signer.connect();
-    expect(address).toMatch(/^ck/);
-    expect(lockArgs).toMatch(/^0x/);
+    expect(address).toBe("ckt1qmocksource");
+    expect(lockArgs).toBe("0x" + "11".repeat(20));
   });
 
   it("replaces the empty witness[0] placeholder with a non-zero signed marker", async () => {
     const signer = new MockCkbTxSigner();
     const signed = await signer.signTransaction(unsignedTx());
-    expect(signed.witnesses[0]).not.toBe(hexFrom(new Uint8Array(1000)));
-    expect(signed.witnesses[0].length).toBeGreaterThan(2);
+    const w0 = signed.witnesses[0];
+    expect(w0).toBeDefined();
+    expect(w0!).not.toBe(hexFrom(new Uint8Array(1000)));
+    expect(w0!.length).toBeGreaterThan(2);
   });
 });

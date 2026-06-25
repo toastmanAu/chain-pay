@@ -64,7 +64,10 @@ export const useSendsStore = create<SendsStore>()(
         set((st) => ({ sends: transition(st.sends, id, "posting", (s) => s) })),
       markPosted: (id, jeName) =>
         set((st) => ({
-          sends: transition(st.sends, id, "posted", (s) => ({ ...s, journalEntryName: jeName, postError: undefined })),
+          sends: transition(st.sends, id, "posted", (s) => {
+            const { postError: _drop, ...rest } = s;
+            return { ...rest, journalEntryName: jeName };
+          }),
         })),
       markPostFailed: (id, error) =>
         set((st) => ({

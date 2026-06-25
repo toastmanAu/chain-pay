@@ -34,7 +34,9 @@ describe("joyidLockAndDeps", () => {
   it("extracts the JoyID cell deps", () => {
     const { cellDeps } = joyidLockAndDeps(fakeScriptInfo(), ARGS);
     expect(cellDeps).toHaveLength(1);
-    expect(cellDeps[0]).toBeInstanceOf(CellDep);
-    expect(cellDeps[0].depType).toBe("depGroup");
+    const dep0 = cellDeps[0];
+    expect(dep0).toBeDefined();
+    expect(dep0!).toBeInstanceOf(CellDep);
+    expect(dep0!.depType).toBe("depGroup");
   });
 });

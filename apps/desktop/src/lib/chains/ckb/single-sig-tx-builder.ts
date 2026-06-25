@@ -84,7 +84,10 @@ export function buildSingleSigSend(input: SingleSigSendInput): SingleSigSendSkel
     throw new Error(`insufficient capacity: have ${totalIn}, need ${totalOut + feeWithChange}`);
   }
   if (remainder >= minChange) {
-    tx.outputs[tx.outputs.length - 1].capacity = remainder;
+    const changeOutput = tx.outputs[tx.outputs.length - 1];
+    // changeOutput was just pushed above — it exists.
+    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+    changeOutput!.capacity = remainder;
     return { tx, totalIn, totalOut: totalOut + remainder, change: remainder, fee: feeWithChange };
   }
 

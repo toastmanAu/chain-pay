@@ -47,7 +47,9 @@ describe("buildSingleSigSend", () => {
     const { tx, change, fee, totalIn } = buildSingleSigSend(baseInput());
     expect(tx.inputs.length).toBe(1);
     expect(tx.outputs.length).toBe(2); // recipient + change
-    expect(tx.outputs[1].lock.args).toBe(joyidLock().args); // change to source
+    const changeOutput = tx.outputs[1];
+    expect(changeOutput).toBeDefined();
+    expect(changeOutput!.lock.args).toBe(joyidLock().args); // change to source
     expect(totalIn).toBe(200n * 100_000_000n);
     expect(change).toBeGreaterThan(0n);
     expect(fee).toBeGreaterThan(0n);
@@ -56,17 +58,20 @@ describe("buildSingleSigSend", () => {
   it("uses the JoyID cell deps", () => {
     const { tx } = buildSingleSigSend(baseInput());
     expect(tx.cellDeps.length).toBe(1);
-    expect(tx.cellDeps[0].depType).toBe("depGroup");
+    const dep0 = tx.cellDeps[0];
+    expect(dep0).toBeDefined();
+    expect(dep0!.depType).toBe("depGroup");
   });
 
   it("pre-pads witness[0] for the JoyID lock before fee estimation", () => {
     const { tx } = buildSingleSigSend(baseInput());
     const w0 = tx.witnesses[0];
+    expect(w0).toBeDefined();
     // WitnessArgs wrapping makes the witness larger than raw 1000 bytes.
     // hex string of >= JOYID_WITNESS_PLACEHOLDER_BYTES bytes (2 hex chars/byte + 0x)
-    expect(w0.length).toBeGreaterThanOrEqual(2 + JOYID_WITNESS_PLACEHOLDER_BYTES * 2);
+    expect(w0!.length).toBeGreaterThanOrEqual(2 + JOYID_WITNESS_PLACEHOLDER_BYTES * 2);
     // Verify it is a structurally valid WitnessArgs with the lock field filled.
-    const parsed = WitnessArgs.fromBytes(bytesFrom(w0));
+    const parsed = WitnessArgs.fromBytes(bytesFrom(w0!));
     expect(parsed.lock).toBeDefined();
     // lock field hex encodes the 1000-byte placeholder (2 hex chars/byte + "0x")
     expect(parsed.lock!.length).toBe(2 + JOYID_WITNESS_PLACEHOLDER_BYTES * 2);

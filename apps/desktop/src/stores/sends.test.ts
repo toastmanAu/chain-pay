@@ -77,6 +77,28 @@ describe("useSendsStore", () => {
     expect(useSendsStore.getState().sends.find((r) => r.id === "z")!.state).toBe("posting");
   });
 
+  it("clears postError on retry-success (post_failed → posting → posted)", async () => {
+    const { useSendsStore } = await import("./sends");
+    useSendsStore.setState({ sends: [] });
+    const st = useSendsStore.getState();
+    st.addSend(makeSend("retry"));
+    st.markBuilt("retry", 1200n);
+    st.markSigning("retry");
+    st.markBroadcasted("retry", "0xfff");
+    st.markConfirmed("retry");
+    st.markPosting("retry");
+    st.markPostFailed("retry", "timeout");
+    const failed = useSendsStore.getState().sends.find((r) => r.id === "retry")!;
+    expect(failed.postError).toBe("timeout");
+    // Retry cycle
+    useSendsStore.getState().markPosting("retry");
+    useSendsStore.getState().markPosted("retry", "ACC-JV-9999");
+    const posted = useSendsStore.getState().sends.find((r) => r.id === "retry")!;
+    expect(posted.state).toBe("posted");
+    expect(posted.journalEntryName).toBe("ACC-JV-9999");
+    expect(posted.postError).toBeUndefined();
+  });
+
   it("exercises markBackToBuilt from signing state", async () => {
     const { useSendsStore } = await import("./sends");
     useSendsStore.setState({ sends: [] });
