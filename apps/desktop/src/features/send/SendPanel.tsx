@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Link } from "react-router-dom";
 import { useSourcesStore } from "@/stores/sources";
 import { useSendsStore } from "@/stores/sends";
 import { useNetworkConfigStore } from "@/stores/network-config";
@@ -116,9 +117,8 @@ export function SendPanel() {
         updatedAt: now,
       };
 
-      const { useSendsStore: sendsStore } = await import("@/stores/sends");
-      sendsStore.getState().addSend(draft);
-      sendsStore.getState().markBuilt(draft.id, 0n);
+      useSendsStore.getState().addSend(draft);
+      useSendsStore.getState().markBuilt(draft.id, 0n);
 
       const { resolveJoyIdScriptInfo } = await import("@/lib/chains/ckb/joyid-lock");
       const { JoyIdCkbTxSigner } = await import("@/lib/signers/joyid-ckb-tx-signer");
@@ -177,9 +177,9 @@ export function SendPanel() {
       {sources.length === 0 ? (
         <div className="rounded-lg border border-dashed border-surface-hi bg-surface/50 p-6 text-center text-sm text-fg-muted">
           No source wallets. Go to{" "}
-          <a href="/send/sources" className="text-accent hover:underline">
+          <Link to="/send/sources" className="text-accent hover:underline">
             Source wallets
-          </a>{" "}
+          </Link>{" "}
           to connect a JoyID wallet first.
         </div>
       ) : (

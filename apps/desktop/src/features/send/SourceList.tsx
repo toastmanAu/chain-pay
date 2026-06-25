@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useSourcesStore } from "@/stores/sources";
+import { useNetworkConfigStore } from "@/stores/network-config";
 import type { Source } from "@chain-pay/shared";
 
 export function SourceList() {
@@ -7,6 +8,7 @@ export function SourceList() {
   const activeSourceId = useSourcesStore((s) => s.activeSourceId);
   const setActiveSource = useSourcesStore((s) => s.setActiveSource);
   const removeSource = useSourcesStore((s) => s.removeSource);
+  const network = useNetworkConfigStore((s) => s.network);
   const [connecting, setConnecting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -15,20 +17,22 @@ export function SourceList() {
     setError(null);
     try {
       const { JoyIdCkbTxSigner } = await import("@/lib/signers/joyid-ckb-tx-signer");
-      const { Address, ClientPublicTestnet } = await import("@ckb-ccc/core");
+      const { Address, ClientPublicTestnet, ClientPublicMainnet } = await import("@ckb-ccc/core");
       const signer = new JoyIdCkbTxSigner({
         name: "ChainPay",
         logo: "https://chainpay.local/logo.png",
         joyidAppURL: "https://app.joy.id",
       });
       const { address } = await signer.connect();
-      const client = new ClientPublicTestnet();
+      const client =
+        network === "mainnet" ? new ClientPublicMainnet() : new ClientPublicTestnet();
       const parsed = await Address.fromString(address, client);
+      const chain: Source["chain"] = network === "mainnet" ? "ckb:mainnet" : "ckb:testnet";
       const now = new Date().toISOString();
       const src: Source = {
         id: crypto.randomUUID(),
         label: address.slice(0, 10),
-        chain: "ckb:testnet",
+        chain,
         address,
         joyidLockArgs: parsed.script.args as `0x${string}`,
         createdAt: now,
