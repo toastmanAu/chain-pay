@@ -65,6 +65,16 @@ function SendRow({ send }: { send: SendRecord }) {
         <p className="text-xs text-accent">Posted · {send.journalEntryName}</p>
       ) : null}
 
+      {send.state === "broadcasted" ? (
+        <button
+          type="button"
+          onClick={() => useSendsStore.getState().markConfirmed(send.id)}
+          className="rounded-md border border-surface-hi bg-bg px-2 py-1 text-xs text-fg-muted hover:text-fg"
+        >
+          Mark confirmed
+        </button>
+      ) : null}
+
       {send.state === "post_failed" ? (
         <div className="flex items-center gap-2">
           <p className="text-xs text-danger">{send.postError ?? "Post failed"}</p>
