@@ -1,10 +1,15 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Link } from "react-router-dom";
 import { useSourcesStore } from "@/stores/sources";
 import { useSendsStore } from "@/stores/sends";
 import { useNetworkConfigStore } from "@/stores/network-config";
 import { SendHistory } from "./SendHistory";
 import type { SendOutput, SendRecord } from "@chain-pay/shared";
+import {
+  sendAffordability,
+  SEND_FEE_RESERVE_SHANNONS,
+  type Affordability,
+} from "@/lib/send";
 
 const SHANNONS_PER_CKB = 100_000_000n;
 /** Minimum cell capacity: 61 CKB for a secp recipient cell. */
@@ -44,8 +49,56 @@ export function SendPanel() {
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+  const [affordability, setAffordability] = useState<Affordability | null>(null);
+  const [balanceError, setBalanceError] = useState<string | null>(null);
 
   const source = sources.find((s) => s.id === sourceId);
+
+  /** Recompute the outputs total in shannons from the current rows. */
+  const outputsTotalShannons = rows.reduce<bigint>((acc, r) => {
+    const ckb = parseFloat(r.amountCkb);
+    return acc + (isNaN(ckb) || ckb <= 0 ? 0n : BigInt(Math.round(ckb * 1e8)));
+  }, 0n);
+
+  useEffect(() => {
+    if (!source || outputsTotalShannons === 0n) {
+      setAffordability(null);
+      setBalanceError(null);
+      return;
+    }
+
+    let cancelled = false;
+
+    void (async () => {
+      try {
+        setBalanceError(null);
+        const { resolveJoyIdScriptInfo } = await import("@/lib/chains/ckb/joyid-lock");
+        const { joyidLockAndDeps } = await import("@/lib/chains/ckb/joyid-lock");
+        const { lightClient } = await import("@/lib/light-client/client");
+
+        const scriptInfo = await resolveJoyIdScriptInfo(network);
+        const { lock } = joyidLockAndDeps(scriptInfo, source.joyidLockArgs);
+        const balance = await lightClient().getLockBalance(lock);
+
+        if (!cancelled) {
+          setAffordability(
+            sendAffordability(outputsTotalShannons, SEND_FEE_RESERVE_SHANNONS, balance),
+          );
+        }
+      } catch (err: unknown) {
+        if (!cancelled) {
+          setBalanceError(
+            err instanceof Error ? err.message : "Balance check failed",
+          );
+          setAffordability(null);
+        }
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [source, outputsTotalShannons, network]);
 
   function updateRow(id: string, patch: Partial<PayeeRow>) {
     setRows((prev) => prev.map((r) => (r.id === id ? { ...r, ...patch } : r)));
@@ -271,6 +324,14 @@ export function SendPanel() {
             </div>
             <div>Fee rate: 1 200 shannons/KB (20% buffer over pool minimum)</div>
             <div>Min capacity per output: 61 CKB</div>
+            {balanceError ? (
+              <div className="text-warning">Balance check unavailable: {balanceError}</div>
+            ) : affordability !== null && !affordability.affordable ? (
+              <div className="font-medium text-danger">
+                Insufficient balance — short by{" "}
+                {(Number(affordability.shortfallShannons) / 1e8).toFixed(4)} CKB
+              </div>
+            ) : null}
           </div>
 
           <div className="flex items-center justify-between gap-3">
@@ -284,7 +345,7 @@ export function SendPanel() {
             <button
               type="button"
               onClick={() => void handleSend()}
-              disabled={sending || !source}
+              disabled={sending || !source || affordability?.affordable === false}
               className="rounded-md bg-accent px-5 py-2 text-sm font-medium text-accent-fg hover:opacity-90 disabled:opacity-50"
             >
               {sending ? "Sending…" : "Send"}
