@@ -11,6 +11,9 @@ import { SignPanel } from "./features/sign/SignPanel";
 import { Employees } from "./features/employees/Employees";
 import { InvoicesPage } from "./features/invoices/InvoicesPage";
 import { Settings } from "./features/settings/Settings";
+import { SourceList } from "./features/send/SourceList";
+import { SendPanel } from "./features/send/SendPanel";
+import { useSendConfirmationToAccounting } from "./lib/send/use-send-confirmation-to-accounting";
 import { useSyncStore } from "./stores/sync";
 import { useNetworkConfigStore } from "./stores/network-config";
 import { lightClient } from "./lib/light-client/client";
@@ -225,6 +228,7 @@ export function App() {
 
   useBatchConfirmationSync();
   useBatchConfirmationToAccounting();
+  useSendConfirmationToAccounting();
 
   return (
     <AppShell>
@@ -240,6 +244,8 @@ export function App() {
         <Route path="/sign" element={<SignPanel />} />
         <Route path="/employees" element={<Employees />} />
         <Route path="/settings" element={<Settings />} />
+        <Route path="/send" element={<SendPanel />} />
+        <Route path="/send/sources" element={<SourceList />} />
       </Routes>
     </AppShell>
   );
