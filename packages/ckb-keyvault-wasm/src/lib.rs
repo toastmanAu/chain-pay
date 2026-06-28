@@ -1,6 +1,6 @@
 mod error;
 pub mod vault;   // added in A2
-mod derive;  // added in A3
+pub mod derive;  // added in A3
 
 use wasm_bindgen::prelude::*;
 
