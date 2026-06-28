@@ -1,0 +1,4 @@
+/target
+# wasm-pack output — ignore generated artifacts, keep the build note
+/pkg
+!/pkg/.gitkeep
