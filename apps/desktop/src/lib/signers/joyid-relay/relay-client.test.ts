@@ -32,4 +32,38 @@ describe("RelayClient", () => {
     expect(url).toContain("testnet.joyid.dev");
     expect(url).toContain("challenge");
   });
+
+  it("createTxSession posts to /tx-session and returns launchUrl", async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(jsonResponse({ launchUrl: "https://relay.test/tx-launch/abc" }));
+    const c = new RelayClient({ network: "testnet", fetchImpl, baseUrl: "https://relay.test" });
+    const res = await c.createTxSession({
+      id: "abc",
+      joyidSignUrl: "https://testnet.joyid.dev/sign-message?x",
+      preview: { to: [], feeCkb: "0" },
+    });
+    expect(fetchImpl).toHaveBeenCalledWith(
+      "https://relay.test/tx-session",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({
+          id: "abc",
+          joyidSignUrl: "https://testnet.joyid.dev/sign-message?x",
+          preview: { to: [], feeCkb: "0" },
+        }),
+      }),
+    );
+    expect(res).toEqual({ launchUrl: "https://relay.test/tx-launch/abc" });
+  });
+
+  it("pollSession rejects immediately on a non-ok response", async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(new Response("nope", { status: 502 }));
+    const c = new RelayClient({ network: "testnet", fetchImpl, baseUrl: "https://relay.test", pollIntervalMs: 1, pollTimeoutMs: 50 });
+    await expect(c.pollSession("abc")).rejects.toThrow(/502/);
+  });
+
+  it("pollSession rejects when the session is expired", async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(jsonResponse({ data: null, expired: true }));
+    const c = new RelayClient({ network: "testnet", fetchImpl, baseUrl: "https://relay.test", pollIntervalMs: 1, pollTimeoutMs: 50 });
+    await expect(c.pollSession("abc")).rejects.toThrow(/expired/i);
+  });
 });

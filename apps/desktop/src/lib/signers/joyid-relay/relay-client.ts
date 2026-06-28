@@ -2,7 +2,7 @@ import { buildJoyIDURL, buildJoyIDSignMessageURL, decodeSearch } from "@joyid/co
 import type { CkbNetwork } from "@/lib/light-client/network-configs";
 import { DAPP, POLL_INTERVAL_MS, POLL_TIMEOUT_MS, joyidOrigin, relayBaseUrl } from "./config";
 
-interface RelayClientOpts {
+export interface RelayClientOpts {
   network: CkbNetwork;
   fetchImpl?: typeof fetch;
   baseUrl?: string;
@@ -48,11 +48,10 @@ export class RelayClient {
     // eslint-disable-next-line no-constant-condition
     while (true) {
       const res = await this.fetchImpl(`${this.baseUrl}/session/${id}`);
-      if (res.ok) {
-        const body = (await res.json()) as { data: string | null; expired?: boolean };
-        if (body.expired) throw new Error("JoyID session expired");
-        if (body.data) return decodeSearch(body.data);
-      }
+      if (!res.ok) throw new Error(`relay /session poll failed: ${res.status}`);
+      const body = (await res.json()) as { data: string | null; expired?: boolean };
+      if (body.expired) throw new Error("JoyID session expired");
+      if (body.data) return decodeSearch(body.data);
       waited += this.pollIntervalMs;
       if (waited >= deadline) throw new Error("JoyID session timed out (no phone response)");
       await new Promise((r) => setTimeout(r, this.pollIntervalMs));
