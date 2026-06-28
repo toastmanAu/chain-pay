@@ -47,6 +47,7 @@ vi.mock("@/lib/chains/ckb/secp256k1-lock", async (importOriginal) => {
 vi.mock("@/lib/light-client/client", () => ({
   lightClient: vi.fn().mockReturnValue({
     watchLockScript: vi.fn().mockResolvedValue(undefined),
+    watchLockScriptFromRecent: vi.fn().mockResolvedValue(undefined),
     getLockBalance: vi.fn().mockResolvedValue(0n),
   }),
 }));
@@ -399,11 +400,15 @@ describe("KeyvaultSetupPanel — use as send source", () => {
 
     // The light client must be told to sync the new source's lock (fixes the
     // affordability false-"insufficient" bug — SendPanel reads its balance).
-    // (ReceivePanel also watches the same lock for its balance display, so we
-    // assert on the lock that was watched, not an exact call count.)
-    expect(lightClient().watchLockScript).toHaveBeenCalledWith(
+    // A fresh wallet watches from near the tip (recent), not genesis, so the
+    // just-funded balance appears quickly. (ReceivePanel also watches the same
+    // lock, so we assert on the lock that was watched, not an exact call count.)
+    expect(lightClient().watchLockScriptFromRecent).toHaveBeenCalledWith(
       expect.objectContaining({ args: LOCK_ARGS }),
     );
+    // A fresh wallet must NEVER be watched from genesis (the slow path that
+    // left balances stuck at 0) — not by the panel, not by the source action.
+    expect(lightClient().watchLockScript).not.toHaveBeenCalled();
   });
 
   it("shows a confirmation once the source has been added", async () => {

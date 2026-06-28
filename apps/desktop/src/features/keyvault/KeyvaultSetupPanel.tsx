@@ -212,7 +212,9 @@ export function KeyvaultSetupPanel() {
       const scriptInfo = await resolveSecp256k1ScriptInfo(network);
       const { source, lock } = buildKeystoreSource(lockArgs, network, scriptInfo);
       useSourcesStore.getState().addSource(source);
-      await lightClient().watchLockScript(lock);
+      // Fresh wallet → watch from near the tip, not genesis, so the funded
+      // balance is found quickly (SendPanel's affordability reads it).
+      await lightClient().watchLockScriptFromRecent(lock);
       setAddedSource(true);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to add source");

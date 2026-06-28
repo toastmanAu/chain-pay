@@ -51,7 +51,10 @@ export function useKeystoreBalance(
     let cancelled = false;
 
     const lc: LightClientDeps = deps ?? {
-      watchLockScript: (s) => lightClient().watchLockScript(s),
+      // Fresh keystore wallet: watch from near the tip, not genesis, so a
+      // just-funded balance appears in seconds instead of after a full-history
+      // filter sync (see recent-watch-block.ts).
+      watchLockScript: (s) => lightClient().watchLockScriptFromRecent(s),
       getLockBalance: (s) => lightClient().getLockBalance(s),
     };
 
