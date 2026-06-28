@@ -58,3 +58,5 @@ release/
 
 # Graphify output (knowledge-graph artifacts)
 graphify-out/
+
+.superpowers/
