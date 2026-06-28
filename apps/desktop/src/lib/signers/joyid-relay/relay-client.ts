@@ -19,7 +19,10 @@ export class RelayClient {
 
   constructor(opts: RelayClientOpts) {
     this.network = opts.network;
-    this.fetchImpl = opts.fetchImpl ?? fetch;
+    // `window.fetch` is brand-checked — it must be called with `this` === the
+    // global. Stored on an instance and called as `this.fetchImpl(...)`, the
+    // unbound global throws "Illegal invocation". Bind it to the global.
+    this.fetchImpl = opts.fetchImpl ?? fetch.bind(globalThis);
     this.baseUrl = (opts.baseUrl ?? relayBaseUrl()).replace(/\/$/, "");
     this.pollIntervalMs = opts.pollIntervalMs ?? POLL_INTERVAL_MS;
     this.pollTimeoutMs = opts.pollTimeoutMs ?? POLL_TIMEOUT_MS;

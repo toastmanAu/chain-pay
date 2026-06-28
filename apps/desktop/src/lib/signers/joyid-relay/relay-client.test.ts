@@ -15,6 +15,30 @@ describe("RelayClient", () => {
     expect(res).toEqual({ id: "abc", callbackUrl: "https://relay.test/session/abc/callback" });
   });
 
+  it("uses global fetch with correct binding (no Illegal invocation) when no fetchImpl is injected", async () => {
+    const realFetch = globalThis.fetch;
+    // Native window.fetch is brand-checked: it throws "Illegal invocation" if
+    // called with `this` bound to anything other than the global. This mimics
+    // that so we catch the real-world default-binding path the mocks bypass.
+    const branded = function (this: unknown, _url: string, _init?: unknown) {
+      if (this !== undefined && this !== globalThis) {
+        throw new TypeError("Failed to execute 'fetch' on 'Window': Illegal invocation");
+      }
+      return Promise.resolve(jsonResponse({ id: "abc", ttl: 120 }));
+    };
+    globalThis.fetch = branded as unknown as typeof fetch;
+    try {
+      // No fetchImpl → exercises the production default binding.
+      const c = new RelayClient({ network: "testnet", baseUrl: "https://relay.test" });
+      await expect(c.createSession()).resolves.toEqual({
+        id: "abc",
+        callbackUrl: "https://relay.test/session/abc/callback",
+      });
+    } finally {
+      globalThis.fetch = realFetch;
+    }
+  });
+
   it("pollSession resolves decoded data and stops polling on first hit", async () => {
     const fetchImpl = vi
       .fn()
