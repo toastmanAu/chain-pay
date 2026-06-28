@@ -5,6 +5,7 @@ out/
 build/
 .cache/
 .turbo/
+.worktrees/
 .parcel-cache/
 
 *.log
