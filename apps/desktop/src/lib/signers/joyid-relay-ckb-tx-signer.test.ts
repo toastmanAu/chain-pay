@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 import { Transaction } from "@ckb-ccc/core";
 import { JoyIdRelaySigner } from "./joyid-relay-ckb-tx-signer";
 
@@ -10,6 +10,10 @@ vi.mock("@joyid/ckb", () => ({
 }));
 
 const presenter = { showQr: vi.fn(), updateStatus: vi.fn(), dismiss: vi.fn() };
+
+beforeEach(() => {
+  vi.clearAllMocks();
+});
 
 function fakeClient(overrides: Partial<Record<string, unknown>> = {}) {
   return {
@@ -32,6 +36,7 @@ describe("JoyIdRelaySigner", () => {
     expect((client as unknown as { createSession: ReturnType<typeof vi.fn> }).createSession).toHaveBeenCalled();
     expect(presenter.showQr).toHaveBeenCalledWith("https://testnet.joyid.dev/auth?x", "connect");
     expect(res.address).toBe("ckt1qrelay");
+    expect(res.lockArgs).toBe("0xpub");
     expect(presenter.dismiss).toHaveBeenCalled();
   });
 

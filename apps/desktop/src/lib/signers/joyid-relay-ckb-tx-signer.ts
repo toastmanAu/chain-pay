@@ -1,13 +1,14 @@
 import { Transaction } from "@ckb-ccc/core";
 import type { TransactionLike } from "@ckb-ccc/core";
 import { calculateChallenge } from "@joyid/ckb";
+import type { CKBTransaction } from "@joyid/ckb";
 import type { CkbNetwork } from "@/lib/light-client/network-configs";
 import type { CkbTxSigner } from "./ckb-tx-signer";
 import { RelayClient } from "./joyid-relay/relay-client";
 import { assembleSignedCkbTx } from "./joyid-relay/witness";
 import { AuthResultSchema, SignResultSchema, parseDecoded, type SignPresenter } from "./joyid-relay/types";
 
-interface JoyIdRelaySignerOpts {
+export interface JoyIdRelaySignerOpts {
   network: CkbNetwork;
   presenter: SignPresenter;
   address?: string;
@@ -50,7 +51,7 @@ export class JoyIdRelaySigner implements CkbTxSigner {
     }
     const ckbTx = JSON.parse(unsigned.stringify()) as { inputs: unknown[] };
     const witnessIndexes = ckbTx.inputs.map((_, i) => i); // single-source builder: all inputs are the JoyID lock
-    const challenge = await calculateChallenge(ckbTx as never, witnessIndexes);
+    const challenge = await calculateChallenge(ckbTx as unknown as CKBTransaction, witnessIndexes);
 
     const { id, callbackUrl } = await this.client.createSession();
     const joyidSignUrl = this.client.buildSignUrl({ callbackUrl, challenge, address: this.address });
