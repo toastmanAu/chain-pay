@@ -4,6 +4,8 @@ import type { SendRecord, Source } from "@chain-pay/shared";
 import type { CkbTxSigner } from "@/lib/signers/ckb-tx-signer";
 import { buildSingleSigSend, type SingleSigRecipient } from "@/lib/chains/ckb/single-sig-tx-builder";
 import { joyidLockAndDeps } from "@/lib/chains/ckb/joyid-lock";
+import { shannonsToCkbString } from "@/lib/send/ckb-amount";
+import type { SignPreview } from "@/lib/signers/joyid-relay/types";
 
 export interface SendDeps {
   listCellsForLock(lock: Script): Promise<Cell[]>;
@@ -31,7 +33,7 @@ export async function buildAndSend(
     recipients.push({ lock, capacity: o.amount.value });
   }
 
-  const { tx } = buildSingleSigSend({
+  const { tx, fee } = buildSingleSigSend({
     sourceLock,
     joyidCellDeps: cellDeps,
     recipients,
@@ -39,9 +41,18 @@ export async function buildAndSend(
     feeRateShannonsPerByte,
   });
 
+  // Human-readable summary shown on the approver's phone before they sign.
+  const preview: SignPreview = {
+    to: send.outputs.map((o) => ({
+      address: o.payeeAddress,
+      ckb: shannonsToCkbString(o.amount.value),
+    })),
+    feeCkb: shannonsToCkbString(fee),
+  };
+
   deps.markSigning(send.id);
   try {
-    const signed = await signer.signTransaction(tx);
+    const signed = await signer.signTransaction(tx, preview);
     const txHash = await deps.broadcast(signed);
     deps.markBroadcasted(send.id, txHash);
     return { txHash };

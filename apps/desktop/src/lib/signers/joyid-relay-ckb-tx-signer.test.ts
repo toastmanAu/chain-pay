@@ -7,7 +7,20 @@ import { JoyIdRelaySigner } from "./joyid-relay-ckb-tx-signer";
 vi.mock("@joyid/ckb", () => ({
   calculateChallenge: vi.fn().mockResolvedValue("0xdeadbeef"),
   buildSignedTx: vi.fn().mockReturnValue({}),
+  verifySignature: vi.fn().mockResolvedValue(true),
 }));
+
+import { verifySignature } from "@joyid/ckb";
+
+const validSignResult = {
+  // 64-byte P1363 (128 hex) so normalizeSignResult skips the DER→P1363 path.
+  signature: "ab".repeat(64),
+  message: "cd".repeat(32),
+  pubkey: "ef".repeat(33),
+  keyType: "main_session_key",
+  alg: -7,
+  challenge: "0xphone-echoed",
+};
 
 const presenter = { showQr: vi.fn(), updateStatus: vi.fn(), dismiss: vi.fn() };
 
@@ -63,5 +76,47 @@ describe("JoyIdRelaySigner", () => {
       signer.signTransaction(Transaction.from({ inputs: [], outputs: [], outputsData: [], witnesses: [] })),
     ).rejects.toThrow(/outside the configured relay origin/i);
     expect(presenter.dismiss).toHaveBeenCalled();
+  });
+
+  it("verifies the phone signature against the locally-computed challenge before assembling (H1)", async () => {
+    const client = fakeClient({
+      pollSession: vi.fn().mockResolvedValue({ data: validSignResult }),
+    });
+    const signer = new JoyIdRelaySigner({ network: "testnet", address: "ckt1qsrc", presenter, client });
+    await signer.signTransaction(
+      Transaction.from({ inputs: [], outputs: [], outputsData: [], witnesses: [] }),
+    );
+    // The local challenge (from calculateChallenge), not whatever the phone echoed,
+    // is authoritative and must be what we verify against.
+    expect(verifySignature).toHaveBeenCalledWith(
+      expect.objectContaining({ challenge: "0xdeadbeef" }),
+    );
+  });
+
+  it("rejects (and does not broadcast) when signature verification fails (H1)", async () => {
+    vi.mocked(verifySignature).mockResolvedValueOnce(false);
+    const client = fakeClient({
+      pollSession: vi.fn().mockResolvedValue({ data: validSignResult }),
+    });
+    const signer = new JoyIdRelaySigner({ network: "testnet", address: "ckt1qsrc", presenter, client });
+    await expect(
+      signer.signTransaction(Transaction.from({ inputs: [], outputs: [], outputsData: [], witnesses: [] })),
+    ).rejects.toThrow(/signature verification failed/i);
+    expect(presenter.dismiss).toHaveBeenCalled();
+  });
+
+  it("forwards a non-empty preview to the relay tx-session when provided (M2)", async () => {
+    const createTxSession = vi.fn().mockResolvedValue({ launchUrl: "https://relay.test/tx-launch/s1" });
+    const client = fakeClient({
+      createTxSession,
+      pollSession: vi.fn().mockResolvedValue({ data: validSignResult }),
+    });
+    const signer = new JoyIdRelaySigner({ network: "testnet", address: "ckt1qsrc", presenter, client });
+    const preview = { to: [{ address: "ckt1qdest", ckb: "100" }], feeCkb: "0.001" };
+    await signer.signTransaction(
+      Transaction.from({ inputs: [], outputs: [], outputsData: [], witnesses: [] }),
+      preview,
+    );
+    expect(createTxSession).toHaveBeenCalledWith(expect.objectContaining({ preview }));
   });
 });
