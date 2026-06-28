@@ -1,5 +1,6 @@
 // tests/derive.rs — anchor against a fixed mnemonic so any derivation change is caught.
 use ckb_keyvault_wasm::derive::*;
+use k256::ecdsa::{RecoveryId, Signature, SigningKey, VerifyingKey};
 
 const M: &[u8] = b"abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
 
@@ -33,5 +34,13 @@ fn signs_recoverable_and_recovers() {
     let digest = [7u8; 32];
     let sig = sign_recoverable(&pk, &digest);
     assert_eq!(sig.len(), 65);
-    assert!(sig[64] <= 1);
+    assert!(sig[64] <= 1, "recovery id must be 0 or 1 (low-s normalized)");
+
+    // Real recover-and-compare: the pubkey recovered from (digest, r||s, v) must
+    // equal the signing key's compressed pubkey. This is what CKB does on-chain.
+    let signature = Signature::from_slice(&sig[..64]).unwrap();
+    let recid = RecoveryId::from_byte(sig[64]).unwrap();
+    let recovered = VerifyingKey::recover_from_prehash(&digest, &signature, recid).unwrap();
+    let expected = *SigningKey::from_slice(&pk[..]).unwrap().verifying_key();
+    assert_eq!(recovered, expected);
 }
