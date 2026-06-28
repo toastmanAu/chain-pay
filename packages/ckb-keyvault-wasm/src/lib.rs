@@ -1,5 +1,5 @@
 mod error;
-mod vault;   // added in A2
+pub mod vault;   // added in A2
 mod derive;  // added in A3
 
 use wasm_bindgen::prelude::*;
