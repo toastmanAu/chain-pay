@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useKeyvaultStore } from "./keyvault-store";
+import { ReceivePanel } from "./ReceivePanel";
 
 // ---------------------------------------------------------------------------
 // Password entropy meter (client-side heuristic — no IPC)
@@ -354,13 +355,19 @@ export function KeyvaultSetupPanel() {
   // — Active: wallet exists —
   return wrapper(
     <div className="space-y-4">
+      {/* Receive / Fund panel: address + QR + live balance */}
+      {lockArgs && <ReceivePanel lockArgs={lockArgs} />}
+
+      {/* Lock args (technical detail, below the user-facing panel) */}
       <div className="rounded-lg border border-surface-hi bg-bg p-4 text-sm">
         <div className="text-xs uppercase tracking-wide text-fg-muted">Lock args (blake160)</div>
         <div className="mt-1 break-all font-mono text-xs text-accent">
           {lockArgs ?? "—"}
         </div>
       </div>
+
       {error && <ErrorBanner message={error} />}
+
       {!deleteConfirm ? (
         <button
           type="button"

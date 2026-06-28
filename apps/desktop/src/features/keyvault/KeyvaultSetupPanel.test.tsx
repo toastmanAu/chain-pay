@@ -2,8 +2,52 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import "@testing-library/jest-dom/vitest";
+import { ScriptInfo } from "@ckb-ccc/core";
 import { KeyvaultSetupPanel } from "./KeyvaultSetupPanel";
 import { useKeyvaultStore } from "./keyvault-store";
+import { useNetworkConfigStore } from "@/stores/network-config";
+
+// ---------------------------------------------------------------------------
+// Mock heavy async dependencies used by ReceivePanel when rendered in active mode.
+// ---------------------------------------------------------------------------
+
+vi.mock("qrcode", () => ({
+  default: { toDataURL: vi.fn().mockResolvedValue("data:image/png;base64,mockqr") },
+}));
+
+vi.mock("@/lib/chains/ckb/secp256k1-lock", async (importOriginal) => {
+  const original = await importOriginal<typeof import("@/lib/chains/ckb/secp256k1-lock")>();
+  return {
+    ...original,
+    resolveSecp256k1ScriptInfo: vi.fn().mockResolvedValue(
+      ScriptInfo.from({
+        // secp256k1_blake160_sighash_all code hash (testnet / mainnet same)
+        codeHash: "0x9bd7e06f3ecf4be0f2fcd2188b23f1b9fcc88e5d4b65a8637b17723bbda3cce8",
+        hashType: "type",
+        cellDeps: [
+          {
+            cellDep: {
+              outPoint: {
+                txHash:
+                  "0xf8de3bb47d055cdf460d93a2a6e1b05f7432f9777c8c474abf4eec1d4aee5d37",
+                index: 0,
+              },
+              depType: "depGroup",
+            },
+          },
+        ],
+      }),
+    ),
+  };
+});
+
+// Stub the light-client so balance fetches don't hit real IPC.
+vi.mock("@/lib/light-client/client", () => ({
+  lightClient: vi.fn().mockReturnValue({
+    watchLockScript: vi.fn().mockResolvedValue(undefined),
+    getLockBalance: vi.fn().mockResolvedValue(0n),
+  }),
+}));
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -295,5 +339,29 @@ describe("KeyvaultSetupPanel — active state", () => {
     // Still on active view
     expect(screen.getByText(/lock args/i)).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /yes, delete/i })).not.toBeInTheDocument();
+  });
+
+  it("renders ReceivePanel (Fund this wallet heading) once the wallet is active", async () => {
+    useNetworkConfigStore.setState({ network: "testnet", broadcastRpcUrl: "" });
+    // Bridge must confirm exists:true so refreshStatus() doesn't reset the store.
+    mountBridge(makeMockBridge({ statusExists: true, createLockArgs: LOCK_ARGS }));
+    seedActiveStore();
+    render(<KeyvaultSetupPanel />);
+
+    // ReceivePanel should resolve scriptInfo (mocked) and render its heading.
+    await waitFor(() => {
+      expect(screen.getByText(/fund this wallet/i)).toBeInTheDocument();
+    });
+  });
+
+  it("renders the Copy address button once ReceivePanel has resolved the address", async () => {
+    useNetworkConfigStore.setState({ network: "testnet", broadcastRpcUrl: "" });
+    mountBridge(makeMockBridge({ statusExists: true, createLockArgs: LOCK_ARGS }));
+    seedActiveStore();
+    render(<KeyvaultSetupPanel />);
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: /copy address/i })).toBeInTheDocument();
+    });
   });
 });
