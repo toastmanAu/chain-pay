@@ -1,6 +1,7 @@
 import { app, BrowserWindow, ipcMain, session, shell } from "electron";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { createRequire } from "node:module";
 import fs from "node:fs/promises";
 import path from "node:path";
 
@@ -29,6 +30,8 @@ import { restartWithCert, startPairServer, stopPairServer } from "./pair-server"
 import { loadOrCreateTlsCert, rotateTlsCert } from "./tls-cert-store";
 import { addDevice, listDevices, revokeDevice } from "./pair-store";
 import { getSafeStorage } from "./safe-storage";
+import { KeyvaultStore } from "./keyvault-store";
+import { registerKeyvaultHost } from "./keyvault-host";
 import type { CkbNetwork } from "@/lib/light-client/network-configs";
 
 const isDev = !app.isPackaged;
@@ -214,6 +217,24 @@ app.whenReady().then(async () => {
 
   // accounting handlers (Frappe Slice C bridge — credentials stay in main process)
   registerAccountingIpc();
+
+  // keyvault host — encrypted BIP39 signer (single-sig SMB send path only).
+  // The WASM pkg is a synchronous CJS module (wasm-pack --target nodejs).
+  // Both this source file (electron/main/) and the compiled output (out/main/)
+  // are 4 levels deep in the workspace, so the relative path is the same.
+  {
+    const kvStore = new KeyvaultStore(
+      path.join(app.getPath("userData"), "keyvault"),
+    );
+    const _require = createRequire(import.meta.url);
+    const keyvaultWasm = _require(
+      join(
+        __dirname,
+        "../../../../packages/ckb-keyvault-wasm/pkg/ckb_keyvault_wasm.js",
+      ),
+    ) as Parameters<typeof registerKeyvaultHost>[0]["wasm"];
+    registerKeyvaultHost({ store: kvStore, wasm: keyvaultWasm });
+  }
 
   // invoice-files handlers
   registerInvoiceFilesIpc();

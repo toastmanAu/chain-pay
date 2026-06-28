@@ -85,5 +85,11 @@ function zeroWitnessLock(witnessHex: string): WitnessArgs {
     return WitnessArgs.from({ lock: ZEROED_LOCK });
   }
   const existing = WitnessArgs.fromBytes(bytesFrom(witnessHex));
-  return WitnessArgs.from({ ...existing, lock: ZEROED_LOCK });
+  // Explicit properties instead of spread to satisfy exactOptionalPropertyTypes:
+  // WitnessArgs optional fields use `null` to unset, not `undefined`.
+  return WitnessArgs.from({
+    lock: ZEROED_LOCK,
+    ...(existing.inputType != null ? { inputType: existing.inputType } : {}),
+    ...(existing.outputType != null ? { outputType: existing.outputType } : {}),
+  });
 }
