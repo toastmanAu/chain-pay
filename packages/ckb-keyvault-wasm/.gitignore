@@ -1,4 +1,7 @@
 /target
-# wasm-pack output — ignore generated artifacts, keep the build note
-/pkg
-!/pkg/.gitkeep
+# wasm-pack output (pkg/) IS committed: the Electron main process and the
+# host tests load it by filesystem path, not as a resolved npm module, so a
+# fresh clone / CI must have the prebuilt artifacts present without needing a
+# Rust + wasm-pack toolchain. Rebuild with `npm run build:keyvault-wasm` after
+# changing the crate. Only the wasm-pack-generated per-dir ignore is dropped.
+/pkg/.gitignore

@@ -1,0 +1,11 @@
+{
+  "name": "ckb-keyvault-wasm",
+  "version": "0.1.0",
+  "files": [
+    "ckb_keyvault_wasm_bg.wasm",
+    "ckb_keyvault_wasm.js",
+    "ckb_keyvault_wasm.d.ts"
+  ],
+  "main": "ckb_keyvault_wasm.js",
+  "types": "ckb_keyvault_wasm.d.ts"
+}

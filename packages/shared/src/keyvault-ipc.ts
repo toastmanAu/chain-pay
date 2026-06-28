@@ -46,7 +46,7 @@ export type ImportRequest = z.infer<typeof ImportRequest>;
 
 export const UnlockDeriveRequest = z.object({
   /** Keyvault blob ID. */
-  keyvaultId: z.string(),
+  keyvaultId: z.string().min(1),
   /** Decryption password. */
   password: z.string().min(1),
   /** BIP32 child index to derive the lock-args for. */
