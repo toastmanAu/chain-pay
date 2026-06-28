@@ -39,7 +39,11 @@ export function SourceList() {
       };
       useSourcesStore.getState().addSource(src);
       const { lightClient } = await import("@/lib/light-client/client");
-      await lightClient().watchLockScript(parsed.script);
+      // Watch from a recent block, not genesis, so a recently-funded wallet's
+      // balance appears quickly (the genesis filter-sync is the documented
+      // "fromBlock: 0n" trap). Wallets with older funds need the rescan control
+      // (backlog) — acceptable for the common SMB case of funding for the purpose.
+      await lightClient().watchLockScriptFromRecent(parsed.script);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Connect failed");
     } finally {

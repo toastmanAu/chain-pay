@@ -222,6 +222,15 @@ afterEach(() => {
 // Tests: secp256k1 source path
 // ---------------------------------------------------------------------------
 
+describe("SendPanel — manage wallets link", () => {
+  it("shows a persistent link to Source wallets even when a source already exists", () => {
+    useSourcesStore.getState().addSource(SECP256K1_SOURCE);
+    renderSend();
+    const link = screen.getByRole("link", { name: /manage (source )?wallets/i });
+    expect(link).toHaveAttribute("href", "/send/sources");
+  });
+});
+
 describe("SendPanel — secp256k1 (local keystore) path", () => {
   it("opens UnlockModal when Send is clicked with a secp256k1 source and valid rows", async () => {
     useSourcesStore.getState().addSource(SECP256K1_SOURCE);

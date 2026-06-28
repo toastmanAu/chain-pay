@@ -370,11 +370,21 @@ export function SendPanel() {
         }}
         onClose={() => setUnlockModalOpen(false)}
       />
-      <header>
-        <h1 className="text-2xl font-semibold">Send</h1>
-        <p className="mt-1 text-sm text-fg-muted">
-          Single-sig payments. Select a source wallet and add payee rows.
-        </p>
+      <header className="flex items-start justify-between">
+        <div>
+          <h1 className="text-2xl font-semibold">Send</h1>
+          <p className="mt-1 text-sm text-fg-muted">
+            Single-sig payments. Select a source wallet and add payee rows.
+          </p>
+        </div>
+        {/* Persistent path to wallet management — adding a source must never
+            strand the user with no way back to connect/add another wallet. */}
+        <Link
+          to="/send/sources"
+          className="shrink-0 rounded-md border border-surface-hi bg-bg px-3 py-2 text-sm font-medium hover:opacity-90"
+        >
+          Manage wallets
+        </Link>
       </header>
 
       {sources.length === 0 ? (
