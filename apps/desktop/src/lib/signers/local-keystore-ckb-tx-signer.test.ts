@@ -30,7 +30,6 @@ function makeSigner(bridge: ReturnType<typeof makeBridge>) {
     derivationIndex: 0,
     sourceLockArgs: LOCK_ARGS,
     password: "pw",
-    groupInputIndices: [0],
     bridge,
   });
 }

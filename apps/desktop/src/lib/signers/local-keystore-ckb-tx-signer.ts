@@ -21,8 +21,6 @@ interface LocalSignerOpts {
    * renderer beyond the signer's lifecycle.
    */
   password: string;
-  /** Absolute input indices that belong to this signing group. */
-  groupInputIndices: number[];
   /** IPC bridge to the main-process keyvault host. */
   bridge: KeyvaultBridge;
 }
@@ -60,13 +58,17 @@ export class LocalKeystoreCkbTxSigner implements CkbTxSigner {
     unsigned: Transaction,
     _preview?: SignPreview,
   ): Promise<Transaction> {
+    // Single-source single-sig: every input belongs to the source lock.
+    // Computed here from the built tx so the caller doesn't need to know
+    // the indices at signer-construction time (mirrors JoyID signer behaviour).
+    const groupInputIndices = unsigned.inputs.map((_, i) => i);
     const res = await this.opts.bridge.signTx({
       keyvaultId: this.opts.keyvaultId,
       password: this.opts.password,
       derivationIndex: this.opts.derivationIndex,
       unsignedTx: stringify(unsigned),
       sourceLockArgs: this.opts.sourceLockArgs,
-      groupInputIndices: this.opts.groupInputIndices,
+      groupInputIndices,
     });
     return Transaction.from(JSON.parse(res.signedTx) as Parameters<typeof Transaction.from>[0]);
   }

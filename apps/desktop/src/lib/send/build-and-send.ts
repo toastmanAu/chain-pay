@@ -4,6 +4,7 @@ import type { SendRecord, Source } from "@chain-pay/shared";
 import type { CkbTxSigner } from "@/lib/signers/ckb-tx-signer";
 import { buildSingleSigSend, type SingleSigRecipient } from "@/lib/chains/ckb/single-sig-tx-builder";
 import { joyidLockAndDeps } from "@/lib/chains/ckb/joyid-lock";
+import { secp256k1LockAndDeps } from "@/lib/chains/ckb/secp256k1-lock";
 import { shannonsToCkbString } from "@/lib/send/ckb-amount";
 import type { SignPreview } from "@/lib/signers/joyid-relay/types";
 
@@ -11,7 +12,13 @@ export interface SendDeps {
   listCellsForLock(lock: Script): Promise<Cell[]>;
   broadcast(tx: import("@ckb-ccc/core").Transaction): Promise<string>;
   resolveRecipientLock(address: string): Promise<Script>;
+  /** JoyID (or default) lock script info. */
   scriptInfo: ScriptInfo;
+  /**
+   * secp256k1_blake160_sighash_all script info.
+   * Required when source.lockKind === "secp256k1"; unused otherwise.
+   */
+  secp256k1ScriptInfo?: ScriptInfo;
   markSigning(id: string): void;
   markBroadcasted(id: string, hash: string): void;
   markBackToBuilt(id: string): void;
@@ -24,7 +31,17 @@ export async function buildAndSend(
   feeRateShannonsPerByte: bigint,
   deps: SendDeps,
 ): Promise<{ txHash: string }> {
-  const { lock: sourceLock, cellDeps } = joyidLockAndDeps(deps.scriptInfo, source.joyidLockArgs);
+  const { lock: sourceLock, cellDeps } = (() => {
+    if (source.lockKind === "secp256k1") {
+      if (!deps.secp256k1ScriptInfo) {
+        throw new Error(
+          "secp256k1ScriptInfo is required in SendDeps when source.lockKind is 'secp256k1'",
+        );
+      }
+      return secp256k1LockAndDeps(deps.secp256k1ScriptInfo, source.joyidLockArgs);
+    }
+    return joyidLockAndDeps(deps.scriptInfo, source.joyidLockArgs);
+  })();
   const availableCells = await deps.listCellsForLock(sourceLock);
 
   const recipients: SingleSigRecipient[] = [];
