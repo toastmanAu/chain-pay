@@ -7,7 +7,7 @@ import type { SignPreview } from "./joyid-relay/types";
  * JoyID signs the entire tx and returns a broadcast-ready Transaction.
  */
 export interface CkbTxSigner {
-  readonly kind: "joyid";
+  readonly kind: "joyid" | "local-keystore";
   connect(): Promise<{ address: string; lockArgs: string }>;
   /**
    * @param preview human-readable recipient/amount/fee shown to the approver on
