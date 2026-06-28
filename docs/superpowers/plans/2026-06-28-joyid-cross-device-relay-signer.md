@@ -234,10 +234,13 @@ export function derToP1363(derHexInput: string): string {
 }
 
 export function normalizeSignResult(raw: SignResult): SignResult {
-  const message = "0x" + toHexMaybeBase64url(raw.message);
+  // buildSignedTx wants BARE hex (no 0x) for signature, message, AND pubkey —
+  // matches the proven joyid-ckb-connector, which strips 0x from all three.
+  const message = toHexMaybeBase64url(raw.message);
+  const pubkey = stripHexPrefix(raw.pubkey);
   let signature = toHexMaybeBase64url(raw.signature);
   if (signature.length !== 128) signature = derToP1363(signature);
-  return { ...raw, message, signature: "0x" + signature };
+  return { ...raw, message, pubkey, signature };
 }
 
 export function assembleSignedCkbTx(
