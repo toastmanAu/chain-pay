@@ -23,6 +23,7 @@ import {
   stringify,
 } from "@ckb-ccc/core";
 import { KeyvaultStore } from "./keyvault-store";
+import { KeyvaultRateLimiter } from "./keyvault-rate-limit";
 import { computeSighashAllDigest } from "@shared/ckb-sighash";
 import {
   SignTxRequest,
@@ -66,6 +67,37 @@ interface WasmVault {
 export interface Deps {
   store: KeyvaultStore;
   wasm: WasmVault;
+  /**
+   * Optional brute-force guard. When present, decryption entry points
+   * (signTxInVault, unlockDeriveInVault) check it before attempting a
+   * password decrypt, record failures, and reset it on success.
+   */
+  limiter?: KeyvaultRateLimiter;
+}
+
+/**
+ * Derive lock-args from the vault, funnelled through the rate limiter so a
+ * wrong password counts toward lockout and a correct one resets the counter.
+ * The thrown error from a wrong password (or a locked-out `check`) propagates
+ * unchanged — callers surface it to the renderer.
+ */
+function deriveLockArgsGuarded(
+  deps: Deps,
+  vaultId: string,
+  blob: Uint8Array,
+  password: Uint8Array,
+  index: number,
+): string {
+  deps.limiter?.check(vaultId);
+  let args: Uint8Array;
+  try {
+    args = deps.wasm.derive_lock_args(blob, password, index);
+  } catch (err) {
+    deps.limiter?.recordFailure(vaultId);
+    throw err;
+  }
+  deps.limiter?.recordSuccess(vaultId);
+  return hexFrom(args);
 }
 
 // ---------------------------------------------------------------------------
@@ -129,9 +161,14 @@ export async function signTxInVault(
   try {
     // Step 2 — Verify the vault's derived key owns the claimed source lock.
     // This is the anti-blind-sign gate: if the vault doesn't control the
-    // lock being spent, we refuse to produce a signature for it.
-    const derivedArgs = hexFrom(
-      deps.wasm.derive_lock_args(blob, password, req.derivationIndex),
+    // lock being spent, we refuse to produce a signature for it. The derive
+    // is funnelled through the rate limiter (wrong password ⇒ lockout).
+    const derivedArgs = deriveLockArgsGuarded(
+      deps,
+      req.keyvaultId,
+      blob,
+      password,
+      req.derivationIndex,
     );
     if (derivedArgs.toLowerCase() !== req.sourceLockArgs.toLowerCase()) {
       throw new Error(
@@ -180,6 +217,37 @@ export async function signTxInVault(
   }
 }
 
+/**
+ * Unlock the vault and derive the lock-args at `derivationIndex` — the
+ * password-only "is this my vault" path. This is the cheapest brute-force
+ * surface (no tx required), so it goes through the rate limiter too.
+ *
+ * Returns only the public lock-args; no key material crosses the boundary.
+ */
+export async function unlockDeriveInVault(
+  reqIn: unknown,
+  deps: Deps,
+): Promise<{ lockArgs: string }> {
+  const req = UnlockDeriveRequest.parse(reqIn);
+  if (!deps.store.has(req.keyvaultId)) {
+    throw new Error(`keyvault not found: ${req.keyvaultId}`);
+  }
+  const blob = deps.store.read(req.keyvaultId);
+  const password = new TextEncoder().encode(req.password);
+  try {
+    const lockArgs = deriveLockArgsGuarded(
+      deps,
+      req.keyvaultId,
+      blob,
+      password,
+      req.derivationIndex,
+    );
+    return { lockArgs };
+  } finally {
+    password.fill(0);
+  }
+}
+
 // ---------------------------------------------------------------------------
 // IPC registration (Electron main only — not called during unit tests)
 // ---------------------------------------------------------------------------
@@ -190,7 +258,14 @@ export async function signTxInVault(
  * Call once inside `app.whenReady()` after constructing the KeyvaultStore
  * and loading the wasm module.
  */
-export function registerKeyvaultHost(deps: Deps): void {
+export function registerKeyvaultHost(depsIn: Deps): void {
+  // One shared brute-force guard for every decryption channel, unless the
+  // caller injected its own (tests do). State lives only in the main process.
+  const deps: Deps = {
+    ...depsIn,
+    limiter: depsIn.limiter ?? new KeyvaultRateLimiter(),
+  };
+
   ipcMain.handle(KEYVAULT_CHANNELS.import, (_e, r: unknown) =>
     importVault(r as { mnemonic: string; password: string }, deps),
   );
@@ -222,22 +297,9 @@ export function registerKeyvaultHost(deps: Deps): void {
     exists: deps.store.has(VAULT_ID),
   }));
 
-  ipcMain.handle(KEYVAULT_CHANNELS.unlockDerive, (_e, r: unknown) => {
-    const req = UnlockDeriveRequest.parse(r);
-    if (!deps.store.has(req.keyvaultId)) {
-      throw new Error(`keyvault not found: ${req.keyvaultId}`);
-    }
-    const blob = deps.store.read(req.keyvaultId);
-    const password = new TextEncoder().encode(req.password);
-    try {
-      const args = hexFrom(
-        deps.wasm.derive_lock_args(blob, password, req.derivationIndex),
-      );
-      return { lockArgs: args };
-    } finally {
-      password.fill(0);
-    }
-  });
+  ipcMain.handle(KEYVAULT_CHANNELS.unlockDerive, (_e, r: unknown) =>
+    unlockDeriveInVault(r, deps),
+  );
 
   ipcMain.handle(KEYVAULT_CHANNELS.export, (_e, r: unknown) => {
     const req = ExportRequest.parse(r);
@@ -246,11 +308,16 @@ export function registerKeyvaultHost(deps: Deps): void {
     }
     const blob = deps.store.read(req.keyvaultId);
     const password = new TextEncoder().encode(req.password);
+    deps.limiter?.check(req.keyvaultId);
     try {
       const mnemonicBytes = deps.wasm.export_seed_phrase(blob, password);
       const mnemonic = new TextDecoder().decode(mnemonicBytes);
       mnemonicBytes.fill(0);
+      deps.limiter?.recordSuccess(req.keyvaultId);
       return { mnemonic };
+    } catch (err) {
+      deps.limiter?.recordFailure(req.keyvaultId);
+      throw err;
     } finally {
       password.fill(0);
     }
@@ -264,10 +331,15 @@ export function registerKeyvaultHost(deps: Deps): void {
     const blob = deps.store.read(req.keyvaultId);
     const oldPw = new TextEncoder().encode(req.oldPassword);
     const newPw = new TextEncoder().encode(req.newPassword);
+    deps.limiter?.check(req.keyvaultId);
     try {
       const newBlob = deps.wasm.change_password(blob, oldPw, newPw);
       deps.store.write(req.keyvaultId, Buffer.from(newBlob));
+      deps.limiter?.recordSuccess(req.keyvaultId);
       return { ok: true };
+    } catch (err) {
+      deps.limiter?.recordFailure(req.keyvaultId);
+      throw err;
     } finally {
       oldPw.fill(0);
       newPw.fill(0);
