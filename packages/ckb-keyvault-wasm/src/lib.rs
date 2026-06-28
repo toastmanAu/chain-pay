@@ -4,7 +4,7 @@ pub mod vault;
 
 use js_sys::{Object, Reflect, Uint8Array};
 use wasm_bindgen::prelude::*;
-use zeroize::Zeroize;
+use zeroize::{Zeroize, Zeroizing};
 
 // ── Password utility ──────────────────────────────────────────────────────────
 
@@ -89,7 +89,8 @@ pub fn generate_master_seed(password: &[u8]) -> Result<JsValue, JsValue> {
     let m = bip39::Mnemonic::from_entropy(&entropy)
         .map_err(|_| error::VaultError::Corrupt("mnemonic-gen"))?;
     entropy.zeroize(); // erase entropy immediately after use
-    let words = m.to_string();
+    // Zeroizing<String> ensures the WASM-side mnemonic copy is wiped on drop.
+    let words = Zeroizing::new(m.to_string());
     // blob plaintext = mnemonic UTF-8 (consistent with import_seed_phrase)
     let blob = vault::encrypt_seed(words.as_bytes(), password)?;
     let obj = Object::new();

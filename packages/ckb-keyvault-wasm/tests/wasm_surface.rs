@@ -81,3 +81,27 @@ fn wrong_password_in_derive_path() {
     let result = decrypt_seed(&blob, b"wrong");
     assert!(result.is_err());
 }
+
+/// Binding-level guard: import_seed_phrase validates the mnemonic before encrypting.
+///
+/// NOTE: the binding's *error* path constructs a `JsValue` (via
+/// `From<VaultError> for JsValue` → `JsValue::from_str`), which is
+/// "not implemented on non-wasm32 targets" and ABORTS the process (SIGABRT) under
+/// native `cargo test` rather than returning `Err`. So we cannot assert
+/// `import_seed_phrase(b"bad words", ..).is_err()` here. Instead we cover the guard
+/// two ways that DO run natively:
+///   (a) assert the exact predicate the binding branches on, and
+///   (b) exercise the binding's success path (valid mnemonic → decryptable blob).
+/// The full error-return shape is exercised by `keyvault-host.test.ts` in Phase B
+/// against the real wasm pkg.
+#[test]
+fn import_rejects_invalid_mnemonic() {
+    use ckb_keyvault_wasm::derive::validate_mnemonic;
+    // (a) the predicate guarding the binding: `if !validate_mnemonic { return Err(..) }`
+    assert!(!validate_mnemonic(b"bad words"), "binding must reject this mnemonic");
+    assert!(validate_mnemonic(M), "binding must accept a valid mnemonic");
+    // (b) success path runs natively (no JsValue constructed on Ok)
+    let blob = ckb_keyvault_wasm::import_seed_phrase(M, b"pw").unwrap();
+    let recovered = decrypt_seed(&blob, b"pw").unwrap();
+    assert_eq!(&recovered[..], M, "blob plaintext must be the mnemonic bytes");
+}
