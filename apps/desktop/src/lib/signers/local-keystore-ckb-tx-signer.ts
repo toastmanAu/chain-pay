@@ -1,4 +1,4 @@
-import { Transaction, type Script } from "@ckb-ccc/core";
+import { Transaction, stringify } from "@ckb-ccc/core";
 import type { CkbTxSigner } from "./ckb-tx-signer";
 import type { SignPreview } from "./joyid-relay/types";
 import type { Hex20 } from "@shared/types";
@@ -21,8 +21,6 @@ interface LocalSignerOpts {
    * renderer beyond the signer's lifecycle.
    */
   password: string;
-  /** The secp256k1_blake160_sighash_all lock script for the source cell. */
-  sourceLock: Script;
   /** Absolute input indices that belong to this signing group. */
   groupInputIndices: number[];
   /** IPC bridge to the main-process keyvault host. */
@@ -66,7 +64,7 @@ export class LocalKeystoreCkbTxSigner implements CkbTxSigner {
       keyvaultId: this.opts.keyvaultId,
       password: this.opts.password,
       derivationIndex: this.opts.derivationIndex,
-      unsignedTx: unsigned.stringify(),
+      unsignedTx: stringify(unsigned),
       sourceLockArgs: this.opts.sourceLockArgs,
       groupInputIndices: this.opts.groupInputIndices,
     });

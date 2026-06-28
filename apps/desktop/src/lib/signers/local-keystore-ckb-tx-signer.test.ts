@@ -1,16 +1,10 @@
 import { describe, it, expect, vi } from "vitest";
-import { Transaction, Script } from "@ckb-ccc/core";
+import { Transaction } from "@ckb-ccc/core";
 import type { Hex20 } from "@shared/types";
 import { LocalKeystoreCkbTxSigner } from "./local-keystore-ckb-tx-signer";
 
 const LOCK_ARGS = ("0x" + "ab".repeat(20)) as Hex20;
 const SIG_HEX = ("0x" + "ff".repeat(65)) as `0x${string}`;
-
-const sourceLock = Script.from({
-  codeHash: "0x" + "33".repeat(32),
-  hashType: "type",
-  args: LOCK_ARGS,
-});
 
 function makeTx(): Transaction {
   return Transaction.from({
@@ -36,14 +30,13 @@ function makeSigner(bridge: ReturnType<typeof makeBridge>) {
     derivationIndex: 0,
     sourceLockArgs: LOCK_ARGS,
     password: "pw",
-    sourceLock,
     groupInputIndices: [0],
     bridge,
   });
 }
 
 describe("LocalKeystoreCkbTxSigner", () => {
-  it("sends the right keyvaultId, derivationIndex, sourceLockArgs and groupInputIndices to the bridge", async () => {
+  it("sends the right keyvaultId, derivationIndex, password, sourceLockArgs and groupInputIndices to the bridge", async () => {
     const tx = makeTx();
     const bridge = makeBridge({ signedTx: tx.stringify() });
     const signer = makeSigner(bridge);
@@ -55,6 +48,7 @@ describe("LocalKeystoreCkbTxSigner", () => {
       expect.objectContaining({
         keyvaultId: "main",
         derivationIndex: 0,
+        password: "pw",
         sourceLockArgs: LOCK_ARGS,
         groupInputIndices: [0],
       }),
