@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useSourcesStore } from "@/stores/sources";
 import { useNetworkConfigStore } from "@/stores/network-config";
+import { JoyIdSignModal } from "./JoyIdSignModal";
 import type { Source } from "@chain-pay/shared";
 
 export function SourceList() {
@@ -16,13 +17,10 @@ export function SourceList() {
     setConnecting(true);
     setError(null);
     try {
-      const { JoyIdCkbTxSigner } = await import("@/lib/signers/joyid-ckb-tx-signer");
+      const { JoyIdRelaySigner } = await import("@/lib/signers/joyid-relay-ckb-tx-signer");
+      const { makePresenter } = await import("@/stores/joyid-sign");
       const { Address, ClientPublicTestnet, ClientPublicMainnet } = await import("@ckb-ccc/core");
-      const signer = new JoyIdCkbTxSigner({
-        name: "ChainPay",
-        logo: "https://chainpay.local/logo.png",
-        joyidAppURL: "https://app.joy.id",
-      });
+      const signer = new JoyIdRelaySigner({ network, presenter: makePresenter() });
       const { address } = await signer.connect();
       const client =
         network === "mainnet" ? new ClientPublicMainnet() : new ClientPublicTestnet();
@@ -50,6 +48,7 @@ export function SourceList() {
 
   return (
     <section className="space-y-4">
+      <JoyIdSignModal />
       <header className="flex items-center justify-between">
         <h1 className="text-xl font-semibold">Source wallets</h1>
         <button

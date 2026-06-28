@@ -4,6 +4,7 @@ import { useSourcesStore } from "@/stores/sources";
 import { useSendsStore } from "@/stores/sends";
 import { useNetworkConfigStore } from "@/stores/network-config";
 import { SendHistory } from "./SendHistory";
+import { JoyIdSignModal } from "./JoyIdSignModal";
 import type { SendOutput, SendRecord } from "@chain-pay/shared";
 import {
   sendAffordability,
@@ -177,7 +178,8 @@ export function SendPanel() {
       useSendsStore.getState().markBuilt(draft.id, 0n);
 
       const { resolveJoyIdScriptInfo } = await import("@/lib/chains/ckb/joyid-lock");
-      const { JoyIdCkbTxSigner } = await import("@/lib/signers/joyid-ckb-tx-signer");
+      const { JoyIdRelaySigner } = await import("@/lib/signers/joyid-relay-ckb-tx-signer");
+      const { makePresenter } = await import("@/stores/joyid-sign");
       const { buildAndSend } = await import("@/lib/send/build-and-send");
       const { lightClient } = await import("@/lib/light-client/client");
       const { Address, ClientPublicTestnet, ClientPublicMainnet } = await import("@ckb-ccc/core");
@@ -187,12 +189,10 @@ export function SendPanel() {
         network === "mainnet" ? new ClientPublicMainnet() : new ClientPublicTestnet();
       const scriptInfo = await resolveJoyIdScriptInfo(network);
 
-      // Forward-note #1: MUST pass source.address so signTransaction doesn't throw.
-      const signer = new JoyIdCkbTxSigner({
-        name: "ChainPay",
-        logo: "https://chainpay.local/logo.png",
-        joyidAppURL: "https://app.joy.id",
+      const signer = new JoyIdRelaySigner({
+        network,
         address: source.address,
+        presenter: makePresenter(),
       });
 
       const { txHash } = await buildAndSend(
@@ -223,6 +223,7 @@ export function SendPanel() {
 
   return (
     <div className="space-y-8">
+      <JoyIdSignModal />
       <header>
         <h1 className="text-2xl font-semibold">Send</h1>
         <p className="mt-1 text-sm text-fg-muted">
