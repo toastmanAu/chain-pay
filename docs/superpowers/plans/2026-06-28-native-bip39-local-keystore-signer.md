@@ -1238,6 +1238,46 @@ it("marks exists=true after import", async () => {
 - [ ] **Step 4: Run → PASS.**
 - [ ] **Step 5: Commit** `feat(keyvault): unlock modal gating secp256k1 sends`.
 
+### Task D3: Keystore address encoding + light-client registration + balance hook
+
+> Added 2026-06-28 per scope expansion: the in-app wallet must expose a fundable address and show its live on-chain balance. Creating a wallet is already covered (A4 `generate_master_seed` + D1 create flow); this task makes the resulting address visible and watched.
+
+**Files:**
+- Create: `apps/desktop/src/lib/chains/ckb/secp256k1-address.ts`
+- Test: `apps/desktop/src/lib/chains/ckb/secp256k1-address.test.ts`
+- Create: `apps/desktop/src/features/keyvault/useKeystoreBalance.ts`
+- Test: `apps/desktop/src/features/keyvault/useKeystoreBalance.test.ts`
+
+**Interfaces:**
+- Consumes: `secp256k1LockAndDeps` (Task C2), the light-client host bridge — **already exposes** `watchLockScript(script, fromBlock?)` (idempotent; subscribes the WASM light client to a lock so it syncs blocks touching it — REQUIRED or `getLockBalance` returns 0 for a brand-new address) and `getLockBalance(script): Promise<bigint>` (shannons), per `apps/desktop/src/lib/light-client/host.ts:146,160`.
+- Produces:
+  - `secp256k1AddressFromLockArgs(args: Hex20, network: "ckb" | "ckt", scriptInfo: ScriptInfo): string` — builds the `secp256k1_blake160_sighash_all` `Script` from the args and encodes it to a CKB address via CCC's `Address`/`ccc.Address.fromScript(...).toString()` (verify the exact CCC API against `node_modules/@ckb-ccc/core`; the binding contract is: a valid `ckb1…`/`ckt1…` address that round-trips back to the same lock script).
+  - `useKeystoreBalance(lock: Script | null, deps: { watchLockScript; getLockBalance }): { balance: bigint | null; loading: boolean; error: string | null; refresh(): void }` — on mount/lock-change calls `watchLockScript(lock)` once then `getLockBalance(lock)`; exposes a manual `refresh()`. Balance-fetch failure surfaces as `error`, never throws to the caller (mirror the existing send affordability pattern that treats balance-fetch failure as a warning, not a hard block).
+
+- [ ] **Step 1: Write failing address test** — `secp256k1AddressFromLockArgs("0x" + "ab".repeat(20), "ckt", info)` returns a `ckt1…` string, and decoding it (CCC `Address.fromString`) yields a lock whose `args` equals the input and whose codeHash is the sighash-all code hash.
+- [ ] **Step 2: Run → FAIL** (`../../node_modules/.bin/vitest run secp256k1-address` from `apps/desktop`).
+- [ ] **Step 3: Implement `secp256k1-address.ts`** using `secp256k1LockAndDeps` to build the lock then CCC `Address` to encode. Then write the `useKeystoreBalance` failing test (inject fake `watchLockScript`/`getLockBalance`; assert it watches once, then resolves balance; assert `refresh()` re-fetches; assert a rejecting `getLockBalance` sets `error` and leaves `balance` null without throwing).
+- [ ] **Step 4: Implement `useKeystoreBalance.ts`** (React hook; guard against setting state after unmount; `watchLockScript` called once per distinct lock).
+- [ ] **Step 5: Run both → PASS.**
+- [ ] **Step 6: Commit** `feat(keyvault): keystore address encoding + watched live-balance hook`.
+
+### Task D4: Receive / Fund panel (address + live balance UI)
+
+**Files:**
+- Create: `apps/desktop/src/features/keyvault/ReceivePanel.tsx`
+- Test: `apps/desktop/src/features/keyvault/ReceivePanel.test.tsx`
+- Modify: `apps/desktop/src/features/keyvault/KeyvaultSetupPanel.tsx` (Task D1) — after a wallet is created or imported, render `ReceivePanel` so the user immediately sees their fundable address + balance.
+
+**Interfaces:**
+- Consumes: keyvault store (current `lockArgs`, derived `Script`/address), `useKeystoreBalance`, the active network. Reuses the existing `qrcode` dependency (already used by the JoyID relay sign-modal) to render the address QR, and `shannonsToCkbString` (Task M2/`apps/desktop/src/lib/send/ckb-amount.ts`) to format the balance.
+- Produces: a panel showing the CKB address (monospace, **copy-to-clipboard** button, QR), the live balance in CKB with a **Refresh** button and a loading/stale indicator, and a short "Send testnet/mainnet CKB to this address to fund the wallet" hint. While the light client is still syncing the freshly-watched lock, show "syncing… balance may be incomplete" rather than a misleading 0 (cross-reference memory `mobile-drain-debugging-traps`: a displayed 0 must not be mistaken for confirmed-empty).
+
+- [ ] **Step 1: Write failing test** — given a store with a derived address and a `useKeystoreBalance` returning a known balance, `ReceivePanel` renders the address text, a copy button, and the formatted CKB balance; clicking Refresh calls the hook's `refresh()`.
+- [ ] **Step 2: Run → FAIL.**
+- [ ] **Step 3: Implement `ReceivePanel.tsx`** and wire it into `KeyvaultSetupPanel` post-create/import.
+- [ ] **Step 4: Run → PASS.**
+- [ ] **Step 5: Commit** `feat(keyvault): receive/fund panel with address, QR, and live balance`.
+
 ---
 
 ## Phase E — Verification & guardrails
