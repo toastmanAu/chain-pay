@@ -66,4 +66,10 @@ describe("RelayClient", () => {
     const c = new RelayClient({ network: "testnet", fetchImpl, baseUrl: "https://relay.test", pollIntervalMs: 1, pollTimeoutMs: 50 });
     await expect(c.pollSession("abc")).rejects.toThrow(/expired/i);
   });
+
+  it("createSession rejects when relay returns an id with illegal chars", async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(jsonResponse({ id: "../evil", ttl: 120 }));
+    const c = new RelayClient({ network: "testnet", fetchImpl, baseUrl: "https://relay.test" });
+    await expect(c.createSession()).rejects.toThrow(/invalid session id/i);
+  });
 });

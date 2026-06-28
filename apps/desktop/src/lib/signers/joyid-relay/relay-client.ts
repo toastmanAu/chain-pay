@@ -25,10 +25,17 @@ export class RelayClient {
     this.pollTimeoutMs = opts.pollTimeoutMs ?? POLL_TIMEOUT_MS;
   }
 
+  get relayOrigin(): string {
+    return this.baseUrl;
+  }
+
   async createSession(): Promise<{ id: string; callbackUrl: string }> {
     const res = await this.fetchImpl(`${this.baseUrl}/session`, { method: "POST" });
     if (!res.ok) throw new Error(`relay /session failed: ${res.status}`);
     const body = (await res.json()) as { id: string };
+    if (typeof body.id !== "string" || !/^[A-Za-z0-9_-]+$/.test(body.id)) {
+      throw new Error("relay returned an invalid session id");
+    }
     return { id: body.id, callbackUrl: `${this.baseUrl}/session/${body.id}/callback` };
   }
 

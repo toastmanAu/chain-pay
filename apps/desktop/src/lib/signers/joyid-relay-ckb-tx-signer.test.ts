@@ -17,10 +17,11 @@ beforeEach(() => {
 
 function fakeClient(overrides: Partial<Record<string, unknown>> = {}) {
   return {
-    createSession: vi.fn().mockResolvedValue({ id: "s1", callbackUrl: "https://relay/session/s1/callback" }),
+    relayOrigin: "https://relay.test",
+    createSession: vi.fn().mockResolvedValue({ id: "s1", callbackUrl: "https://relay.test/session/s1/callback" }),
     buildAuthUrl: vi.fn().mockReturnValue("https://testnet.joyid.dev/auth?x"),
     buildSignUrl: vi.fn().mockReturnValue("https://testnet.joyid.dev/sign-message?x"),
-    createTxSession: vi.fn().mockResolvedValue({ launchUrl: "https://relay/tx-launch/s1" }),
+    createTxSession: vi.fn().mockResolvedValue({ launchUrl: "https://relay.test/tx-launch/s1" }),
     pollSession: vi.fn(),
     ...overrides,
   } as unknown as import("./joyid-relay/relay-client").RelayClient;
@@ -49,6 +50,18 @@ describe("JoyIdRelaySigner", () => {
     const client = fakeClient({ pollSession: vi.fn().mockRejectedValue(new Error("timed out")) });
     const signer = new JoyIdRelaySigner({ network: "testnet", address: "ckt1qsrc", presenter, client });
     await expect(signer.signTransaction(Transaction.from({ inputs: [], outputs: [], outputsData: [], witnesses: [] }))).rejects.toThrow(/timed out/);
+    expect(presenter.dismiss).toHaveBeenCalled();
+  });
+
+  it("signTransaction rejects and calls dismiss when launchUrl is outside relay origin", async () => {
+    const client = fakeClient({
+      relayOrigin: "https://relay.test",
+      createTxSession: vi.fn().mockResolvedValue({ launchUrl: "https://evil.test/x" }),
+    });
+    const signer = new JoyIdRelaySigner({ network: "testnet", address: "ckt1qsrc", presenter, client });
+    await expect(
+      signer.signTransaction(Transaction.from({ inputs: [], outputs: [], outputsData: [], witnesses: [] })),
+    ).rejects.toThrow(/outside the configured relay origin/i);
     expect(presenter.dismiss).toHaveBeenCalled();
   });
 });

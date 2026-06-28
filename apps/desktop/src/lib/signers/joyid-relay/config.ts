@@ -15,5 +15,8 @@ export function relayBaseUrl(): string {
       "JoyID relay not configured. Set VITE_JOYID_RELAY_URL to the deployed joyid-relay Worker origin.",
     );
   }
+  if (!url.startsWith("https://")) {
+    throw new Error("VITE_JOYID_RELAY_URL must use HTTPS");
+  }
   return url.replace(/\/$/, "");
 }

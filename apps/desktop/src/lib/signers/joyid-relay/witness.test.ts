@@ -31,6 +31,14 @@ describe("derToP1363", () => {
     expect(out.slice(64)).toBe(s31.padStart(64, "0"));
   });
 
+  it("throws when the s component tag byte is not 0x02", () => {
+    const r = "a".repeat(64);
+    const s = "b".repeat(64);
+    // Replace the 0x02 tag before s with 0x03 (wrong tag)
+    const der = "3044" + "0220" + r + "0320" + s;
+    expect(() => derToP1363(der)).toThrow(/s component tag missing/i);
+  });
+
   it("passes through an already-64-byte (128 hex) signature unchanged via normalize", () => {
     const already = "1".repeat(128);
     const out = normalizeSignResult({

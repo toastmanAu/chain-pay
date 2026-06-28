@@ -1,17 +1,17 @@
 import { z } from "zod";
 
 export const AuthResultSchema = z.object({
-  address: z.string().min(1),
-  pubkey: z.string().min(1),
-  keyType: z.string().min(1),
+  address: z.string().min(1).max(256),
+  pubkey: z.string().min(1).max(256),
+  keyType: z.string().min(1).max(64),
 });
 export type AuthResult = z.infer<typeof AuthResultSchema>;
 
 export const SignResultSchema = z.object({
-  signature: z.string().min(1),
-  message: z.string().min(1),
-  pubkey: z.string().min(1),
-  keyType: z.string().min(1),
+  signature: z.string().min(1).max(8192),
+  message: z.string().min(1).max(16384),
+  pubkey: z.string().min(1).max(256),
+  keyType: z.string().min(1).max(64),
   alg: z.number(),
 });
 export type SignResult = z.infer<typeof SignResultSchema>;

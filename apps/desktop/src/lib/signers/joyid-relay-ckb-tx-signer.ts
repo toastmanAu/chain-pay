@@ -55,11 +55,13 @@ export class JoyIdRelaySigner implements CkbTxSigner {
 
     const { id, callbackUrl } = await this.client.createSession();
     const joyidSignUrl = this.client.buildSignUrl({ callbackUrl, challenge, address: this.address });
-    const { launchUrl } = await this.client.createTxSession({ id, joyidSignUrl, preview: {} });
-
-    this.presenter.showQr(launchUrl, "sign");
     this.presenter.updateStatus("awaiting-confirm");
     try {
+      const { launchUrl } = await this.client.createTxSession({ id, joyidSignUrl, preview: {} });
+      if (!launchUrl.startsWith(this.client.relayOrigin + "/")) {
+        throw new Error("Relay returned a launchUrl outside the configured relay origin");
+      }
+      this.presenter.showQr(launchUrl, "sign");
       const decoded = await this.client.pollSession(id);
       const raw = parseDecoded(SignResultSchema, decoded);
       this.presenter.updateStatus("assembling");

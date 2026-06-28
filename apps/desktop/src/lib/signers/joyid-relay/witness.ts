@@ -33,6 +33,10 @@ export function derToP1363(derHexInput: string): string {
     throw new Error("Invalid DER signature: truncated");
   }
 
+  if (bytes[rEnd] !== 0x02) {
+    throw new Error("Invalid DER signature: s component tag missing");
+  }
+
   const sLen = bytes[rEnd + 1] ?? 0;
   const sStart = rEnd + 2;
   const sEnd = sStart + sLen;
