@@ -1,5 +1,15 @@
-import { describe, it, expect } from "vitest";
-import { derToP1363, normalizeSignResult } from "./witness";
+import { describe, it, expect, vi, afterEach } from "vitest";
+import { derToP1363, normalizeSignResult, assembleSignedCkbTx } from "./witness";
+
+vi.mock("@joyid/ckb", () => ({
+  buildSignedTx: vi.fn((tx, data, idx) => ({ tx, data, idx })),
+}));
+
+import { buildSignedTx } from "@joyid/ckb";
+
+afterEach(() => {
+  vi.clearAllMocks();
+});
 
 describe("derToP1363", () => {
   // DER: 30 44 02 20 <32B r> 02 20 <32B s>  → 64B r||s
@@ -31,5 +41,30 @@ describe("derToP1363", () => {
       alg: -7,
     });
     expect(out.signature).toBe(already);
+  });
+});
+
+describe("assembleSignedCkbTx", () => {
+  it("forwards bare-hex normalized fields + witnessIndexes to buildSignedTx", () => {
+    assembleSignedCkbTx(
+      { any: "tx" },
+      {
+        signature: "0x" + "1".repeat(128),
+        message: "0xdead",
+        pubkey: "0xabcd",
+        keyType: "main_key",
+        alg: -7,
+      },
+      [0, 1],
+    );
+
+    const mock = buildSignedTx as unknown as ReturnType<typeof vi.fn>;
+    expect(mock).toHaveBeenCalledTimes(1);
+
+    const [, data, idx] = mock.mock.calls[0] as unknown[];
+    expect((data as Record<string, unknown>).signature).toBe("1".repeat(128));
+    expect((data as Record<string, unknown>).message).toBe("dead");
+    expect((data as Record<string, unknown>).pubkey).toBe("abcd");
+    expect(idx).toEqual([0, 1]);
   });
 });

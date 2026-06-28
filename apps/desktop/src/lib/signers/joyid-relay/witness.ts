@@ -18,13 +18,29 @@ export function derToP1363(derHexInput: string): string {
   const der = stripHexPrefix(derHexInput);
   const bytes: number[] = [];
   for (let i = 0; i < der.length; i += 2) bytes.push(parseInt(der.slice(i, i + 2), 16));
+
+  // Validate DER format early: must start with 0x30 (SEQUENCE) and have minimum structure
+  if (bytes.length < 8 || bytes[0] !== 0x30 || bytes[2] !== 0x02) {
+    throw new Error("Invalid DER signature");
+  }
+
   // bytes[0]=0x30 seq, bytes[1]=total len, bytes[2]=0x02 int, bytes[3]=rLen
-  const rLen = bytes[3];
+  const rLen = bytes[3] ?? 0;
   const rStart = 4;
   const rEnd = rStart + rLen;
-  const sLen = bytes[rEnd + 1];
+
+  if (rEnd + 2 > bytes.length) {
+    throw new Error("Invalid DER signature: truncated");
+  }
+
+  const sLen = bytes[rEnd + 1] ?? 0;
   const sStart = rEnd + 2;
   const sEnd = sStart + sLen;
+
+  if (sEnd > bytes.length) {
+    throw new Error("Invalid DER signature: truncated");
+  }
+
   const toHex = (arr: number[]) => arr.map((b) => b.toString(16).padStart(2, "0")).join("");
   let r = toHex(bytes.slice(rStart, rEnd));
   let s = toHex(bytes.slice(sStart, sEnd));
@@ -34,10 +50,11 @@ export function derToP1363(derHexInput: string): string {
 }
 
 export function normalizeSignResult(raw: SignResult): SignResult {
-  const message = "0x" + toHexMaybeBase64url(raw.message);
+  const message = toHexMaybeBase64url(raw.message);
+  const pubkey = stripHexPrefix(raw.pubkey);
   let signature = toHexMaybeBase64url(raw.signature);
   if (signature.length !== 128) signature = derToP1363(signature);
-  return { ...raw, message, signature };
+  return { ...raw, message, pubkey, signature };
 }
 
 export function assembleSignedCkbTx(
