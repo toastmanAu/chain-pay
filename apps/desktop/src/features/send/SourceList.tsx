@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Link } from "react-router-dom";
 import { useSourcesStore } from "@/stores/sources";
 import { useNetworkConfigStore } from "@/stores/network-config";
 import { JoyIdSignModal } from "./JoyIdSignModal";
@@ -51,14 +52,22 @@ export function SourceList() {
       <JoyIdSignModal />
       <header className="flex items-center justify-between">
         <h1 className="text-xl font-semibold">Source wallets</h1>
-        <button
-          type="button"
-          onClick={() => void handleConnect()}
-          disabled={connecting}
-          className="rounded-md bg-accent px-4 py-2 text-sm font-medium text-accent-fg hover:opacity-90 disabled:opacity-50"
-        >
-          {connecting ? "Connecting…" : "Connect JoyID wallet"}
-        </button>
+        <div className="flex gap-2">
+          <button
+            type="button"
+            onClick={() => void handleConnect()}
+            disabled={connecting}
+            className="rounded-md bg-accent px-4 py-2 text-sm font-medium text-accent-fg hover:opacity-90 disabled:opacity-50"
+          >
+            {connecting ? "Connecting…" : "Connect JoyID wallet"}
+          </button>
+          <Link
+            to="/send/sources/keystore"
+            className="rounded-md border border-surface-hi bg-bg px-4 py-2 text-sm font-medium hover:opacity-90"
+          >
+            Set up local wallet
+          </Link>
+        </div>
       </header>
       {error ? <p className="text-xs text-danger">{error}</p> : null}
       {sources.length === 0 ? (

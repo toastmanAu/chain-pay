@@ -6,6 +6,8 @@ import { ScriptInfo } from "@ckb-ccc/core";
 import { KeyvaultSetupPanel } from "./KeyvaultSetupPanel";
 import { useKeyvaultStore } from "./keyvault-store";
 import { useNetworkConfigStore } from "@/stores/network-config";
+import { useSourcesStore } from "@/stores/sources";
+import { lightClient } from "@/lib/light-client/client";
 
 // ---------------------------------------------------------------------------
 // Mock heavy async dependencies used by ReceivePanel when rendered in active mode.
@@ -362,6 +364,59 @@ describe("KeyvaultSetupPanel — active state", () => {
 
     await waitFor(() => {
       expect(screen.getByRole("button", { name: /copy address/i })).toBeInTheDocument();
+    });
+  });
+});
+
+describe("KeyvaultSetupPanel — use as send source", () => {
+  beforeEach(() => {
+    useSourcesStore.setState({ sources: [], activeSourceId: null });
+    useNetworkConfigStore.setState({ network: "testnet", broadcastRpcUrl: "" });
+    vi.clearAllMocks();
+  });
+  afterEach(() => {
+    useSourcesStore.setState({ sources: [], activeSourceId: null });
+  });
+
+  it("adds a secp256k1 source and watches its lock when clicked", async () => {
+    mountBridge(makeMockBridge({ statusExists: true, createLockArgs: LOCK_ARGS }));
+    seedActiveStore();
+    render(<KeyvaultSetupPanel />);
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /use as send source/i }));
+    });
+
+    await waitFor(() => {
+      expect(useSourcesStore.getState().sources).toHaveLength(1);
+    });
+    const src = useSourcesStore.getState().sources[0]!;
+    expect(src.lockKind).toBe("secp256k1");
+    expect(src.keyvaultId).toBe("main");
+    expect(src.derivationIndex).toBe(0);
+    expect(src.joyidLockArgs).toBe(LOCK_ARGS);
+    expect(src.address).toMatch(/^ckt1/);
+
+    // The light client must be told to sync the new source's lock (fixes the
+    // affordability false-"insufficient" bug — SendPanel reads its balance).
+    // (ReceivePanel also watches the same lock for its balance display, so we
+    // assert on the lock that was watched, not an exact call count.)
+    expect(lightClient().watchLockScript).toHaveBeenCalledWith(
+      expect.objectContaining({ args: LOCK_ARGS }),
+    );
+  });
+
+  it("shows a confirmation once the source has been added", async () => {
+    mountBridge(makeMockBridge({ statusExists: true, createLockArgs: LOCK_ARGS }));
+    seedActiveStore();
+    render(<KeyvaultSetupPanel />);
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /use as send source/i }));
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText(/added to your source wallets/i)).toBeInTheDocument();
     });
   });
 });

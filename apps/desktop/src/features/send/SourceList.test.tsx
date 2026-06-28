@@ -25,6 +25,12 @@ describe("SourceList", () => {
     expect(screen.getByText(/no source wallets/i)).toBeInTheDocument();
   });
 
+  it("offers a link to set up a local keystore wallet", () => {
+    render(<MemoryRouter><SourceList /></MemoryRouter>);
+    const link = screen.getByRole("link", { name: /set up local wallet/i });
+    expect(link).toHaveAttribute("href", "/send/sources/keystore");
+  });
+
   it("renders a persisted source's label", () => {
     useSourcesStore.getState().addSource({
       id: "a", label: "Ops wallet", chain: "ckb:testnet",

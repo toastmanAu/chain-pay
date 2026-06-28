@@ -1,6 +1,11 @@
 import { useEffect, useRef, useState } from "react";
 import { useKeyvaultStore } from "./keyvault-store";
 import { ReceivePanel } from "./ReceivePanel";
+import { buildKeystoreSource } from "./keystore-source";
+import { useNetworkConfigStore } from "@/stores/network-config";
+import { useSourcesStore } from "@/stores/sources";
+import { resolveSecp256k1ScriptInfo } from "@/lib/chains/ckb/secp256k1-lock";
+import { lightClient } from "@/lib/light-client/client";
 
 // ---------------------------------------------------------------------------
 // Password entropy meter (client-side heuristic — no IPC)
@@ -105,6 +110,9 @@ export function KeyvaultSetupPanel() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [deleteConfirm, setDeleteConfirm] = useState(false);
+  const [addingSource, setAddingSource] = useState(false);
+  const [addedSource, setAddedSource] = useState(false);
+  const network = useNetworkConfigStore((s) => s.network);
 
   // SECURITY: Mnemonic lives ONLY here — NOT in the store, NOT logged.
   const [mnemonic, setMnemonic] = useState("");
@@ -188,6 +196,28 @@ export function KeyvaultSetupPanel() {
       setMode("idle");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Delete failed");
+    }
+  }
+
+  /**
+   * Promote this keystore into a secp256k1 send source: build the Source from
+   * the derived lock-args, register it, and tell the light client to sync the
+   * lock (so SendPanel sees its balance and can spend its cells).
+   */
+  async function handleUseAsSource(): Promise<void> {
+    if (!lockArgs) return;
+    setError(null);
+    setAddingSource(true);
+    try {
+      const scriptInfo = await resolveSecp256k1ScriptInfo(network);
+      const { source, lock } = buildKeystoreSource(lockArgs, network, scriptInfo);
+      useSourcesStore.getState().addSource(source);
+      await lightClient().watchLockScript(lock);
+      setAddedSource(true);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to add source");
+    } finally {
+      setAddingSource(false);
     }
   }
 
@@ -367,6 +397,25 @@ export function KeyvaultSetupPanel() {
       </div>
 
       {error && <ErrorBanner message={error} />}
+
+      {/* Promote this keystore into a send source wallet */}
+      {addedSource ? (
+        <div
+          role="status"
+          className="rounded-lg border border-green-500/40 bg-green-500/5 p-3 text-sm text-green-400"
+        >
+          ✓ Added to your source wallets. Open the <strong>Send</strong> page to pay from it.
+        </div>
+      ) : (
+        <button
+          type="button"
+          onClick={() => void handleUseAsSource()}
+          disabled={!lockArgs || addingSource}
+          className="rounded-md bg-accent px-4 py-2 text-sm font-medium text-accent-fg hover:opacity-90 disabled:opacity-50"
+        >
+          {addingSource ? "Adding…" : "Use as send source"}
+        </button>
+      )}
 
       {!deleteConfirm ? (
         <button
