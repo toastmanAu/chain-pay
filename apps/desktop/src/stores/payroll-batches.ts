@@ -76,6 +76,12 @@ interface PayrollBatchesStore {
   markBroadcastFailed: (batchId: string, error: string) => void;
   /** Operator re-arms after a broadcast failure — returns to approved and clears broadcastError. */
   retryAutoBroadcast: (batchId: string) => void;
+  /** Transition a confirmed (or post_failed) batch into posting — clears any prior postError. */
+  markPosting: (batchId: string) => void;
+  /** Record a successful journal-entry post — sets jeName and transitions to posted. */
+  markPosted: (batchId: string, jeName: string) => void;
+  /** Record a post failure — sets postError and transitions to post_failed. */
+  markPostFailed: (batchId: string, error: string) => void;
 }
 
 // PayrollBatch holds bigints inside `lines[i].fiat.minor`, `lines[i].crypto.value`,
@@ -304,6 +310,37 @@ export const usePayrollBatchesStore = create<PayrollBatchesStore>()(
             if (!canTransition(b.state, "approved")) return b;
             const { broadcastError: _be, ...rest } = b;
             return { ...rest, state: "approved" as PayrollBatchState };
+          }),
+        }));
+      },
+      markPosting: (batchId) => {
+        set((s) => ({
+          batches: s.batches.map((b) => {
+            if (b.id !== batchId) return b;
+            if (b.kind !== "payroll") return b;
+            assertCanTransition(b.state, "posting");
+            const { postError: _drop, ...rest } = b;
+            return { ...rest, state: "posting" as PayrollBatchState, updatedAt: new Date().toISOString() };
+          }),
+        }));
+      },
+      markPosted: (batchId, jeName) => {
+        set((s) => ({
+          batches: s.batches.map((b) => {
+            if (b.id !== batchId) return b;
+            if (b.kind !== "payroll") return b;
+            assertCanTransition(b.state, "posted");
+            return { ...b, state: "posted" as PayrollBatchState, jeName, updatedAt: new Date().toISOString() };
+          }),
+        }));
+      },
+      markPostFailed: (batchId, error) => {
+        set((s) => ({
+          batches: s.batches.map((b) => {
+            if (b.id !== batchId) return b;
+            if (b.kind !== "payroll") return b;
+            assertCanTransition(b.state, "post_failed");
+            return { ...b, state: "post_failed" as PayrollBatchState, postError: error, updatedAt: new Date().toISOString() };
           }),
         }));
       },

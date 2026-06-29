@@ -27,3 +27,10 @@ class TestSeed(FrappeTestCase):
         seed.run()
         after = frappe.db.count("Account", {"company": "ChainPay Test"})
         self.assertEqual(before, after)
+
+    def test_seed_delivers_postable_gl(self):
+        from crypto_payroll.setup import seed
+        seed.run()
+        year = str(frappe.utils.getdate(frappe.utils.today()).year)
+        self.assertTrue(frappe.db.exists("Fiscal Year", year))
+        self.assertTrue(frappe.db.exists("Cost Center", "Main - CPT"))

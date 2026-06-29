@@ -515,6 +515,96 @@ describe("2.7c auto-broadcast state transitions", () => {
   });
 });
 
+// ── Phase 5 Slice C: accounting-post lifecycle ───────────────────────────────
+
+describe("accounting-post lifecycle (markPosting / markPosted / markPostFailed)", () => {
+  it("drives the accounting-post lifecycle", async () => {
+    const { usePayrollBatchesStore } = await import("./payroll-batches");
+    const store = usePayrollBatchesStore.getState();
+    const addConfirmedBatch = (id: string) =>
+      store.addBatch({ ...sampleBatch, id, state: "confirmed" });
+    const get = (id: string) => store.findById(id) as PayrollBatch;
+
+    addConfirmedBatch("pbX");
+    store.markPosting("pbX");
+    expect(get("pbX").state).toBe("posting");
+    store.markPosted("pbX", "ACC-JV-0009");
+    expect(get("pbX").state).toBe("posted");
+    expect(get("pbX").jeName).toBe("ACC-JV-0009");
+  });
+
+  it("records a post failure with the error and allows retry", async () => {
+    const { usePayrollBatchesStore } = await import("./payroll-batches");
+    const store = usePayrollBatchesStore.getState();
+    const addConfirmedBatch = (id: string) =>
+      store.addBatch({ ...sampleBatch, id, state: "confirmed" });
+    const get = (id: string) => store.findById(id) as PayrollBatch;
+
+    addConfirmedBatch("pbY");
+    store.markPosting("pbY");
+    store.markPostFailed("pbY", "boom");
+    expect(get("pbY").state).toBe("post_failed");
+    expect(get("pbY").postError).toBe("boom");
+    store.markPosting("pbY"); // retry: post_failed → posting
+    expect(get("pbY").state).toBe("posting");
+  });
+
+  it("markPosting clears postError from a previous failure", async () => {
+    const { usePayrollBatchesStore } = await import("./payroll-batches");
+    const store = usePayrollBatchesStore.getState();
+    const addConfirmedBatch = (id: string) =>
+      store.addBatch({ ...sampleBatch, id, state: "confirmed" });
+    const get = (id: string) => store.findById(id) as PayrollBatch;
+
+    addConfirmedBatch("pbZ");
+    store.markPosting("pbZ");
+    store.markPostFailed("pbZ", "transient error");
+    store.markPosting("pbZ"); // retry
+    expect(get("pbZ").postError).toBeUndefined();
+  });
+});
+
+// ── Phase 5 Slice C: kind guard — vendor batches immune to accounting-post actions ──
+
+describe("accounting-post kind guard — vendor batch is never mutated", () => {
+  it("markPosting called with a vendor batch id is a no-op (state stays confirmed, no jeName/postError)", async () => {
+    const { usePayrollBatchesStore } = await import("./payroll-batches");
+    const store = usePayrollBatchesStore.getState();
+
+    const vendorBatch: VendorPaymentBatch = {
+      kind: "vendor",
+      id: "vb-guard-1",
+      createdAt: "2026-06-25T00:00:00Z",
+      updatedAt: "2026-06-25T00:00:00Z",
+      label: "Acme INV-002",
+      treasuryId: "tr_1",
+      invoiceIds: ["inv_2"],
+      vendorId: "vendor_1",
+      fxSnapshot: [],
+      lines: [
+        {
+          vendorId: "vendor_1",
+          fiat: { minor: 200n, currency: "AUD" },
+          crypto: { value: 2_000_000n, asset: "CKB", decimals: 8 },
+          fxRate: "1",
+          feeAllocated: { value: 0n, asset: "CKB", decimals: 8 },
+        },
+      ],
+      state: "confirmed",
+    };
+
+    store.addBatch(vendorBatch);
+    store.markPosting("vb-guard-1");
+
+    const got = store.findById("vb-guard-1")!;
+    expect(got.kind).toBe("vendor");
+    expect(got.state).toBe("confirmed");
+    // PayrollBatch-only fields must not have been written onto the vendor batch
+    expect((got as unknown as Record<string, unknown>)["jeName"]).toBeUndefined();
+    expect((got as unknown as Record<string, unknown>)["postError"]).toBeUndefined();
+  });
+});
+
 // ── 3a-T11: kind discriminator + v1→v2 migration ────────────────────────────
 
 describe("kind discriminator + v1→v2 migration", () => {

@@ -23,6 +23,7 @@ import { useIncomingPacketsStore } from "./stores/incoming-packets";
 import { usePayrollBatchesStore } from "./stores/payroll-batches";
 import { useCommSendRetry } from "./features/payments/useCommSendRetry";
 import { useBatchConfirmationSync } from "./lib/invoices/use-batch-confirmation-to-invoice";
+import { useBatchConfirmationToAccounting } from "./lib/accounting/use-batch-confirmation-to-accounting";
 import { isExpired } from "./lib/comm/expires-at";
 import type { OutgoingPacket } from "./lib/comm/types";
 import type { TransferPacket } from "@chain-pay/shared";
@@ -223,6 +224,7 @@ export function App() {
   useCommSendRetry({ packetForBatch, multisigForBatch });
 
   useBatchConfirmationSync();
+  useBatchConfirmationToAccounting();
 
   return (
     <AppShell>

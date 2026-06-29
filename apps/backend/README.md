@@ -35,6 +35,56 @@ and troubleshooting. HRMS and additional DocTypes are added by later slices.
 | Fiat Ramp Provider | Adapter config for Stripe / Coinbase / Transak / Banxa. Phase 5. |
 | Chain Adapter Config | Per-network settings (RPC URL fallback, light client toggle, gas defaults). |
 
+## Accounting bridge (desktop → Frappe)
+
+The Electron **main** process posts approved payroll journals to ERPNext via
+the `crypto_payroll.api.post_journal` whitelisted endpoint. Three env vars must
+be present in the **main-process environment** before launching the desktop app:
+
+| Variable | Description |
+|---|---|
+| `FRAPPE_URL` | ERPNext site base URL — **must** be the site host, e.g. `http://chainpay.localhost:8000`. Never `http://localhost:PORT` (Frappe routes by HTTP `Host` header; a bare `localhost` request returns 404). |
+| `FRAPPE_API_KEY` | API key for the Frappe service account. |
+| `FRAPPE_API_SECRET` | API secret for the Frappe service account (one-time reveal on generation). |
+
+**These values must never appear in the renderer process and must never be
+committed to the repository.**
+
+### Accounts-role requirement
+
+The `post_journal` endpoint is role-gated:
+
+```python
+frappe.only_for(["Accounts Manager", "Accounts User"])
+```
+
+The API user whose key/secret the desktop uses must hold **Accounts Manager**
+or **Accounts User** in ERPNext. To grant it:
+
+1. Log in to ERPNext as Administrator.
+2. Open the target user's document (`Settings → User`).
+3. Add **Accounts Manager** (or Accounts User) in the **Roles** table and save.
+
+The built-in Administrator account already holds all roles and can be used for
+local development.
+
+### Generating API keys
+
+In ERPNext, open the user document and click **API Access → Generate Keys** (or
+use the ⋮ menu). Copy both values — the secret is shown only once. Store them
+in your shell profile or a local secrets tool; never in source control.
+
+### Host-header routing note
+
+Frappe's `bench serve` routes requests by the HTTP `Host` header to the correct
+site. `FRAPPE_URL` must therefore resolve to the site host
+(`http://chainpay.localhost:PORT`). Node's `fetch` derives the `Host` header
+from the URL automatically, so no manual header override is needed — just set
+the URL correctly.
+
+See the full walkthrough in
+[../../docs/phase-5-slice-c-smoke-playbook.md](../../docs/phase-5-slice-c-smoke-playbook.md).
+
 ## API surface (preview)
 
 Same as `chainPay` text spec — endpoints under `/api/method/crypto_payroll.api.*`. See [../../docs/api-contract.md](../../docs/api-contract.md).

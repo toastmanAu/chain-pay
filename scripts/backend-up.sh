@@ -60,5 +60,8 @@ bench_site migrate
 log "Seeding test Company + GL accounts"
 bench_site execute crypto_payroll.setup.seed.run
 
+log "Ensuring custom fields (crypto_batch_id on Journal Entry)…"
+bench_site execute crypto_payroll.setup.custom_fields.ensure_custom_fields
+
 log "Running smoke checks"
 "$REPO_ROOT/scripts/backend-smoke.sh"

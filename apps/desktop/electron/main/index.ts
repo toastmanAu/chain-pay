@@ -16,6 +16,7 @@ import {
   resolveProfile,
   setCurrentNetwork,
 } from "./comm-transport-service";
+import { registerAccountingIpc } from "./accounting-host";
 import { registerInvoiceFilesIpc } from "./invoice-files-host";
 import { loadNetworkState, saveNetworkState } from "./network-state-store";
 import {
@@ -210,6 +211,9 @@ app.whenReady().then(async () => {
   ipcMain.handle("commTransport:resolveProfile", (_e, address: string) =>
     resolveProfile(address),
   );
+
+  // accounting handlers (Frappe Slice C bridge — credentials stay in main process)
+  registerAccountingIpc();
 
   // invoice-files handlers
   registerInvoiceFilesIpc();

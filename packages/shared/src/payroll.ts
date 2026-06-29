@@ -57,6 +57,10 @@ export interface PayrollBatch extends Identified, Timestamped {
   autoBroadcast?: boolean;
   /** RPC error string when state === "broadcast_failed". */
   broadcastError?: string;
+  /** ERPNext Journal Entry name once the batch's journal is posted. */
+  jeName?: string;
+  /** Failure message when state === "post_failed". */
+  postError?: string;
   /** Atomic guard for the broadcast_countdown → broadcast_initiating transition.
    *  Prevents duplicate Mth-sig events from re-broadcasting. */
   broadcastInFlight?: boolean;
@@ -113,6 +117,9 @@ export type PayrollBatchState =
   | "broadcast_failed"
   | "broadcasted"
   | "confirmed"
+  | "posting"
+  | "posted"
+  | "post_failed"
   | "failed"
   | "cancelled";
 

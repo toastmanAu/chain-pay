@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { PayrollBatchState } from "@chain-pay/shared";
-import { canTransition, assertCanTransition, terminalStates, nextStates } from "./state-machine";
+import { canTransition, assertCanTransition, isTerminal, terminalStates, nextStates } from "./state-machine";
 
 describe("PayrollBatch state machine", () => {
   describe("canTransition", () => {
@@ -46,7 +46,7 @@ describe("PayrollBatch state machine", () => {
       expect(canTransition("draft", "confirmed")).toBe(false);
     });
 
-    it("forbids transitions out of confirmed (terminal state)", () => {
+    it("forbids illegal transitions out of confirmed (only posting is allowed)", () => {
       expect(canTransition("confirmed", "draft")).toBe(false);
       expect(canTransition("confirmed", "calculated")).toBe(false);
       expect(canTransition("confirmed", "broadcasted")).toBe(false);
@@ -78,19 +78,36 @@ describe("PayrollBatch state machine", () => {
   });
 
   describe("terminalStates", () => {
-    it("identifies confirmed, failed, cancelled as terminal", () => {
+    it("identifies posted, failed, cancelled as terminal (confirmed is no longer terminal)", () => {
       const terminals: PayrollBatchState[] = [...terminalStates];
-      expect(terminals).toContain("confirmed");
+      expect(terminals).toContain("posted");
       expect(terminals).toContain("cancelled");
       expect(terminals).toContain("failed");
+      expect(terminals).not.toContain("confirmed"); // confirmed → posting is now valid
     });
 
-    it("does not mark draft/calculated/approved/broadcasted as terminal", () => {
+    it("does not mark draft/calculated/approved/broadcasted/confirmed as terminal", () => {
       const terminals: readonly PayrollBatchState[] = terminalStates;
       expect(terminals).not.toContain("draft");
       expect(terminals).not.toContain("calculated");
       expect(terminals).not.toContain("approved");
       expect(terminals).not.toContain("broadcasted");
+      expect(terminals).not.toContain("confirmed");
+    });
+  });
+
+  describe("Phase 5 / Slice C: accounting-post lifecycle", () => {
+    it("allows the accounting-post lifecycle", () => {
+      expect(canTransition("confirmed", "posting")).toBe(true);
+      expect(canTransition("posting", "posted")).toBe(true);
+      expect(canTransition("posting", "post_failed")).toBe(true);
+      expect(canTransition("post_failed", "posting")).toBe(true);
+    });
+
+    it("treats posted as terminal and blocks illegal post transitions", () => {
+      expect(isTerminal("posted")).toBe(true);
+      expect(canTransition("posted", "posting")).toBe(false);
+      expect(canTransition("confirmed", "posted")).toBe(false); // must go via posting
     });
   });
 
