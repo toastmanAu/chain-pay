@@ -1,0 +1,7 @@
+# pkg/
+
+This directory is produced by:
+
+    wasm-pack build --target nodejs
+
+The generated files are git-ignored. Run the command above to produce them.

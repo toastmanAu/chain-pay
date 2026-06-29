@@ -9,10 +9,16 @@ import { buildAndSend, type SendDeps } from "./build-and-send";
 const JOYID = "0xd23761b364210735c19c60561d213fb3beae2fd6172743719eff6920e020baac";
 const SECP = "0x9bd7e06f3ecf4be0f2fcd2188b23f1b9fcc88e5d4b65a8637b17723bbda3cce8";
 
-function scriptInfo(): ScriptInfo {
+function joyidScriptInfo(): ScriptInfo {
   return ScriptInfo.from({
     codeHash: JOYID, hashType: "type",
     cellDeps: [{ cellDep: { outPoint: { txHash: "0x" + "cd".repeat(32), index: 0 }, depType: "depGroup" } }],
+  });
+}
+function secp256k1ScriptInfo(): ScriptInfo {
+  return ScriptInfo.from({
+    codeHash: SECP, hashType: "type",
+    cellDeps: [{ cellDep: { outPoint: { txHash: "0x" + "ef".repeat(32), index: 0 }, depType: "depGroup" } }],
   });
 }
 function source(): Source {
@@ -43,7 +49,7 @@ function deps(over: Partial<SendDeps> = {}): SendDeps {
     listCellsForLock: vi.fn(async () => [cell()]),
     broadcast: vi.fn(async () => "0xbroadcasthash"),
     resolveRecipientLock: vi.fn(async () => Script.from({ codeHash: SECP, hashType: "type", args: "0x" + "22".repeat(20) })),
-    scriptInfo: scriptInfo(),
+    scriptInfo: joyidScriptInfo(),
     markSigning: vi.fn(),
     markBroadcasted: vi.fn(),
     markBackToBuilt: vi.fn(),
@@ -77,5 +83,46 @@ describe("buildAndSend", () => {
     await expect(buildAndSend(send(), source(), failingSigner, 1200n, d)).rejects.toThrow(/user rejected/);
     expect(d.markBackToBuilt).toHaveBeenCalledWith("snd1");
     expect(d.markBroadcasted).not.toHaveBeenCalled();
+  });
+});
+
+describe("buildAndSend — source lock kind branching", () => {
+  it("uses the JoyID lock when lockKind is absent (default/back-compat)", async () => {
+    const capturedLocks: Script[] = [];
+    const d = deps({
+      listCellsForLock: vi.fn(async (lock: Script) => { capturedLocks.push(lock); return [cell()]; }),
+    });
+    await buildAndSend(send(), source(), new MockCkbTxSigner(), 1200n, d);
+    expect(capturedLocks[0]?.codeHash).toBe(JOYID);
+  });
+
+  it("uses the secp256k1 lock when source.lockKind is 'secp256k1'", async () => {
+    const capturedLocks: Script[] = [];
+    const d = deps({
+      secp256k1ScriptInfo: secp256k1ScriptInfo(),
+      listCellsForLock: vi.fn(async (lock: Script) => { capturedLocks.push(lock); return [cell()]; }),
+    });
+    const secp256k1Source: Source = { ...source(), lockKind: "secp256k1" };
+    const res = await buildAndSend(send(), secp256k1Source, new MockCkbTxSigner(), 1200n, d);
+    expect(res.txHash).toBe("0xbroadcasthash");
+    expect(capturedLocks[0]?.codeHash).toBe(SECP);
+  });
+
+  it("uses the JoyID lock when source.lockKind is explicitly 'joyid'", async () => {
+    const capturedLocks: Script[] = [];
+    const d = deps({
+      listCellsForLock: vi.fn(async (lock: Script) => { capturedLocks.push(lock); return [cell()]; }),
+    });
+    const joyidSource: Source = { ...source(), lockKind: "joyid" };
+    await buildAndSend(send(), joyidSource, new MockCkbTxSigner(), 1200n, d);
+    expect(capturedLocks[0]?.codeHash).toBe(JOYID);
+  });
+
+  it("throws with a clear message when lockKind is 'secp256k1' but secp256k1ScriptInfo is missing", async () => {
+    const secp256k1Source: Source = { ...source(), lockKind: "secp256k1" };
+    // deps() does not include secp256k1ScriptInfo
+    await expect(
+      buildAndSend(send(), secp256k1Source, new MockCkbTxSigner(), 1200n, deps()),
+    ).rejects.toThrow(/secp256k1ScriptInfo/);
   });
 });

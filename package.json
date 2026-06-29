@@ -13,6 +13,7 @@
     "dev:desktop": "npm --workspace apps/desktop run dev",
     "build:desktop": "npm --workspace apps/desktop run build",
     "build:shared": "npm --workspace packages/shared run build",
+    "build:keyvault-wasm": "cd packages/ckb-keyvault-wasm && wasm-pack build --target nodejs",
     "typecheck": "npm --workspaces --if-present run typecheck",
     "lint": "npm --workspaces --if-present run lint"
   },

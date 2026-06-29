@@ -4,6 +4,8 @@ import { useSourcesStore } from "@/stores/sources";
 import { useSendsStore } from "@/stores/sends";
 import { useNetworkConfigStore } from "@/stores/network-config";
 import { SendHistory } from "./SendHistory";
+import { JoyIdSignModal } from "./JoyIdSignModal";
+import { UnlockModal } from "@/features/keyvault/UnlockModal";
 import type { SendOutput, SendRecord } from "@chain-pay/shared";
 import {
   sendAffordability,
@@ -48,6 +50,7 @@ export function SendPanel() {
   const [sourceId, setSourceId] = useState<string>(activeSourceId ?? sources[0]?.id ?? "");
   const [rows, setRows] = useState<PayeeRow[]>([makeRow()]);
   const [sending, setSending] = useState(false);
+  const [unlockModalOpen, setUnlockModalOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [affordability, setAffordability] = useState<Affordability | null>(null);
@@ -74,13 +77,24 @@ export function SendPanel() {
     void (async () => {
       try {
         setBalanceError(null);
-        const { resolveJoyIdScriptInfo } = await import("@/lib/chains/ckb/joyid-lock");
-        const { joyidLockAndDeps } = await import("@/lib/chains/ckb/joyid-lock");
         const { lightClient } = await import("@/lib/light-client/client");
 
-        const scriptInfo = await resolveJoyIdScriptInfo(network);
-        const { lock } = joyidLockAndDeps(scriptInfo, source.joyidLockArgs);
-        const balance = await lightClient().getLockBalance(lock);
+        let balance: bigint;
+        if (source.lockKind === "secp256k1") {
+          const { resolveSecp256k1ScriptInfo, secp256k1LockAndDeps } = await import(
+            "@/lib/chains/ckb/secp256k1-lock"
+          );
+          const scriptInfo = await resolveSecp256k1ScriptInfo(network);
+          const { lock } = secp256k1LockAndDeps(scriptInfo, source.joyidLockArgs);
+          balance = await lightClient().getLockBalance(lock);
+        } else {
+          const { resolveJoyIdScriptInfo, joyidLockAndDeps } = await import(
+            "@/lib/chains/ckb/joyid-lock"
+          );
+          const scriptInfo = await resolveJoyIdScriptInfo(network);
+          const { lock } = joyidLockAndDeps(scriptInfo, source.joyidLockArgs);
+          balance = await lightClient().getLockBalance(lock);
+        }
 
         if (!cancelled) {
           setAffordability(
@@ -138,6 +152,16 @@ export function SendPanel() {
       return;
     }
 
+    // Local-keystore (secp256k1) path: collect password via the UnlockModal first.
+    // The rest of the send runs inside handleSecp256k1Send once the password is submitted.
+    if (source.lockKind === "secp256k1") {
+      setError(null);
+      setSuccess(null);
+      setUnlockModalOpen(true);
+      return;
+    }
+
+    // JoyID relay path (default)
     setSending(true);
     setError(null);
     setSuccess(null);
@@ -177,7 +201,8 @@ export function SendPanel() {
       useSendsStore.getState().markBuilt(draft.id, 0n);
 
       const { resolveJoyIdScriptInfo } = await import("@/lib/chains/ckb/joyid-lock");
-      const { JoyIdCkbTxSigner } = await import("@/lib/signers/joyid-ckb-tx-signer");
+      const { JoyIdRelaySigner } = await import("@/lib/signers/joyid-relay-ckb-tx-signer");
+      const { makePresenter } = await import("@/stores/joyid-sign");
       const { buildAndSend } = await import("@/lib/send/build-and-send");
       const { lightClient } = await import("@/lib/light-client/client");
       const { Address, ClientPublicTestnet, ClientPublicMainnet } = await import("@ckb-ccc/core");
@@ -187,12 +212,10 @@ export function SendPanel() {
         network === "mainnet" ? new ClientPublicMainnet() : new ClientPublicTestnet();
       const scriptInfo = await resolveJoyIdScriptInfo(network);
 
-      // Forward-note #1: MUST pass source.address so signTransaction doesn't throw.
-      const signer = new JoyIdCkbTxSigner({
-        name: "ChainPay",
-        logo: "https://chainpay.local/logo.png",
-        joyidAppURL: "https://app.joy.id",
+      const signer = new JoyIdRelaySigner({
+        network,
         address: source.address,
+        presenter: makePresenter(),
       });
 
       const { txHash } = await buildAndSend(
@@ -221,13 +244,147 @@ export function SendPanel() {
     }
   }
 
+  /**
+   * secp256k1 (local-keystore) send path. Called by the UnlockModal's onSubmit
+   * after the user has entered their password.
+   *
+   * Security invariants:
+   * - `password` is a plain function parameter — it lives only in this frame.
+   * - It is passed once to `LocalKeystoreCkbTxSigner` then goes out of scope.
+   * - It is NEVER stored in Zustand, component state, or any persistent layer.
+   * - Main-process vault zeroizes the password after signing.
+   */
+  async function handleSecp256k1Send(password: string): Promise<void> {
+    // Capture source from the current render closure; guard against a race where
+    // the source is deselected between modal open and confirm.
+    const src = source;
+    if (!src) return;
+    if (!src.keyvaultId) {
+      setError("Source wallet has no associated keystore.");
+      return;
+    }
+
+    setUnlockModalOpen(false);
+    setSending(true);
+    setError(null);
+    setSuccess(null);
+
+    try {
+      const chain: SendRecord["chain"] =
+        network === "mainnet" ? "ckb:mainnet" : "ckb:testnet";
+
+      const outputs: SendOutput[] = rows.map((r) => ({
+        payeeId: r.address,
+        payeeAddress: r.address.trim(),
+        amount: {
+          asset: "CKB",
+          value: ckbStringToShannons(r.amountCkb) ?? 0n,
+          decimals: 8,
+        },
+        fiat: {
+          currency: r.currency,
+          minor: BigInt(Math.round(parseFloat(r.fiatAmount) * 100)),
+        },
+      }));
+
+      const now = new Date().toISOString();
+      const draft: SendRecord = {
+        id: crypto.randomUUID(),
+        sourceId: src.id,
+        chain,
+        outputs,
+        feeShannons: 0n,
+        state: "draft",
+        createdAt: now,
+        updatedAt: now,
+      };
+
+      useSendsStore.getState().addSend(draft);
+      useSendsStore.getState().markBuilt(draft.id, 0n);
+
+      const { resolveSecp256k1ScriptInfo } = await import("@/lib/chains/ckb/secp256k1-lock");
+      const { resolveJoyIdScriptInfo } = await import("@/lib/chains/ckb/joyid-lock");
+      const { LocalKeystoreCkbTxSigner } = await import(
+        "@/lib/signers/local-keystore-ckb-tx-signer"
+      );
+      const { buildAndSend } = await import("@/lib/send/build-and-send");
+      const { lightClient } = await import("@/lib/light-client/client");
+      const { Address, ClientPublicTestnet, ClientPublicMainnet } = await import("@ckb-ccc/core");
+
+      const host = lightClient();
+      const client =
+        network === "mainnet" ? new ClientPublicMainnet() : new ClientPublicTestnet();
+
+      // Resolve both script infos concurrently.
+      // secp256k1ScriptInfo drives the source lock; scriptInfo (JoyID) satisfies
+      // the required SendDeps.scriptInfo field (unused for secp256k1 sources in buildAndSend).
+      const [scriptInfo, secp256k1ScriptInfo] = await Promise.all([
+        resolveJoyIdScriptInfo(network),
+        resolveSecp256k1ScriptInfo(network),
+      ]);
+
+      const signer = new LocalKeystoreCkbTxSigner({
+        keyvaultId: src.keyvaultId,
+        derivationIndex: src.derivationIndex ?? 0,
+        sourceLockArgs: src.joyidLockArgs,
+        password,
+        bridge: window.chainpay.keyvault,
+      });
+
+      const { txHash } = await buildAndSend(
+        draft,
+        src,
+        signer,
+        1200n,
+        {
+          listCellsForLock: (lock) => host.listCellsForLock(lock),
+          broadcast: (tx) => host.broadcastTransaction(tx),
+          resolveRecipientLock: async (addr) => (await Address.fromString(addr, client)).script,
+          scriptInfo,
+          secp256k1ScriptInfo,
+          markSigning: (id) => useSendsStore.getState().markSigning(id),
+          markBroadcasted: (id, hash) =>
+            useSendsStore.getState().markBroadcasted(id, hash as `0x${string}`),
+          markBackToBuilt: (id) => useSendsStore.getState().markBackToBuilt(id),
+        },
+      );
+
+      // `password` leaves scope here — only the signer held it and the signer
+      // is now out of scope too. Main already zeroized inside the vault.
+      setSuccess(`Broadcasted · ${txHash}`);
+      setRows([makeRow()]);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Send failed");
+    } finally {
+      setSending(false);
+    }
+  }
+
   return (
     <div className="space-y-8">
-      <header>
-        <h1 className="text-2xl font-semibold">Send</h1>
-        <p className="mt-1 text-sm text-fg-muted">
-          Single-sig JoyID payments. Select a source wallet and add payee rows.
-        </p>
+      <JoyIdSignModal />
+      <UnlockModal
+        open={unlockModalOpen}
+        onSubmit={(password) => {
+          if (source) void handleSecp256k1Send(password);
+        }}
+        onClose={() => setUnlockModalOpen(false)}
+      />
+      <header className="flex items-start justify-between">
+        <div>
+          <h1 className="text-2xl font-semibold">Send</h1>
+          <p className="mt-1 text-sm text-fg-muted">
+            Single-sig payments. Select a source wallet and add payee rows.
+          </p>
+        </div>
+        {/* Persistent path to wallet management — adding a source must never
+            strand the user with no way back to connect/add another wallet. */}
+        <Link
+          to="/send/sources"
+          className="shrink-0 rounded-md border border-surface-hi bg-bg px-3 py-2 text-sm font-medium hover:opacity-90"
+        >
+          Manage wallets
+        </Link>
       </header>
 
       {sources.length === 0 ? (
@@ -348,7 +505,7 @@ export function SendPanel() {
               onClick={() => void handleSend()}
               // Fail-open intent: affordability===null (balance fetch failed or rows empty)
               // does NOT block send — graceful degrade. Only explicit affordable===false blocks.
-              disabled={sending || !source || affordability?.affordable === false}
+              disabled={sending || unlockModalOpen || !source || affordability?.affordable === false}
               className="rounded-md bg-accent px-5 py-2 text-sm font-medium text-accent-fg hover:opacity-90 disabled:opacity-50"
             >
               {sending ? "Sending…" : "Send"}

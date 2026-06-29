@@ -1,5 +1,5 @@
 import { NavLink } from "react-router-dom";
-import { LayoutDashboard, Vault, Calendar, FileText, Send, PenLine, Users, Settings as Cog, Wallet } from "lucide-react";
+import { LayoutDashboard, Vault, Calendar, FileText, Send, PenLine, Users, Settings as Cog, Wallet, WalletCards } from "lucide-react";
 import { useSyncStore, type CkbSyncState } from "@/stores/sync";
 
 const items = [
@@ -9,6 +9,7 @@ const items = [
   { to: "/invoices", icon: FileText, label: "Invoices" },
   { to: "/payments", icon: Send, label: "Payments" },
   { to: "/send", icon: Wallet, label: "Send" },
+  { to: "/send/sources", icon: WalletCards, label: "Wallets" },
   { to: "/sign", icon: PenLine, label: "Sign" },
   { to: "/employees", icon: Users, label: "Employees" },
   { to: "/settings", icon: Cog, label: "Settings" },

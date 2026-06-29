@@ -1,5 +1,9 @@
 import { contextBridge, ipcRenderer } from "electron";
 import type { PairedDevice } from "../main/pair-store";
+import {
+  KEYVAULT_CHANNELS,
+  type SignTxRequest,
+} from "../../../../packages/shared/src/keyvault-ipc";
 
 const platformApi = {
   platform: process.platform,
@@ -105,6 +109,56 @@ const chainpayApi = {
       preview: unknown,
     ): Promise<{ jeName: string; idempotent: boolean }> =>
       ipcRenderer.invoke("accounting:postJournal", batchId, preview),
+  },
+  keyvault: {
+    /** Check whether a keyvault blob exists on disk. */
+    status: (): Promise<{ exists: boolean }> =>
+      ipcRenderer.invoke(KEYVAULT_CHANNELS.status),
+    /** Generate a new BIP39 mnemonic, encrypt it, and persist it. */
+    create: (
+      password: string,
+    ): Promise<{ id: string; lockArgs: string; mnemonic: string }> =>
+      ipcRenderer.invoke(KEYVAULT_CHANNELS.create, { password }),
+    /** Import an existing BIP39 mnemonic phrase into a new keyvault. */
+    import: (
+      mnemonic: string,
+      password: string,
+    ): Promise<{ id: string; lockArgs: string }> =>
+      ipcRenderer.invoke(KEYVAULT_CHANNELS.import, { mnemonic, password }),
+    /** Decrypt the keyvault and return derived lock-args without signing. */
+    unlockDerive: (
+      keyvaultId: string,
+      password: string,
+      derivationIndex: number,
+    ): Promise<{ lockArgs: string }> =>
+      ipcRenderer.invoke(KEYVAULT_CHANNELS.unlockDerive, {
+        keyvaultId,
+        password,
+        derivationIndex,
+      }),
+    /** Sign a CKB tx inside main (anti-blind-sign enforced; digest recomputed in main). */
+    signTx: (req: SignTxRequest): Promise<{ signedTx: string }> =>
+      ipcRenderer.invoke(KEYVAULT_CHANNELS.signTx, req),
+    /** Export the mnemonic phrase (shown once; caller must zeroize). */
+    export: (
+      keyvaultId: string,
+      password: string,
+    ): Promise<{ mnemonic: string }> =>
+      ipcRenderer.invoke(KEYVAULT_CHANNELS.export, { keyvaultId, password }),
+    /** Re-encrypt the keyvault blob under a new password. */
+    changePassword: (
+      keyvaultId: string,
+      oldPassword: string,
+      newPassword: string,
+    ): Promise<{ ok: boolean }> =>
+      ipcRenderer.invoke(KEYVAULT_CHANNELS.changePassword, {
+        keyvaultId,
+        oldPassword,
+        newPassword,
+      }),
+    /** Permanently delete the keyvault blob from disk. */
+    delete: (keyvaultId: string): Promise<{ ok: boolean }> =>
+      ipcRenderer.invoke(KEYVAULT_CHANNELS.delete, { keyvaultId }),
   },
 };
 

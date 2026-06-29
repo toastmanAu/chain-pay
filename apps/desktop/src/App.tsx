@@ -13,6 +13,7 @@ import { InvoicesPage } from "./features/invoices/InvoicesPage";
 import { Settings } from "./features/settings/Settings";
 import { SourceList } from "./features/send/SourceList";
 import { SendPanel } from "./features/send/SendPanel";
+import { KeyvaultSetupPanel } from "./features/keyvault/KeyvaultSetupPanel";
 import { useSendConfirmationToAccounting } from "./lib/send/use-send-confirmation-to-accounting";
 import { useSyncStore } from "./stores/sync";
 import { useNetworkConfigStore } from "./stores/network-config";
@@ -246,6 +247,7 @@ export function App() {
         <Route path="/settings" element={<Settings />} />
         <Route path="/send" element={<SendPanel />} />
         <Route path="/send/sources" element={<SourceList />} />
+        <Route path="/send/sources/keystore" element={<KeyvaultSetupPanel />} />
       </Routes>
     </AppShell>
   );

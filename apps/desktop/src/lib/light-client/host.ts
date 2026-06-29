@@ -16,6 +16,10 @@ import {
   type Transaction,
 } from "@ckb-ccc/core";
 import { configFor, type CkbNetwork } from "./network-configs";
+import {
+  recentWatchBlock,
+  FRESH_WALLET_WATCH_MARGIN_BLOCKS,
+} from "./recent-watch-block";
 
 export interface SyncSnapshot {
   network: CkbNetwork;
@@ -150,6 +154,24 @@ export class LightClientHost {
       blockNumber: fromBlock,
     };
     await this.requireClient().setScripts([status], LightClientSetScriptsCommand.Partial);
+  }
+
+  /**
+   * Watch a *freshly created* wallet's lock from near the chain tip instead of
+   * genesis. A new wallet can hold nothing older than its creation, so a
+   * full-history filter sync is wasted work — and is why a just-funded balance
+   * otherwise takes a very long time (or never, within a session) to appear.
+   *
+   * Do NOT use for connected wallets that may hold pre-existing coins (JoyID,
+   * imported mnemonics) — those must watch from genesis.
+   */
+  async watchLockScriptFromRecent(
+    script: ScriptLike,
+    marginBlocks: bigint = FRESH_WALLET_WATCH_MARGIN_BLOCKS,
+  ): Promise<void> {
+    const tip = await this.requireClient().getTipHeader();
+    const from = recentWatchBlock(BigInt(tip.number ?? 0), marginBlocks);
+    await this.watchLockScript(script, from);
   }
 
   async getWatchedScripts(): Promise<ScriptStatus[]> {

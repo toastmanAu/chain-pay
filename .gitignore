@@ -5,6 +5,7 @@ out/
 build/
 .cache/
 .turbo/
+.worktrees/
 .parcel-cache/
 
 *.log
@@ -57,3 +58,5 @@ release/
 
 # Graphify output (knowledge-graph artifacts)
 graphify-out/
+
+.superpowers/

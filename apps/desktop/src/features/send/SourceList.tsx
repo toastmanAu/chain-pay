@@ -1,6 +1,8 @@
 import { useState } from "react";
+import { Link } from "react-router-dom";
 import { useSourcesStore } from "@/stores/sources";
 import { useNetworkConfigStore } from "@/stores/network-config";
+import { JoyIdSignModal } from "./JoyIdSignModal";
 import type { Source } from "@chain-pay/shared";
 
 export function SourceList() {
@@ -16,13 +18,10 @@ export function SourceList() {
     setConnecting(true);
     setError(null);
     try {
-      const { JoyIdCkbTxSigner } = await import("@/lib/signers/joyid-ckb-tx-signer");
+      const { JoyIdRelaySigner } = await import("@/lib/signers/joyid-relay-ckb-tx-signer");
+      const { makePresenter } = await import("@/stores/joyid-sign");
       const { Address, ClientPublicTestnet, ClientPublicMainnet } = await import("@ckb-ccc/core");
-      const signer = new JoyIdCkbTxSigner({
-        name: "ChainPay",
-        logo: "https://chainpay.local/logo.png",
-        joyidAppURL: "https://app.joy.id",
-      });
+      const signer = new JoyIdRelaySigner({ network, presenter: makePresenter() });
       const { address } = await signer.connect();
       const client =
         network === "mainnet" ? new ClientPublicMainnet() : new ClientPublicTestnet();
@@ -40,7 +39,11 @@ export function SourceList() {
       };
       useSourcesStore.getState().addSource(src);
       const { lightClient } = await import("@/lib/light-client/client");
-      await lightClient().watchLockScript(parsed.script);
+      // Watch from a recent block, not genesis, so a recently-funded wallet's
+      // balance appears quickly (the genesis filter-sync is the documented
+      // "fromBlock: 0n" trap). Wallets with older funds need the rescan control
+      // (backlog) — acceptable for the common SMB case of funding for the purpose.
+      await lightClient().watchLockScriptFromRecent(parsed.script);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Connect failed");
     } finally {
@@ -50,16 +53,25 @@ export function SourceList() {
 
   return (
     <section className="space-y-4">
+      <JoyIdSignModal />
       <header className="flex items-center justify-between">
         <h1 className="text-xl font-semibold">Source wallets</h1>
-        <button
-          type="button"
-          onClick={() => void handleConnect()}
-          disabled={connecting}
-          className="rounded-md bg-accent px-4 py-2 text-sm font-medium text-accent-fg hover:opacity-90 disabled:opacity-50"
-        >
-          {connecting ? "Connecting…" : "Connect JoyID wallet"}
-        </button>
+        <div className="flex gap-2">
+          <button
+            type="button"
+            onClick={() => void handleConnect()}
+            disabled={connecting}
+            className="rounded-md bg-accent px-4 py-2 text-sm font-medium text-accent-fg hover:opacity-90 disabled:opacity-50"
+          >
+            {connecting ? "Connecting…" : "Connect JoyID wallet"}
+          </button>
+          <Link
+            to="/send/sources/keystore"
+            className="rounded-md border border-surface-hi bg-bg px-4 py-2 text-sm font-medium hover:opacity-90"
+          >
+            Set up local wallet
+          </Link>
+        </div>
       </header>
       {error ? <p className="text-xs text-danger">{error}</p> : null}
       {sources.length === 0 ? (
