@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import { useSourcesStore } from "@/stores/sources";
 import { useNetworkConfigStore } from "@/stores/network-config";
 import { JoyIdSignModal } from "./JoyIdSignModal";
+import { RescanControl } from "./RescanControl";
 import type { Source } from "@chain-pay/shared";
 
 export function SourceList() {
@@ -102,13 +103,16 @@ export function SourceList() {
                   </span>
                 ) : null}
               </button>
-              <button
-                type="button"
-                onClick={() => removeSource(s.id)}
-                className="ml-3 shrink-0 rounded-md border border-surface-hi px-2 py-1 text-xs text-fg-muted hover:border-danger hover:text-danger"
-              >
-                Remove
-              </button>
+              <div className="ml-3 flex shrink-0 items-start gap-2">
+                <RescanControl source={s} />
+                <button
+                  type="button"
+                  onClick={() => removeSource(s.id)}
+                  className="rounded-md border border-surface-hi px-2 py-1 text-xs text-fg-muted hover:border-danger hover:text-danger"
+                >
+                  Remove
+                </button>
+              </div>
             </li>
           ))}
         </ul>

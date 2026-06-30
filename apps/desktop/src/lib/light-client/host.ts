@@ -20,6 +20,7 @@ import {
   recentWatchBlock,
   FRESH_WALLET_WATCH_MARGIN_BLOCKS,
 } from "./recent-watch-block";
+import { rescanLock } from "./rescan-lock";
 
 export interface SyncSnapshot {
   network: CkbNetwork;
@@ -172,6 +173,15 @@ export class LightClientHost {
     const tip = await this.requireClient().getTipHeader();
     const from = recentWatchBlock(BigInt(tip.number ?? 0), marginBlocks);
     await this.watchLockScript(script, from);
+  }
+
+  /**
+   * Re-scan an already-watched lock from `fromBlock` (0n = genesis). Use when a
+   * connected/imported wallet holds coins older than the fresh-wallet watch
+   * margin and its balance reads low. Delegates to the pure `rescanLock` helper.
+   */
+  async rescanLockFromBlock(script: ScriptLike, fromBlock: bigint): Promise<void> {
+    await rescanLock(this.requireClient(), script, fromBlock);
   }
 
   async getWatchedScripts(): Promise<ScriptStatus[]> {
