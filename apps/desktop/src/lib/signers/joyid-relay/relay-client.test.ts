@@ -72,11 +72,48 @@ describe("RelayClient", () => {
         body: JSON.stringify({
           id: "abc",
           joyidSignUrl: "https://testnet.joyid.dev/sign-message?x",
-          preview: { to: [], feeCkb: "0" },
+          preview: {
+            title: "Send CKB to 0 recipients",
+            details: [{ label: "Estimated fee", value: "0 CKB", mono: false }],
+            network: "testnet",
+          },
         }),
       }),
     );
     expect(res).toEqual({ launchUrl: "https://relay.test/tx-launch/abc" });
+  });
+
+  it("converts the desktop payment preview to the relay renderer contract", async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(
+      jsonResponse({ launchUrl: "https://relay.test/tx-launch/abc" }),
+    );
+    const c = new RelayClient({
+      network: "testnet",
+      fetchImpl,
+      baseUrl: "https://relay.test",
+    });
+
+    await c.createTxSession({
+      id: "abc",
+      joyidSignUrl: "https://testnet.joyid.dev/sign-message?x",
+      preview: { to: [{ address: "ckt1qrecipient", ckb: "64" }], feeCkb: "0.000012" },
+    });
+
+    const request = fetchImpl.mock.calls[0]?.[1] as RequestInit;
+    expect(JSON.parse(String(request.body))).toEqual({
+      id: "abc",
+      joyidSignUrl: "https://testnet.joyid.dev/sign-message?x",
+      preview: {
+        title: "Send CKB",
+        amount: "64 CKB",
+        details: [
+          { label: "Recipient", value: "ckt1qrecipient", mono: true },
+          { label: "Amount", value: "64 CKB" },
+          { label: "Estimated fee", value: "0.000012 CKB", mono: false },
+        ],
+        network: "testnet",
+      },
+    });
   });
 
   it("pollSession rejects immediately on a non-ok response", async () => {

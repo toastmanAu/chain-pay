@@ -1,6 +1,7 @@
 import { buildJoyIDURL, buildJoyIDSignMessageURL, decodeSearch } from "@joyid/common";
 import type { CkbNetwork } from "@/lib/light-client/network-configs";
 import { DAPP, POLL_INTERVAL_MS, POLL_TIMEOUT_MS, joyidOrigin, relayBaseUrl } from "./config";
+import type { SignPreview } from "./types";
 
 export interface RelayClientOpts {
   network: CkbNetwork;
@@ -42,11 +43,14 @@ export class RelayClient {
     return { id: body.id, callbackUrl: `${this.baseUrl}/session/${body.id}/callback` };
   }
 
-  async createTxSession(args: { id: string; joyidSignUrl: string; preview: unknown }): Promise<{ launchUrl: string }> {
+  async createTxSession(args: { id: string; joyidSignUrl: string; preview: SignPreview }): Promise<{ launchUrl: string }> {
     const res = await this.fetchImpl(`${this.baseUrl}/tx-session`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify(args),
+      body: JSON.stringify({
+        ...args,
+        preview: relayTxPreview(args.preview, this.network),
+      }),
     });
     if (!res.ok) throw new Error(`relay /tx-session failed: ${res.status}`);
     return (await res.json()) as { launchUrl: string };
@@ -90,4 +94,26 @@ export class RelayClient {
       "redirect",
     );
   }
+}
+
+function relayTxPreview(preview: SignPreview, network: CkbNetwork) {
+  const details = preview.to.flatMap((recipient, index) => [
+    {
+      label: preview.to.length === 1 ? "Recipient" : `Recipient ${index + 1}`,
+      value: recipient.address,
+      mono: true,
+    },
+    {
+      label: preview.to.length === 1 ? "Amount" : `Amount ${index + 1}`,
+      value: `${recipient.ckb} CKB`,
+    },
+  ]);
+  details.push({ label: "Estimated fee", value: `${preview.feeCkb} CKB`, mono: false });
+
+  return {
+    title: preview.to.length === 1 ? "Send CKB" : `Send CKB to ${preview.to.length} recipients`,
+    amount: preview.to.length === 1 ? `${preview.to[0]?.ckb ?? "0"} CKB` : undefined,
+    details,
+    network,
+  };
 }

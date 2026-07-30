@@ -60,7 +60,11 @@ export class JoyIdRelaySigner implements CkbTxSigner {
     try {
       // Forward the real recipient/amount/fee so the phone shows what it's
       // approving — never an empty preview for payment software (review M2).
-      const { launchUrl } = await this.client.createTxSession({ id, joyidSignUrl, preview: preview ?? {} });
+      const { launchUrl } = await this.client.createTxSession({
+        id,
+        joyidSignUrl,
+        preview: preview ?? { to: [], feeCkb: "0" },
+      });
       if (!launchUrl.startsWith(this.client.relayOrigin + "/")) {
         throw new Error("Relay returned a launchUrl outside the configured relay origin");
       }
