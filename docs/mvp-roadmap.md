@@ -9,7 +9,7 @@
 | 2 | CKB multisig treasury | 2-of-3 testnet treasury can pay one address end-to-end |
 | 2.5 | Payroll batch over CKB multisig | N-to-many payroll tx broadcast from a treasury |
 | 3 | EVM (Safe) treasury | 2-of-3 Safe on Sepolia can pay one address; MetaMask + WalletConnect both work as signers |
-| 4 | Accounting bridge | Confirmed CKB + EVM payments post journal entries into Frappe automatically |
+| 4 | Accounting bridge | CKB complete: submitted source record + server-derived JE; EVM follows Phase 3 |
 | 5+ | Adapter expansion | BTC watch-only, SOL adapter, fiat ramp providers, compliance exports |
 
 ## Phase 0 — Scaffold (done)
@@ -59,13 +59,17 @@ See [PHASE-1.md](../PHASE-1.md) for the next-session checklist. Highlights:
 
 ## Phase 4 — Frappe accounting bridge
 
-- Stand up local Frappe via docker-compose
-- Install ERPNext, Frappe HR, custom `crypto_payroll` app
-- Implement `accounting_bridge.py`: each confirmed payment → Journal Entry
+- ✅ Stand up local Frappe/ERPNext via Docker Compose
+- ✅ Persist confirmed CKB payment records and child lines as submitted DocTypes
+- ✅ Derive Journal Entries server-side without caller-selected accounts/amounts
+- ✅ Enforce immutable-record, batch-ID, and transaction-hash idempotency
+- EVM confirmed-payment ingestion follows Phase 3
 - Compliance export: CSV/PDF with payslip + crypto + FX + tx hash + network fee
 - REST endpoints wired per [api-contract.md](./api-contract.md)
 
-**Verification gate:** Confirmed CKB and EVM testnet payment both produce balanced journal entries in Frappe.
+**CKB verification gate:** A confirmed testnet payment produces one persisted
+source record and one balanced submitted Journal Entry; replay returns both
+existing records. Full phase gate still requires the EVM path after Phase 3.
 
 ## Phase 5+ — Adapter expansion
 

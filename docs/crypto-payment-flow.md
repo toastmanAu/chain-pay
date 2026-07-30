@@ -46,7 +46,7 @@ End-to-end lifecycle of one payment from payroll calculation to confirmed on-cha
         │ N confirmations (chain-specific)
         ▼
    ┌──────────┐
-   │confirmed │  → accounting_bridge.post_journal()  → done
+   │confirmed │  → persist source → derive/post journal → done
    └──────────┘
 
    ┌─────────┐
@@ -98,7 +98,8 @@ End-to-end lifecycle of one payment from payroll calculation to confirmed on-cha
 
 ### confirming → confirmed
 - Threshold reached (CKB: 6 blocks; EVM: 12-24 blocks depending on chain)
-- Auto-call `accounting_bridge.post_journal()`
+- Auto-call `post_confirmed_payment(record)`; Frappe submits the immutable
+  source record, then calls `post_journal(batch_id)` without a client preview
 - Mark batch as `confirmed` if all lines confirmed
 
 ### Any → failed
@@ -121,7 +122,10 @@ Phase 2 UI must make this distinction obvious. Approving ≠ signing.
 
 - Re-broadcasting an already-broadcasted tx is a no-op (chains reject duplicates).
 - Re-signing a tx with the same signer is a no-op (deduplicated by `signerHash` in `signatures[]`).
-- Journal posting is idempotent on `tx_hash` — if `accounting_bridge.post_journal(tx_hash)` is called twice, the second call returns the existing journal entry id.
+- Confirmed source persistence is digest-bound and idempotent on both external
+  batch ID and `tx_hash`.
+- Journal posting is independently idempotent on both identifiers; a replay
+  returns the existing submitted Journal Entry.
 
 ## Failure recovery
 

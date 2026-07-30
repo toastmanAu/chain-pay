@@ -37,8 +37,8 @@ and troubleshooting. HRMS and additional DocTypes are added by later slices.
 |---|---|
 | Crypto Wallet | A multisig treasury (CKB or EVM). Stores config blob, address, chain. |
 | Crypto Payee Profile | Per-employee/contractor crypto payment preferences. |
-| Crypto Payment Batch | Payroll run for a cycle — produces one multisig tx. |
-| Crypto Payment | A single output line within a batch. |
+| Crypto Payment Batch | Immutable submitted source record for a confirmed send/payroll transaction. |
+| Crypto Payment Line | A fiat + crypto output inside a confirmed payment record. |
 | Crypto Transaction | Confirmed on-chain tx with hash, block, network fee, FX rate snapshot. |
 | Crypto Exchange Rate | FX rate snapshots at payment time, for audit. |
 | Crypto Network Fee | Per-tx network fee record (separate so accounting can reference). |
@@ -48,8 +48,10 @@ and troubleshooting. HRMS and additional DocTypes are added by later slices.
 
 ## Accounting bridge (desktop → Frappe)
 
-The Electron **main** process posts approved payroll journals to ERPNext via
-the `crypto_payroll.api.post_journal` whitelisted endpoint. Three env vars must
+The Electron **main** process posts confirmed payment records to ERPNext via
+the `crypto_payroll.api.post_confirmed_payment` whitelisted endpoint. Frappe
+persists and submits the source record before deriving the Journal Entry using
+server-owned account mappings. The desktop never selects GL accounts. Three env vars must
 be present in the **main-process environment** before launching the desktop app:
 
 | Variable | Description |
@@ -63,7 +65,7 @@ committed to the repository.**
 
 ### Accounts-role requirement
 
-The `post_journal` endpoint is role-gated:
+The persistence and journal endpoints are role-gated:
 
 ```python
 frappe.only_for(["Accounts Manager", "Accounts User"])

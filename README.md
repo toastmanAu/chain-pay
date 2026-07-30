@@ -3,7 +3,9 @@
 Crypto-native payroll & accounting suite. CKB and EVM multisig treasuries, **embedded WASM CKB light client** in the desktop app, no private key custody.
 
 > [!NOTE]
-> Phases 1–3a are **shipped end-to-end on testnet** and live on `main`, with a confirmed multisig payroll batch, a working PQ-secure signature relay, mainnet network plumbing, and invoice ingest (manual entry, payee + vendor flows). EVM treasuries (Phase 3) and the Frappe accounting bridge (Phase 4) are next. See [Status](#status) for the full table and [What's actually working](#whats-actually-working) for canonical on-chain artefacts.
+> The CKB path is shipped end-to-end on testnet: multisig payroll, single-sig
+> JoyID sends, PQ-secure signature relay, invoice ingest, and server-derived
+> ERPNext journal posting. EVM treasuries remain the next major chain phase.
 
 ## Why ChainPay exists
 
@@ -37,7 +39,7 @@ The trust-minimisation half is the differentiator. The CKB light client is **emb
 | 3a | Invoice ingest — manual entry + payee flow, vendor flow, draft autosave, approve-and-queue, batch↔invoice confirmation sync | ✅ done — PR #7 merged `8a3b426` (2026-05-29); shell-level smoke clean on `main` |
 | 3b | Invoice ingest — OCR extraction + multi-invoice bundling | planned (deferred from 3a scope) |
 | 3 (EVM) | EVM (Safe) treasury — MetaMask + WalletConnect + Ledger signers | planned |
-| 4 | Frappe accounting bridge — every confirmed payment posts a journal entry | planned |
+| 4 | Frappe accounting bridge — persisted confirmed payments → server-derived journal entries | ✅ CKB path done; EVM awaits Phase 3 |
 | 5+ | BTC watch-only, SOL adapter, fiat ramps, mobile signer companion | planned |
 
 Detailed roadmap: [docs/mvp-roadmap.md](docs/mvp-roadmap.md). Phase-specific notes: [PHASE-1.md](PHASE-1.md). Comm-channel design (CEMP-PQ integration): [docs/comm-channel-design.md](docs/comm-channel-design.md).
@@ -52,6 +54,7 @@ Detailed roadmap: [docs/mvp-roadmap.md](docs/mvp-roadmap.md). Phase-specific not
 | Post-quantum signature relay (CEMP-PQ) | `packages/cemp-pq/`, `src/features/sign/` | First confirmed A↔B roundtrip 2026-05-24; ML-DSA + ML-KEM; comm keys segregated from multisig signers by design |
 | Invoice ingest (manual entry, both flows) | `src/features/invoices/` | 450 tests green on `main` post-merge; routes verified on shell smoke |
 | Mainnet network switch (UX only, no real-fund tx yet) | `src/features/settings/NetworkSection.tsx`, `electron/main/network-state-store.ts` | Manual smoke 2026-05-29: testnet → mainnet → soft-fail UX → testnet round-trip with LC IDB wipe |
+| CKB → ERPNext accounting recovery | `crypto_payroll.api.post_confirmed_payment`, desktop accounting host | Confirmed tx `0xdbafdf…ae2a` recovered at USD 0.50; submitted JE `ACC-JV-2026-00023`; source records and tx hashes now idempotency-bound |
 
 ### Why the JoyID → ckb-cli signer pivot
 
@@ -83,7 +86,7 @@ Phase 2 originally planned JoyID as the first signer transport. Discovery during
 │                    ╚══════════════════════════════════════╝ │
 └─────────────────────────────────────────────────────────────┘
 
-Phase 4: ────────────────► HTTP ────────────────►
+Accounting: ─────────────► HTTP ────────────────►
                            Frappe + ERPNext + crypto_payroll
                            (journal entries, payslips, exports)
 ```
@@ -119,8 +122,8 @@ If you're porting this WASM bundle into any other Electron / Tauri / browser app
 | Tests | Vitest + @vitest/coverage-v8 |
 | CKB | embedded `@nervosnetwork/ckb-light-client-js` (WASM) + `@ckb-ccc/core` for tx construction |
 | EVM | viem + wagmi + `@safe-global/protocol-kit` (planned, Phase 3) |
-| Backend | ERPNext + Frappe HR + custom `crypto_payroll` app (planned, Phase 4) |
-| DB (backend) | MariaDB via Frappe (planned, Phase 4) |
+| Backend | ERPNext + custom `crypto_payroll` Frappe app |
+| DB (backend) | MariaDB via Frappe |
 
 ## External dependencies that materially shape the architecture
 

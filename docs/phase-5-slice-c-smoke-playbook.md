@@ -23,11 +23,12 @@ bash scripts/backend-up.sh
 - The Docker stack is running and MariaDB is healthy.
 - `crypto_payroll` is pip-installed in the venv and migrated.
 - The seed is applied: Company `ChainPay Test` + 4 GL accounts.
-- The `crypto_batch_id` custom field exists on Journal Entry (unique, read-only).
+- The `crypto_batch_id` and `crypto_tx_hash` fields exist on Journal Entry
+  (unique, read-only).
 - A Fiscal Year covering today and a leaf Cost Center are present.
 - The 5 smoke checks pass (`ALL SMOKE CHECKS PASSED`).
 
-> **Self-healing on every call:** the `post_journal` endpoint itself calls
+> **Self-healing on every call:** the server-derived `post_journal` endpoint calls
 > `ensure_fiscal_year()` and `ensure_cost_center()` before inserting a Journal
 > Entry, so even if the seed step was skipped or the Fiscal Year rolled over,
 > the endpoint re-creates the required records on demand.
@@ -39,7 +40,7 @@ Login: **Administrator** / the `ADMIN_PASSWORD` in `docker/.env` (default: `admi
 
 ## Step 2 — Mint a Frappe API key and grant an Accounts role
 
-The `post_journal` endpoint is role-gated: `frappe.only_for(["Accounts Manager",
+The payment persistence and journal endpoints are role-gated: `frappe.only_for(["Accounts Manager",
 "Accounts User"])`. The API user whose key and secret the desktop sends **must**
 hold one of those roles.
 
@@ -146,6 +147,9 @@ The batch status transitions: `draft → signing → signed → broadcasting →
 ## Step 5 — Verify the Journal Entry
 
 Once the batch reaches `confirmed` the accounting reactor fires automatically.
+It sends a domain payment record (transaction hash, chain, payees, fiat and
+crypto values) with no GL account fields. Frappe submits that record as a
+`Crypto Payment Batch`, then derives the Journal Entry from it.
 The batch status transitions through `posting` (brief, in-flight) and then:
 
 **Expected success path:**
@@ -158,6 +162,7 @@ The batch status transitions through `posting` (brief, in-flight) and then:
    - **Status:** Submitted
    - **Company:** ChainPay Test
    - **`crypto_batch_id`:** the batch's ID
+   - **`crypto_tx_hash`:** the confirmed CKB transaction hash
    - **Accounts:** a balanced set of debit/credit rows (Salary or Wage Expense
      debited; Crypto Treasury Asset credited; Network Fee Expense if fee > 0).
    - **Cost Center:** the leaf cost center from the seed (on debit rows).
@@ -172,9 +177,9 @@ store). This exercises the double-fire guard:
 
 1. The reactor sees the batch is already in state `posting` or `posted` and
    does nothing (the in-flight guard prevents re-entry).
-2. Even if a second POST reaches Frappe, the backend checks for an existing JE
-   with the same `crypto_batch_id` and returns `{"je_name": ..., "idempotent": true}`
-   — no duplicate is created.
+2. Even if a second POST reaches Frappe, the backend verifies the replay matches
+   the submitted source record, then checks both `crypto_batch_id` and
+   `crypto_tx_hash`. It returns the existing JE and creates no duplicate.
 3. The batch stays in `posted`; the JE name is unchanged.
 
 ---
@@ -210,21 +215,14 @@ Expected:
 
 ---
 
-## Known residual — trust-the-client (Slice E prerequisite)
+## Security boundary
 
-The `post_journal` endpoint currently **trusts the caller-supplied `preview`**
-(accounts and amounts). It is bounded by the role gate and company-bound account
-existence checks, but amounts are **not** independently verified against a
-server-side source of truth (batches are not persisted in ERPNext until Slice E).
-
-**This is a production blocker.** Before any real-money use, Slice E must:
-- Persist `Crypto Payment Batch` records in ERPNext, and
-- Have `post_journal` verify (or derive) the JE from that persisted, confirmed
-  batch rather than trusting the `preview` payload.
-
-See the design spec for the full security discussion:
-`docs/superpowers/specs/2026-06-24-phase-5-slice-c-accounting-bridge-design.md`
-(§ Security → Known residual).
+The former trust-the-client blocker is closed. `post_journal(batch_id)` accepts
+no preview, account, or amount arguments. It loads a submitted, confirmed
+`Crypto Payment Batch` and derives balanced rows with company-bound server
+account mappings. The source record is immutable and digest-bound; the batch ID
+and transaction hash are independently unique. A replay with changed values or
+a reused transaction hash is rejected.
 
 ---
 
@@ -236,8 +234,8 @@ See the design spec for the full security discussion:
 | Frappe returns 404 | `FRAPPE_URL` set to `http://localhost:PORT` instead of site host | Use `http://chainpay.localhost:PORT` |
 | Frappe returns 403 | API user lacks Accounts Manager / Accounts User role | Grant the role in ERPNext User document (Step 2a) |
 | Frappe returns 417 `batch_id is required` | Batch ID missing from IPC payload | Check IPC bridge wiring |
-| Frappe returns 417 `unbalanced journal` | `buildBatchJournal` produced unbalanced output | Should not happen; check `batch-to-journal-inputs.ts` |
-| Frappe returns 417 `unknown account` | Account name in preview does not exist in ChainPay Test | Re-run `backend-up.sh` to re-apply seed |
+| Frappe returns 417 `already exists with different immutable data` | A replay changed a confirmed value | Inspect the persisted Crypto Payment Batch; do not overwrite accounting source data |
+| Frappe returns 417 `configured account is missing` | A server-owned GL account is absent | Re-run `backend-up.sh` to re-apply seed |
 | JE created but not submitted | `je.submit()` failed (e.g. missing Fiscal Year) | Re-run `backend-up.sh`; `ensure_fiscal_year()` and `ensure_cost_center()` are called by the endpoint |
-| Duplicate JE created | Idempotency field `crypto_batch_id` not unique-indexed | Check that `backend-up.sh` ran `ensure_custom_fields` successfully |
+| Duplicate JE created | Source-id custom fields are not unique-indexed | Check that `backend-up.sh` ran `ensure_custom_fields` successfully |
 | `*.localhost` does not resolve | System lacks systemd-resolved | Add `127.0.0.1 chainpay.localhost` to `/etc/hosts` |

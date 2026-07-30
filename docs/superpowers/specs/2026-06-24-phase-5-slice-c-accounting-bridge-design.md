@@ -158,6 +158,11 @@ placeholder until a dedicated lot-tracking slice. `feeFiat` is derived from the 
 
 ### Known residual — trust-the-client (closes in Slice E)
 
+> **Resolved 2026-07-30:** confirmed payment records and structured child lines
+> are now persisted and submitted in Frappe. `post_journal(batch_id)` accepts no
+> preview and derives account rows from the immutable record using server-owned
+> company mappings. Batch ID and transaction hash are unique and replay-bound.
+
 The `post_journal` endpoint currently **trusts the caller-supplied `preview`** (accounts and
 amounts). It is bounded by the role gate + company-bound account checks, but amounts are **not**
 verified against a server-side source of truth, because batches are not persisted in ERPNext

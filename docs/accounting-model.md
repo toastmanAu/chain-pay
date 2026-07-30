@@ -2,6 +2,13 @@
 
 Every confirmed crypto payment posts a balanced journal entry into ERPNext. This document specifies exactly what gets posted.
 
+## Trusted source record
+
+Before posting, Frappe persists a submitted `Crypto Payment Batch` with child
+`Crypto Payment Line` rows. Its canonical digest, external batch ID, and chain
+transaction hash are immutable and unique. The journal endpoint accepts only
+the batch ID; account names and amounts cannot be supplied in the posting call.
+
 ## Per-payment entries
 
 For a single payroll payment of `X` crypto to a payee, where the fiat-denominated obligation was `F`:
@@ -58,7 +65,14 @@ This is the minimum set for typical jurisdictions (AU/US/UK/EU). Per-jurisdictio
 - **Sanity check:** Coinbase or another independent feed; warn if > 1 % drift
 - **Manual override:** any user with `System Manager` role can override per-batch (logged to audit)
 
-## What we explicitly do not model in Phase 4
+## Current CKB accounting scope
+
+The shipped CKB send path uses the entered fiat obligation as carrying cost
+(zero-FX) and derives Salary/Wage Expense debit plus Crypto Treasury Asset
+credit. The richer fee, FX, and cost-basis rows below remain the next accounting
+extension.
+
+## What we explicitly do not model yet
 
 - Multi-currency consolidation reports (Phase 5)
 - Per-jurisdiction tax withholding calculation (relies on payroll provider rules; we just pass through the fiat amount)

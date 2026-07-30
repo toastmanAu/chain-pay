@@ -1,6 +1,8 @@
 # API contract
 
-Frappe REST endpoints exposed by the `crypto_payroll` app. All endpoints under `/api/method/crypto_payroll.api.*`. Wired up in Phase 4.
+Frappe REST endpoints exposed by the `crypto_payroll` app. Implemented methods
+are directly under `/api/method/crypto_payroll.api.*`; the remaining names are
+roadmap contracts.
 
 ## Conventions
 
@@ -39,8 +41,14 @@ Frappe REST endpoints exposed by the `crypto_payroll` app. All endpoints under `
 
 | Method | Endpoint | Body | Returns |
 |---|---|---|---|
-| GET | `crypto_payroll.api.accounting.preview_journal` | `?batch_id=<id>` | `AccountingJournalPreview` |
-| POST | `crypto_payroll.api.accounting.post_journal` | `{ tx_hash }` | `{ journal_entry_id }` |
+| POST | `crypto_payroll.api.persist_confirmed_payment` | `{ record: ConfirmedPaymentRecord }` | `{ batch_name, idempotent }` |
+| POST | `crypto_payroll.api.post_journal` | `{ batch_id }` | `{ je_name, idempotent }` |
+| POST | `crypto_payroll.api.post_confirmed_payment` | `{ record: ConfirmedPaymentRecord }` | persist + post result |
+
+`ConfirmedPaymentRecord` contains `batchId`, `sourceType`, `label`, `chain`,
+`txHash`, `confirmedAt`, and payment `lines` with fiat/crypto values. It cannot
+contain GL account selections. Frappe stores it as a submitted
+`Crypto Payment Batch` and derives the Journal Entry from server-owned mappings.
 
 ## Exchange rates
 

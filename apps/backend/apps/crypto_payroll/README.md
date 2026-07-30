@@ -40,6 +40,6 @@ crypto_payroll/
 ## Rules
 
 1. **No private keys, ever.** Backend coordinates multisig — frontends + co-signer wallets sign.
-2. **Every confirmed payment must call `accounting_bridge.post_journal()`.** No silent settlements.
+2. **Every confirmed payment must call `post_confirmed_payment(record)`.** Frappe persists the immutable source before deriving the Journal Entry; no silent settlements.
 3. **Audit log is append-only.** Use `frappe.log_error` or a dedicated DocType — never delete entries.
 4. **REST endpoints are thin.** They validate input, call a service, return shape. No business logic.
