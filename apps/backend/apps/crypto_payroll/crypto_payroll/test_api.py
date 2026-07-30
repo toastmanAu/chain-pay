@@ -1,56 +1,58 @@
+import copy
+
 import frappe
 from frappe.tests.utils import FrappeTestCase
+
+from crypto_payroll.api import (
+    persist_confirmed_payment,
+    post_confirmed_payment,
+    post_journal,
+)
 from crypto_payroll.setup import seed
 from crypto_payroll.setup.custom_fields import ensure_custom_fields
-from crypto_payroll.api import post_journal
 
 COMPANY = "ChainPay Test"
-
-# Batch IDs used by this test module.  Collected here so setUp can wipe any
-# leftovers from previous runs and keep tests idempotent.
-_BATCH_IDS = ["batch-A", "batch-B", "batch-C", "batch-D", "batch-E", "batch-SEC-1"]
+_IDS = ["secure-A", "secure-B", "secure-C", "secure-D", "secure-E"]
 
 
-def _acct(name):
-    return frappe.db.get_value("Account", {"account_name": name, "company": COMPANY}, "name")
-
-
-def _preview(batch_id, salary_minor="10000", treasury_minor="10000"):
+def _record(batch_id="secure-A", tx_byte="aa", minor="50"):
     return {
         "batchId": batch_id,
-        "entries": [
-            {"account": _acct("Salary or Wage Expense"),
-             "debit": {"currency": "USD", "minor": salary_minor}, "memo": "t"},
-            {"account": _acct("Crypto Treasury Asset"),
-             "credit": {"currency": "USD", "minor": treasury_minor}, "memo": "t"},
+        "sourceType": "send",
+        "label": f"Send {batch_id}",
+        "chain": "ckb:testnet",
+        "txHash": "0x" + tx_byte * 32,
+        "confirmedAt": "2026-07-30T08:00:00Z",
+        "lines": [
+            {
+                "payeeId": "vendor-1",
+                "fiat": {"currency": "USD", "minor": minor},
+                "crypto": {"asset": "CKB", "value": "6100000000", "decimals": 8},
+            }
         ],
     }
 
 
-def _delete_jes_for_batches(batch_ids):
-    """Hard-delete any Journal Entries (and their GL entries) for given batch IDs.
-
-    Submitted JEs have linked GL entries that prevent normal cancel+delete.
-    We purge the GL rows first, then force-delete the JE at the DB layer.
-    This is test-only housekeeping; never use outside of test teardown.
-    """
-    for bid in batch_ids:
-        existing = frappe.db.get_all(
-            "Journal Entry", filters={"crypto_batch_id": bid}, fields=["name"]
+def _delete_test_records():
+    for batch_id in _IDS:
+        jes = frappe.db.get_all(
+            "Journal Entry", filters={"crypto_batch_id": batch_id}, pluck="name"
         )
-        for je in existing:
-            je_name = je["name"]
-            # Remove linked GL entries so the JE can be deleted.
+        for je_name in jes:
             frappe.db.delete("GL Entry", {"voucher_no": je_name})
-            # Also remove Payment Ledger entries if present (ERPNext ≥14).
             frappe.db.delete("Payment Ledger Entry", {"voucher_no": je_name})
-            # Force-delete the JE itself regardless of docstatus.
             frappe.db.delete("Journal Entry Account", {"parent": je_name})
             frappe.db.delete("Journal Entry", {"name": je_name})
+        batch_names = frappe.db.get_all(
+            "Crypto Payment Batch", filters={"external_id": batch_id}, pluck="name"
+        )
+        for name in batch_names:
+            frappe.db.delete("Crypto Payment Line", {"parent": name})
+            frappe.db.delete("Crypto Payment Batch", {"name": name})
     frappe.db.commit()
 
 
-class TestPostJournal(FrappeTestCase):
+class TestConfirmedPaymentAccounting(FrappeTestCase):
     @classmethod
     def setUpClass(cls):
         super().setUpClass()
@@ -58,134 +60,152 @@ class TestPostJournal(FrappeTestCase):
         ensure_custom_fields()
 
     def setUp(self):
-        """Wipe leftover JEs so each test starts from a clean slate."""
-        _delete_jes_for_batches(_BATCH_IDS)
+        _delete_test_records()
 
-    # ------------------------------------------------------------------
-    # Original 4 tests (unchanged behaviour)
-    # ------------------------------------------------------------------
+    def test_persists_submitted_confirmed_record_with_child_lines(self):
+        result = persist_confirmed_payment(_record())
+        self.assertFalse(result["idempotent"])
+        batch = frappe.get_doc("Crypto Payment Batch", result["batch_name"])
+        self.assertEqual(batch.docstatus, 1)
+        self.assertEqual(batch.state, "confirmed")
+        self.assertEqual(batch.external_id, "secure-A")
+        self.assertEqual(batch.tx_hash, "0x" + "aa" * 32)
+        self.assertEqual(batch.fiat_total_minor, "50")
+        self.assertEqual(batch.payments[0].fiat_minor, "50")
+        self.assertEqual(len(batch.record_digest), 64)
 
-    def test_posts_balanced_submitted_je_with_batch_id(self):
-        res = post_journal("batch-A", _preview("batch-A"))
-        self.assertFalse(res["idempotent"])
-        je = frappe.get_doc("Journal Entry", res["je_name"])
-        self.assertEqual(je.docstatus, 1)               # submitted
-        self.assertEqual(je.crypto_batch_id, "batch-A")
-        self.assertEqual(je.total_debit, je.total_credit)
+    def test_posts_server_derived_balanced_journal_for_fifty_cents(self):
+        result = post_confirmed_payment(_record())
+        je = frappe.get_doc("Journal Entry", result["je_name"])
+        self.assertEqual(je.docstatus, 1)
+        self.assertEqual(je.crypto_batch_id, "secure-A")
+        self.assertEqual(je.crypto_tx_hash, "0x" + "aa" * 32)
+        self.assertEqual(float(je.total_debit), 0.5)
+        self.assertEqual(float(je.total_credit), 0.5)
+        accounts = {row.account for row in je.accounts}
+        self.assertTrue(any(name.startswith("Salary or Wage Expense") for name in accounts))
+        self.assertTrue(any(name.startswith("Crypto Treasury Asset") for name in accounts))
 
-    def test_idempotent_repost_returns_same_je(self):
-        first = post_journal("batch-B", _preview("batch-B"))
-        second = post_journal("batch-B", _preview("batch-B"))
+    def test_record_and_journal_replays_are_idempotent(self):
+        first = post_confirmed_payment(_record("secure-B", "bb"))
+        second = post_confirmed_payment(_record("secure-B", "bb"))
         self.assertEqual(first["je_name"], second["je_name"])
+        self.assertTrue(second["record_idempotent"])
         self.assertTrue(second["idempotent"])
-        count = frappe.db.count("Journal Entry", {"crypto_batch_id": "batch-B"})
-        self.assertEqual(count, 1)
+        self.assertEqual(
+            frappe.db.count("Journal Entry", {"crypto_batch_id": "secure-B"}), 1
+        )
+        self.assertEqual(
+            frappe.db.count("Crypto Payment Batch", {"external_id": "secure-B"}), 1
+        )
 
-    def test_accepts_desktop_account_labels_and_resolves_company_names(self):
-        preview = _preview("batch-A")
-        preview["entries"][0]["account"] = "Salary or Wage Expense"
-        preview["entries"][1]["account"] = "Crypto Treasury Asset"
-        res = post_journal("batch-A", preview)
-        je = frappe.get_doc("Journal Entry", res["je_name"])
-        self.assertEqual(je.accounts[0].account, _acct("Salary or Wage Expense"))
-        self.assertEqual(je.accounts[1].account, _acct("Crypto Treasury Asset"))
+    def test_replay_with_changed_amount_is_rejected(self):
+        persist_confirmed_payment(_record("secure-C", "cc", "50"))
+        changed = _record("secure-C", "cc", "5000")
+        with self.assertRaises(frappe.ValidationError):
+            persist_confirmed_payment(changed)
 
-    def test_existing_draft_is_not_reported_as_posted(self):
-        seed.ensure_fiscal_year()
-        draft = frappe.get_doc(
+    def test_transaction_hash_cannot_be_rebound_to_another_record(self):
+        persist_confirmed_payment(_record("secure-C", "cc"))
+        with self.assertRaises(frappe.ValidationError):
+            persist_confirmed_payment(_record("secure-D", "cc"))
+
+    def test_matching_legacy_journal_is_bound_to_tx_hash_without_duplication(self):
+        persist_confirmed_payment(_record("secure-D", "dd"))
+        expense = frappe.db.get_value(
+            "Account",
+            {"account_name": "Salary or Wage Expense", "company": COMPANY},
+            "name",
+        )
+        treasury = frappe.db.get_value(
+            "Account",
+            {"account_name": "Crypto Treasury Asset", "company": COMPANY},
+            "name",
+        )
+        legacy = frappe.get_doc(
             {
                 "doctype": "Journal Entry",
                 "voucher_type": "Journal Entry",
                 "company": COMPANY,
-                "posting_date": frappe.utils.today(),
-                "crypto_batch_id": "batch-E",
+                "posting_date": "2026-07-30",
+                "crypto_batch_id": "secure-D",
                 "accounts": [
                     {
-                        "account": _acct("Salary or Wage Expense"),
-                        "debit_in_account_currency": 100,
+                        "account": expense,
+                        "debit_in_account_currency": 0.5,
                         "cost_center": seed.ensure_cost_center(),
                     },
-                    {
-                        "account": _acct("Crypto Treasury Asset"),
-                        "credit_in_account_currency": 100,
-                    },
+                    {"account": treasury, "credit_in_account_currency": 0.5},
                 ],
             }
         )
-        draft.insert(ignore_permissions=True)
+        legacy.insert(ignore_permissions=True)
+        legacy.submit()
         frappe.db.commit()
 
-        with self.assertRaises(frappe.ValidationError):
-            post_journal("batch-E", _preview("batch-E"))
+        result = post_journal("secure-D")
+        self.assertTrue(result["idempotent"])
+        self.assertEqual(result["je_name"], legacy.name)
+        migrated = frappe.get_doc("Journal Entry", legacy.name)
+        self.assertEqual(migrated.crypto_tx_hash, "0x" + "dd" * 32)
+        self.assertEqual(
+            frappe.db.count("Journal Entry", {"crypto_batch_id": "secure-D"}), 1
+        )
 
-    def test_unbalanced_rejected(self):
+    def test_post_requires_a_persisted_submitted_record(self):
         with self.assertRaises(frappe.ValidationError):
-            post_journal("batch-C", _preview("batch-C", salary_minor="10000", treasury_minor="9000"))
+            post_journal("secure-E")
 
-    def test_missing_account_rejected(self):
-        bad = _preview("batch-D")
-        bad["entries"][0]["account"] = "No Such Account - CPT"
+    def test_client_cannot_supply_accounts_to_post_journal(self):
+        persist_confirmed_payment(_record("secure-E", "ee"))
+        with self.assertRaises(TypeError):
+            post_journal(
+                "secure-E",
+                {"entries": [{"account": "Attacker Controlled Account"}]},
+            )
+
+    def test_malformed_or_non_positive_values_are_rejected(self):
+        bad_hash = _record()
+        bad_hash["txHash"] = "0x1234"
         with self.assertRaises(frappe.ValidationError):
-            post_journal("batch-D", bad)
+            persist_confirmed_payment(bad_hash)
 
-    # ------------------------------------------------------------------
-    # Fix 1: role-gate negative test
-    # ------------------------------------------------------------------
+        zero = _record()
+        zero["lines"][0]["fiat"]["minor"] = "0"
+        with self.assertRaises(frappe.ValidationError):
+            persist_confirmed_payment(zero)
+
+        unsupported_currency = _record()
+        unsupported_currency["lines"][0]["fiat"]["currency"] = "AUD"
+        with self.assertRaises(frappe.ValidationError):
+            persist_confirmed_payment(unsupported_currency)
+
+        mixed = _record()
+        second = copy.deepcopy(mixed["lines"][0])
+        second["payeeId"] = "vendor-2"
+        second["fiat"]["currency"] = "AUD"
+        mixed["lines"].append(second)
+        with self.assertRaises(frappe.ValidationError):
+            persist_confirmed_payment(mixed)
 
     def test_rejects_caller_without_accounts_role(self):
-        """frappe.only_for must block a user with no Accounts role.
-
-        frappe.only_for is a no-op when local.flags.in_test is True (Frappe
-        design — Administrator and test runs are always allowed).  To exercise
-        the gate we temporarily clear in_test, switch to a roleless throwaway
-        user, assert PermissionError, then restore both before returning.
-
-        The throwaway user is created fresh so the test makes no assumptions
-        about pre-existing users in the environment.
-        """
-        # Create a throwaway user with no Accounts-related roles.
-        throwaway_email = "roleless-test-user@chainpay.test"
+        throwaway_email = "roleless-accounting-user@chainpay.test"
         if not frappe.db.exists("User", throwaway_email):
-            u = frappe.get_doc({
-                "doctype": "User",
-                "email": throwaway_email,
-                "first_name": "Roleless",
-                "send_welcome_email": 0,
-            })
-            u.insert(ignore_permissions=True)
+            frappe.get_doc(
+                {
+                    "doctype": "User",
+                    "email": throwaway_email,
+                    "first_name": "Roleless",
+                    "send_welcome_email": 0,
+                }
+            ).insert(ignore_permissions=True)
             frappe.db.commit()
 
-        # Temporarily disable in_test so only_for performs the real check.
         frappe.local.flags.in_test = False
         frappe.set_user(throwaway_email)
         try:
             with self.assertRaises(frappe.PermissionError):
-                post_journal("batch-SEC-1", _preview("batch-SEC-1"))
+                persist_confirmed_payment(_record())
         finally:
             frappe.local.flags.in_test = True
             frappe.set_user("Administrator")
-
-    # ------------------------------------------------------------------
-    # Fix 2: company-bind account check
-    # ------------------------------------------------------------------
-
-    def test_account_from_wrong_company_rejected(self):
-        """Accounts not belonging to COMPANY must be rejected.
-
-        The company-bound check is frappe.db.exists("Account",
-        {"name": account, "company": COMPANY}).  An account name that looks
-        valid but carries a different company suffix (e.g. "- XX") does not
-        exist for COMPANY and must raise ValidationError.
-
-        Note: the existing test_missing_account_rejected already exercises the
-        rejection path for a fully non-existent name.  This test additionally
-        proves that the company field is part of the filter: an account name
-        that would pass a bare exists("Account", name) check is still rejected
-        when the company doesn't match.  We use a name with a foreign suffix
-        ("- XX") that cannot exist in this single-company environment.
-        """
-        bad = _preview("batch-D")
-        # Substitute an account name that carries a different company suffix.
-        bad["entries"][0]["account"] = "Salary or Wage Expense - XX"
-        with self.assertRaises(frappe.ValidationError):
-            post_journal("batch-D", bad)

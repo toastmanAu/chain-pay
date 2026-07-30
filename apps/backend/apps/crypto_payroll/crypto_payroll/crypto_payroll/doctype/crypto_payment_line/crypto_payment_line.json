@@ -1,0 +1,16 @@
+{
+  "doctype": "DocType",
+  "name": "Crypto Payment Line",
+  "module": "Crypto Payroll",
+  "istable": 1,
+  "editable_grid": 1,
+  "fields": [
+    { "fieldname": "payee_id",       "fieldtype": "Data", "label": "Payee ID", "reqd": 1 },
+    { "fieldname": "fiat_currency",  "fieldtype": "Data", "label": "Fiat currency", "reqd": 1 },
+    { "fieldname": "fiat_minor",     "fieldtype": "Data", "label": "Fiat minor units", "reqd": 1 },
+    { "fieldname": "crypto_asset",   "fieldtype": "Data", "label": "Crypto asset", "reqd": 1 },
+    { "fieldname": "crypto_value",   "fieldtype": "Data", "label": "Crypto smallest units", "reqd": 1 },
+    { "fieldname": "crypto_decimals","fieldtype": "Int",  "label": "Crypto decimals", "reqd": 1 }
+  ],
+  "permissions": []
+}

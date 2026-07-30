@@ -9,16 +9,25 @@
   "is_submittable": 1,
   "fields": [
     { "fieldname": "label",         "fieldtype": "Data",  "label": "Label",         "reqd": 1 },
-    { "fieldname": "treasury",      "fieldtype": "Link",  "options": "Crypto Wallet", "label": "Treasury", "reqd": 1 },
-    { "fieldname": "cycle_start",   "fieldtype": "Date",  "label": "Cycle start",   "reqd": 1 },
-    { "fieldname": "cycle_end",     "fieldtype": "Date",  "label": "Cycle end",     "reqd": 1 },
+    { "fieldname": "external_id",   "fieldtype": "Data",  "label": "ChainPay record ID", "unique": 1 },
+    { "fieldname": "source_type",   "fieldtype": "Select","label": "Source type", "options": "send\npayroll" },
+    { "fieldname": "chain",         "fieldtype": "Data",  "label": "Chain" },
+    { "fieldname": "confirmed_at",  "fieldtype": "Datetime", "label": "Confirmed at" },
+    { "fieldname": "fiat_currency", "fieldtype": "Data",  "label": "Fiat currency" },
+    { "fieldname": "fiat_total_minor", "fieldtype": "Data", "label": "Fiat total (minor units)" },
+    { "fieldname": "record_digest", "fieldtype": "Data",  "label": "Immutable record digest", "unique": 1, "read_only": 1 },
+    { "fieldname": "payments",      "fieldtype": "Table", "options": "Crypto Payment Line", "label": "Payments" },
+    { "fieldname": "journal_entry", "fieldtype": "Link", "options": "Journal Entry", "label": "Journal Entry", "read_only": 1, "allow_on_submit": 1 },
+    { "fieldname": "treasury",      "fieldtype": "Link",  "options": "Crypto Wallet", "label": "Treasury" },
+    { "fieldname": "cycle_start",   "fieldtype": "Date",  "label": "Cycle start" },
+    { "fieldname": "cycle_end",     "fieldtype": "Date",  "label": "Cycle end" },
     { "fieldname": "fx_snapshot",   "fieldtype": "Long Text", "label": "FX snapshot JSON" },
     { "fieldname": "state",         "fieldtype": "Select","label": "State",
       "options": "draft\ncalculated\napproved\nbroadcasted\nconfirmed\nfailed\ncancelled",
       "default": "draft", "reqd": 1 },
     { "fieldname": "pending_tx_id", "fieldtype": "Data",  "label": "Pending tx id (multisig coordinator)" },
-    { "fieldname": "tx_hash",       "fieldtype": "Data",  "label": "Broadcast tx hash" },
-    { "fieldname": "journal_posted","fieldtype": "Check", "label": "Accounting journal posted", "default": 0 }
+    { "fieldname": "tx_hash",       "fieldtype": "Data",  "label": "Broadcast tx hash", "unique": 1 },
+    { "fieldname": "journal_posted","fieldtype": "Check", "label": "Accounting journal posted", "default": 0, "allow_on_submit": 1 }
   ],
   "permissions": [
     { "role": "System Manager", "read": 1, "write": 1, "create": 1, "submit": 1, "delete": 1 }

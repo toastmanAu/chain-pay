@@ -17,10 +17,10 @@ echo "$apps" | grep -qw erpnext        || fail "erpnext not installed"
 echo "$apps" | grep -qw crypto_payroll || fail "crypto_payroll not installed"
 ok "both apps installed"
 
-log "3. The 4 DocTypes exist"
+log "3. The 5 DocTypes exist"
 count="$(bench_site execute frappe.client.get_count \
   --kwargs '{"doctype":"DocType","filters":{"module":"Crypto Payroll"}}' | tr -dc '0-9')"
-[ "$count" = "4" ] && ok "4 DocTypes" || fail "expected 4 DocTypes, got '$count'"
+[ "$count" = "5" ] && ok "5 DocTypes" || fail "expected 5 DocTypes, got '$count'"
 
 log "4. Seed present (Company + 4 accounts)"
 bench_site execute frappe.client.get_value \

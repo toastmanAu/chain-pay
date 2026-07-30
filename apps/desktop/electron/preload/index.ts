@@ -105,10 +105,13 @@ const chainpayApi = {
   },
   accounting: {
     postJournal: (
-      batchId: string,
-      preview: unknown,
-    ): Promise<{ jeName: string; idempotent: boolean }> =>
-      ipcRenderer.invoke("accounting:postJournal", batchId, preview),
+      record: unknown,
+    ): Promise<{
+      jeName: string;
+      idempotent: boolean;
+      recordName: string;
+      recordIdempotent: boolean;
+    }> => ipcRenderer.invoke("accounting:postJournal", record),
   },
   keyvault: {
     /** Check whether a keyvault blob exists on disk. */

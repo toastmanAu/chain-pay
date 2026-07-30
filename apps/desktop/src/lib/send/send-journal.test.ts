@@ -7,6 +7,7 @@ vi.mock("@/lib/accounting/ipc", () => ({ postJournal }));
 
 import {
   buildSendJournal,
+  buildConfirmedSendRecord,
   DEFAULT_SEND_ACCOUNT_MAP,
   postSendJournal,
 } from "./send-journal";
@@ -26,13 +27,25 @@ function confirmedSend(): SendRecord {
     ],
     feeShannons: 120000n,
     state: "confirmed",
-    txHash: "0xabc123def4567890",
+    txHash: `0x${"ab".repeat(32)}`,
     createdAt: "2026-06-25T00:00:00Z",
     updatedAt: "2026-06-25T00:00:00Z",
   };
 }
 
 describe("buildSendJournal", () => {
+  it("builds an immutable source record without client-selected ledger accounts", () => {
+    const record = buildConfirmedSendRecord(confirmedSend());
+    expect(record).toMatchObject({
+      batchId: "snd1",
+      sourceType: "send",
+      chain: "ckb:testnet",
+      lines: [{ payeeId: "vendor-1", fiat: { currency: "AUD", minor: 10000n } }],
+    });
+    expect(JSON.stringify(record, (_key, value) => typeof value === "bigint" ? value.toString() : value))
+      .not.toContain("Salary or Wage Expense");
+  });
+
   it("produces a balanced zero-FX journal (debit expense, credit treasury)", () => {
     const preview = buildSendJournal(confirmedSend(), DEFAULT_SEND_ACCOUNT_MAP);
     expect(preview.batchId).toBe("snd1");
@@ -81,10 +94,7 @@ describe("postSendJournal recovery", () => {
     await postSendJournal(send.id);
 
     expect(postJournal).toHaveBeenCalledTimes(1);
-    expect(postJournal).toHaveBeenCalledWith(
-      send.id,
-      expect.objectContaining({ batchId: send.id }),
-    );
+    expect(postJournal).toHaveBeenCalledWith(expect.objectContaining({ batchId: send.id }));
     const recovered = useSendsStore.getState().sends[0]!;
     expect(recovered.state).toBe("posted");
     expect(recovered.txHash).toBe(send.txHash);

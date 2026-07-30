@@ -1,6 +1,7 @@
 import {
   buildBatchJournal,
   type AccountingJournalPreview,
+  type ConfirmedPaymentRecord,
   type FiatAmount,
   type PayrollBatch,
   type PayrollBatchLine,
@@ -63,4 +64,26 @@ export function buildBatchJournalForBatch(
     networkFeeExpense: map.networkFeeExpense,
     fxGainLoss: map.fxGainLoss,
   });
+}
+
+export function buildConfirmedPayrollRecord(batch: PayrollBatch): ConfirmedPaymentRecord {
+  if (!batch.pendingTxId) {
+    throw new Error(`batch ${batch.id} has no pendingTxId; cannot persist accounting`);
+  }
+  if (batch.lines.length === 0) {
+    throw new Error(`batch ${batch.id} has no payment lines; cannot persist accounting`);
+  }
+  return {
+    batchId: batch.id,
+    sourceType: "payroll",
+    label: batch.label,
+    chain: "ckb:testnet",
+    txHash: batch.pendingTxId as TransactionHash,
+    confirmedAt: batch.updatedAt,
+    lines: batch.lines.map((line) => ({
+      payeeId: line.payeeId,
+      fiat: { ...line.fiat },
+      crypto: { ...line.crypto },
+    })),
+  };
 }

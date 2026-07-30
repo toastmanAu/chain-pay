@@ -1,6 +1,5 @@
 import { usePayrollBatchesStore } from "@/stores/payroll-batches";
-import { DEFAULT_ACCOUNT_MAP } from "./account-map";
-import { buildBatchJournalForBatch } from "./batch-to-journal-inputs";
+import { buildConfirmedPayrollRecord } from "./batch-to-journal-inputs";
 import { postJournal } from "./ipc";
 
 /**
@@ -26,8 +25,8 @@ export async function postBatchJournal(batchId: string): Promise<void> {
 
   store.markPosting(batchId);
   try {
-    const preview = buildBatchJournalForBatch(batch, DEFAULT_ACCOUNT_MAP);
-    const { jeName } = await postJournal(batchId, preview);
+    const record = buildConfirmedPayrollRecord(batch);
+    const { jeName } = await postJournal(record);
     usePayrollBatchesStore.getState().markPosted(batchId, jeName);
   } catch (err) {
     const message = err instanceof Error ? err.message : "unknown posting error";

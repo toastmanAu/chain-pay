@@ -3,6 +3,27 @@ import type { TransactionHash } from "./types";
 import type { FiatAmount, Money } from "./money";
 import type { JournalEntry, AccountingJournalPreview } from "./payroll";
 
+export interface ConfirmedPaymentLine {
+  payeeId: string;
+  fiat: FiatAmount;
+  crypto: Money;
+}
+
+/**
+ * Immutable accounting source record sent to Frappe after chain confirmation.
+ * Ledger accounts are deliberately absent: account selection belongs to the
+ * trusted backend, not the renderer or Electron client.
+ */
+export interface ConfirmedPaymentRecord {
+  batchId: string;
+  sourceType: "send" | "payroll";
+  label: string;
+  chain: ChainId;
+  txHash: TransactionHash;
+  confirmedAt: string;
+  lines: ConfirmedPaymentLine[];
+}
+
 export interface PaymentJournalInput {
   payeeId: string;
   /** F — salary fiat recognized as expense. */

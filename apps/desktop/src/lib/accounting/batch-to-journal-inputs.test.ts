@@ -1,13 +1,17 @@
 import { describe, it, expect } from "vitest";
 import type { PayrollBatch } from "@chain-pay/shared";
 import { DEFAULT_ACCOUNT_MAP } from "./account-map";
-import { buildBatchJournalForBatch } from "./batch-to-journal-inputs";
+import {
+  buildBatchJournalForBatch,
+  buildConfirmedPayrollRecord,
+} from "./batch-to-journal-inputs";
 
 function batch(over: Partial<PayrollBatch> = {}): PayrollBatch {
   return {
-    kind: "payroll", id: "pb_1", createdAt: "t", updatedAt: "t",
+    kind: "payroll", id: "pb_1",
+    createdAt: "2026-07-30T00:00:00Z", updatedAt: "2026-07-30T01:00:00Z",
     label: "L", treasuryId: "tr1", cycleStart: "a", cycleEnd: "b",
-    fxSnapshot: [], state: "confirmed", pendingTxId: "0xabc123",
+    fxSnapshot: [], state: "confirmed", pendingTxId: `0x${"ab".repeat(32)}`,
     lines: [{
       payeeId: "alice",
       fiat: { currency: "USD", minor: 200000n },
@@ -20,6 +24,22 @@ function batch(over: Partial<PayrollBatch> = {}): PayrollBatch {
 }
 
 describe("buildBatchJournalForBatch", () => {
+  it("builds a domain source record with no client-selected GL accounts", () => {
+    const record = buildConfirmedPayrollRecord(batch());
+    expect(record).toMatchObject({
+      batchId: "pb_1",
+      sourceType: "payroll",
+      chain: "ckb:testnet",
+      lines: [{ payeeId: "alice", fiat: { currency: "USD", minor: 200000n } }],
+    });
+    const json = JSON.stringify(
+      record,
+      (_key, value) => (typeof value === "bigint" ? value.toString() : value),
+    );
+    expect(json).not.toContain("Salary or Wage Expense");
+    expect(json).not.toContain("Crypto Treasury Asset");
+  });
+
   it("maps a zero-fee line to a balanced two-line journal (no fee/FX lines)", () => {
     const preview = buildBatchJournalForBatch(batch(), DEFAULT_ACCOUNT_MAP);
     expect(preview.batchId).toBe("pb_1");

@@ -53,6 +53,13 @@ describe("postBatchJournal", () => {
     postJournal.mockResolvedValue({ jeName: "ACC-JV-1", idempotent: false });
     await postBatchJournal("pbZ");
     expect(postJournal).toHaveBeenCalledTimes(1);
+    expect(postJournal).toHaveBeenCalledWith(
+      expect.objectContaining({
+        batchId: "pbZ",
+        sourceType: "payroll",
+        lines: [expect.objectContaining({ payeeId: "p1" })],
+      }),
+    );
     expect(usePayrollBatchesStore.getState().batches.find((b) => b.id === "pbZ")!.state).toBe(
       "posted",
     );
