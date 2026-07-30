@@ -12,6 +12,13 @@
 
 export type CkbNetwork = "mainnet" | "testnet";
 
+/**
+ * The WASM database worker opens its IndexedDB database using the configured
+ * store path verbatim. This is the chain/indexer cache; deleting it is safe
+ * because the light client can reconstruct it from the network.
+ */
+export const LIGHT_CLIENT_CHAIN_DATABASE = "data/store";
+
 const RPC_BLOCK = `
 [rpc]
 listen_address = "127.0.0.1:9000"
@@ -21,7 +28,7 @@ export const MAINNET_CONFIG = `
 chain = "mainnet"
 
 [store]
-path = "data/store"
+path = "${LIGHT_CLIENT_CHAIN_DATABASE}"
 
 [network]
 path = "data/network"
@@ -71,7 +78,7 @@ export const TESTNET_CONFIG = `
 chain = "testnet"
 
 [store]
-path = "data/store"
+path = "${LIGHT_CLIENT_CHAIN_DATABASE}"
 
 [network]
 path = "data/network"

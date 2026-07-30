@@ -15,12 +15,17 @@ import {
   type ScriptLike,
   type Transaction,
 } from "@ckb-ccc/core";
-import { configFor, type CkbNetwork } from "./network-configs";
+import {
+  configFor,
+  LIGHT_CLIENT_CHAIN_DATABASE,
+  type CkbNetwork,
+} from "./network-configs";
 import {
   recentWatchBlock,
   FRESH_WALLET_WATCH_MARGIN_BLOCKS,
 } from "./recent-watch-block";
-import { rescanLock } from "./rescan-lock";
+import { deleteIndexedDbDatabase, rescanLock } from "./rescan-lock";
+import { reconcileLiveCells } from "./reconcile-live-cells";
 
 export interface SyncSnapshot {
   network: CkbNetwork;
@@ -46,6 +51,7 @@ const POLL_INTERVAL_MS = 5_000;
  */
 export class LightClientHost {
   private client: LightClient | null = null;
+  private startPromise: Promise<void> | null = null;
   private network: CkbNetwork | null = null;
   private startedAt = 0;
   private pollHandle: ReturnType<typeof setInterval> | null = null;
@@ -70,10 +76,29 @@ export class LightClientHost {
   }
 
   async start(network: CkbNetwork): Promise<void> {
-    if (this.client) {
-      if (this.network === network) return;
-      await this.stop();
+    if (this.client && this.network === network) return;
+
+    // React StrictMode intentionally runs mount effects twice in development.
+    // LightClient.start() is asynchronous, so checking only `this.client`
+    // allows both calls through before the first one assigns the instance.
+    // Serialize starts to keep exactly one WASM worker/IndexedDB owner alive.
+    if (this.startPromise) {
+      await this.startPromise;
+      if (this.client && this.network === network) return;
+      return this.start(network);
     }
+
+    const startPromise = this.startUnlocked(network);
+    this.startPromise = startPromise;
+    try {
+      await startPromise;
+    } finally {
+      if (this.startPromise === startPromise) this.startPromise = null;
+    }
+  }
+
+  private async startUnlocked(network: CkbNetwork): Promise<void> {
+    if (this.client) await this.stop();
 
     const secretKey = loadOrCreateSecretKey(network);
     const client = new LightClient();
@@ -178,10 +203,27 @@ export class LightClientHost {
   /**
    * Re-scan an already-watched lock from `fromBlock` (0n = genesis). Use when a
    * connected/imported wallet holds coins older than the fresh-wallet watch
-   * margin and its balance reads low. Delegates to the pure `rescanLock` helper.
+   * margin or the local index contains stale cells.
+   *
+   * Upstream `set_scripts(Delete)` does not purge indexed cells. A correct
+   * rescan therefore rebuilds the recoverable chain database, restarts the
+   * workers, and restores all script watches.
    */
   async rescanLockFromBlock(script: ScriptLike, fromBlock: bigint): Promise<void> {
-    await rescanLock(this.requireClient(), script, fromBlock);
+    const network = this.network;
+    if (!network) throw new Error("light client not started");
+
+    await rescanLock(
+      {
+        getScripts: () => this.requireClient().getScripts(),
+        stop: () => this.stop(),
+        deleteChainIndex: () => deleteIndexedDbDatabase(LIGHT_CLIENT_CHAIN_DATABASE),
+        start: () => this.start(network),
+        setScripts: (scripts, command) => this.requireClient().setScripts(scripts, command),
+      },
+      script,
+      fromBlock,
+    );
   }
 
   async getWatchedScripts(): Promise<ScriptStatus[]> {
@@ -190,22 +232,53 @@ export class LightClientHost {
 
   /** Convenience: total CKB balance (in shannons) for a lock script. */
   async getLockBalance(script: ScriptLike): Promise<bigint> {
-    const capacity = await this.requireClient().getCellsCapacity({
-      script,
-      scriptType: "lock",
-      scriptSearchMode: "exact",
-    });
-    return BigInt(capacity);
+    const cells = await this.listCellsForLock(script);
+    return cells.reduce((total, cell) => total + cell.cellOutput.capacity, 0n);
   }
 
-  /** List unspent cells belonging to a lock script (paginated, max 100/page). */
-  async listCellsForLock(script: ScriptLike, limit = 100): Promise<Cell[]> {
-    const response = await this.requireClient().getCells(
-      { script, scriptType: "lock", scriptSearchMode: "exact" },
-      "asc",
-      limit,
-    );
-    return response.cells.map((c) =>
+  /**
+   * List reconciled unspent cells belonging to a lock script.
+   *
+   * The upstream IndexedDB backend can retain a cell created and spent within
+   * one matched block. Cross-checking candidate cells against locally indexed
+   * transaction inputs prevents stale cells from entering balances or sends.
+   */
+  async listCellsForLock(
+    script: ScriptLike,
+    limit = Number.POSITIVE_INFINITY,
+  ): Promise<Cell[]> {
+    const client = this.requireClient();
+    const searchKey = { script, scriptType: "lock" as const, scriptSearchMode: "exact" as const };
+    const rawCells = [];
+    let cellCursor: Hex | undefined;
+
+    while (rawCells.length < limit) {
+      const response = await client.getCells(
+        searchKey,
+        "asc",
+        Math.min(100, limit - rawCells.length),
+        cellCursor,
+      );
+      rawCells.push(...response.cells);
+      if (response.cells.length === 0 || response.lastCursor === cellCursor) break;
+      cellCursor = hexFrom(response.lastCursor);
+    }
+
+    const transactions = [];
+    let transactionCursor: Hex | undefined;
+    while (true) {
+      const response = await client.getTransactions(
+        { ...searchKey, groupByTransaction: true },
+        "asc",
+        100,
+        transactionCursor,
+      );
+      transactions.push(...response.transactions.map((entry) => entry.transaction));
+      if (response.transactions.length === 0 || response.lastCursor === transactionCursor) break;
+      transactionCursor = hexFrom(response.lastCursor);
+    }
+
+    return reconcileLiveCells(rawCells, transactions).map((c) =>
       Cell.from({
         outPoint: OutPoint.from({
           txHash: hexFrom(c.outPoint.txHash),

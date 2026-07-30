@@ -48,6 +48,6 @@ describe("RescanControl", () => {
     setup();
     fireEvent.click(screen.getByRole("button", { name: /rescan/i }));
     fireEvent.click(screen.getByRole("button", { name: /from genesis/i }));
-    expect(await screen.findByText(/balance updates as the light client syncs/i)).toBeInTheDocument();
+    expect(await screen.findByText(/balances update as the shared light-client index syncs/i)).toBeInTheDocument();
   });
 });

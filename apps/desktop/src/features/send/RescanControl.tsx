@@ -91,8 +91,8 @@ export function RescanControl({
           {error ? <p className="text-xs text-danger">{error}</p> : null}
           {rescanning !== null ? (
             <p className="text-xs text-fg-muted">
-              Rescanning from block {rescanning.toString()} — balance updates as the light client
-              syncs (can take minutes from genesis).
+              Rebuilding all watched wallets from block {rescanning.toString()} — balances update
+              as the shared light-client index syncs (can take minutes from genesis).
             </p>
           ) : null}
         </div>
