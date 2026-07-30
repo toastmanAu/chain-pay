@@ -8,7 +8,7 @@ COMPANY = "ChainPay Test"
 
 # Batch IDs used by this test module.  Collected here so setUp can wipe any
 # leftovers from previous runs and keep tests idempotent.
-_BATCH_IDS = ["batch-A", "batch-B", "batch-C", "batch-D", "batch-SEC-1"]
+_BATCH_IDS = ["batch-A", "batch-B", "batch-C", "batch-D", "batch-E", "batch-SEC-1"]
 
 
 def _acct(name):
@@ -80,6 +80,43 @@ class TestPostJournal(FrappeTestCase):
         self.assertTrue(second["idempotent"])
         count = frappe.db.count("Journal Entry", {"crypto_batch_id": "batch-B"})
         self.assertEqual(count, 1)
+
+    def test_accepts_desktop_account_labels_and_resolves_company_names(self):
+        preview = _preview("batch-A")
+        preview["entries"][0]["account"] = "Salary or Wage Expense"
+        preview["entries"][1]["account"] = "Crypto Treasury Asset"
+        res = post_journal("batch-A", preview)
+        je = frappe.get_doc("Journal Entry", res["je_name"])
+        self.assertEqual(je.accounts[0].account, _acct("Salary or Wage Expense"))
+        self.assertEqual(je.accounts[1].account, _acct("Crypto Treasury Asset"))
+
+    def test_existing_draft_is_not_reported_as_posted(self):
+        seed.ensure_fiscal_year()
+        draft = frappe.get_doc(
+            {
+                "doctype": "Journal Entry",
+                "voucher_type": "Journal Entry",
+                "company": COMPANY,
+                "posting_date": frappe.utils.today(),
+                "crypto_batch_id": "batch-E",
+                "accounts": [
+                    {
+                        "account": _acct("Salary or Wage Expense"),
+                        "debit_in_account_currency": 100,
+                        "cost_center": seed.ensure_cost_center(),
+                    },
+                    {
+                        "account": _acct("Crypto Treasury Asset"),
+                        "credit_in_account_currency": 100,
+                    },
+                ],
+            }
+        )
+        draft.insert(ignore_permissions=True)
+        frappe.db.commit()
+
+        with self.assertRaises(frappe.ValidationError):
+            post_journal("batch-E", _preview("batch-E"))
 
     def test_unbalanced_rejected(self):
         with self.assertRaises(frappe.ValidationError):

@@ -11,6 +11,7 @@
   ],
   "scripts": {
     "dev:desktop": "npm --workspace apps/desktop run dev",
+    "dev:desktop:accounting": "bash scripts/desktop-accounting-dev.sh",
     "build:desktop": "npm --workspace apps/desktop run build",
     "build:shared": "npm --workspace packages/shared run build",
     "build:keyvault-wasm": "cd packages/ckb-keyvault-wasm && wasm-pack build --target nodejs",

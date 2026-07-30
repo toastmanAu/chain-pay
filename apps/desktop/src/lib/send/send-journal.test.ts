@@ -1,6 +1,15 @@
-import { describe, it, expect } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { SendRecord } from "@chain-pay/shared";
-import { buildSendJournal, DEFAULT_SEND_ACCOUNT_MAP } from "./send-journal";
+import { useSendsStore } from "@/stores/sends";
+
+const { postJournal } = vi.hoisted(() => ({ postJournal: vi.fn() }));
+vi.mock("@/lib/accounting/ipc", () => ({ postJournal }));
+
+import {
+  buildSendJournal,
+  DEFAULT_SEND_ACCOUNT_MAP,
+  postSendJournal,
+} from "./send-journal";
 
 function confirmedSend(): SendRecord {
   return {
@@ -41,9 +50,86 @@ describe("buildSendJournal", () => {
     expect(() => buildSendJournal(s, DEFAULT_SEND_ACCOUNT_MAP)).toThrow(/no txHash/);
   });
 
+  it("rejects a zero fiat valuation before contacting Frappe", () => {
+    const s = confirmedSend();
+    s.outputs[0]!.fiat.minor = 0n;
+    expect(() => buildSendJournal(s, DEFAULT_SEND_ACCOUNT_MAP)).toThrow(
+      /Accounting fiat value is required/,
+    );
+  });
+
   it("all journal entry memos start with 'Send ' (not 'Payroll')", () => {
     const preview = buildSendJournal(confirmedSend(), DEFAULT_SEND_ACCOUNT_MAP);
     const memos = preview.entries.map((e) => e.memo);
     expect(memos.every((m) => m?.startsWith("Send "))).toBe(true);
+  });
+});
+
+describe("postSendJournal recovery", () => {
+  beforeEach(() => {
+    postJournal.mockReset();
+    useSendsStore.setState({ sends: [] });
+  });
+
+  it("retries a committed post_failed send through accounting only and preserves its txHash", async () => {
+    const send = confirmedSend();
+    send.state = "post_failed";
+    send.postError = "FRAPPE_URL not configured";
+    useSendsStore.setState({ sends: [send] });
+    postJournal.mockResolvedValue({ jeName: "ACC-JV-RECOVERED", idempotent: false });
+
+    await postSendJournal(send.id);
+
+    expect(postJournal).toHaveBeenCalledTimes(1);
+    expect(postJournal).toHaveBeenCalledWith(
+      send.id,
+      expect.objectContaining({ batchId: send.id }),
+    );
+    const recovered = useSendsStore.getState().sends[0]!;
+    expect(recovered.state).toBe("posted");
+    expect(recovered.txHash).toBe(send.txHash);
+    expect(recovered.journalEntryName).toBe("ACC-JV-RECOVERED");
+    expect(recovered.postError).toBeUndefined();
+  });
+
+  it("coalesces concurrent Retry clicks into one idempotent Frappe POST", async () => {
+    const send = confirmedSend();
+    send.state = "post_failed";
+    useSendsStore.setState({ sends: [send] });
+
+    let resolvePost!: (value: { jeName: string; idempotent: boolean }) => void;
+    postJournal.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolvePost = resolve;
+        }),
+    );
+
+    const first = postSendJournal(send.id);
+    const second = postSendJournal(send.id);
+    expect(second).toBe(first);
+    expect(postJournal).toHaveBeenCalledTimes(1);
+
+    resolvePost({ jeName: "ACC-JV-EXISTING", idempotent: true });
+    await Promise.all([first, second]);
+    expect(useSendsStore.getState().sends[0]).toMatchObject({
+      state: "posted",
+      journalEntryName: "ACC-JV-EXISTING",
+      txHash: send.txHash,
+    });
+  });
+
+  it("records an accounting error without losing the committed transaction identity", async () => {
+    const send = confirmedSend();
+    useSendsStore.setState({ sends: [send] });
+    postJournal.mockRejectedValue(new Error("Frappe 503"));
+
+    await postSendJournal(send.id);
+
+    expect(useSendsStore.getState().sends[0]).toMatchObject({
+      state: "post_failed",
+      postError: "Frappe 503",
+      txHash: send.txHash,
+    });
   });
 });

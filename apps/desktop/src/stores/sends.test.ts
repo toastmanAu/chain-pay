@@ -92,11 +92,47 @@ describe("useSendsStore", () => {
     expect(failed.postError).toBe("timeout");
     // Retry cycle
     useSendsStore.getState().markPosting("retry");
+    expect(
+      useSendsStore.getState().sends.find((r) => r.id === "retry")!.postError,
+    ).toBeUndefined();
     useSendsStore.getState().markPosted("retry", "ACC-JV-9999");
     const posted = useSendsStore.getState().sends.find((r) => r.id === "retry")!;
     expect(posted.state).toBe("posted");
     expect(posted.journalEntryName).toBe("ACC-JV-9999");
     expect(posted.postError).toBeUndefined();
+  });
+
+  it("recovers a persisted in-flight post as safely retryable after restart", async () => {
+    const { useSendsStore, INTERRUPTED_POST_ERROR } = await import("./sends");
+    const posting = makeSend("interrupted");
+    posting.state = "posting";
+    posting.txHash = "0xcommitted";
+    useSendsStore.setState({ sends: [posting] });
+
+    useSendsStore.getState().recoverInterruptedPostings();
+
+    expect(useSendsStore.getState().sends[0]).toMatchObject({
+      state: "post_failed",
+      postError: INTERRUPTED_POST_ERROR,
+      txHash: "0xcommitted",
+    });
+  });
+
+  it("adds a missing accounting valuation to a post_failed send without changing its txHash", async () => {
+    const { useSendsStore } = await import("./sends");
+    const send = makeSend("valuation");
+    send.state = "post_failed";
+    send.txHash = "0xalreadycommitted";
+    send.outputs[0]!.fiat.minor = 0n;
+    useSendsStore.setState({ sends: [send] });
+
+    useSendsStore.getState().updateAccountingValues("valuation", [12345n]);
+
+    expect(useSendsStore.getState().sends[0]).toMatchObject({
+      state: "post_failed",
+      txHash: "0xalreadycommitted",
+      outputs: [{ fiat: { currency: "AUD", minor: 12345n } }],
+    });
   });
 
   it("exercises markBackToBuilt from signing state", async () => {

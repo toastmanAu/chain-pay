@@ -64,4 +64,12 @@ describe("postJournalToFrappe", () => {
     expect(body.preview.entries[0].debit.minor).toBe("200000");
     expect(body.preview.entries[1].credit.minor).toBe("200000");
   });
+
+  it("rejects a malformed success response instead of marking the send posted", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ message: { idempotent: false } }),
+    }));
+    await expect(postJournalToFrappe("b1", preview)).rejects.toThrow(/invalid response/);
+  });
 });

@@ -1,5 +1,7 @@
+import { useState } from "react";
 import { useSendsStore } from "@/stores/sends";
 import { postSendJournal } from "@/lib/send/send-journal";
+import { formatFiatMinor, parseFiatMajorToMinor } from "@/lib/send/fiat-value";
 import type { SendRecord, SendState } from "@chain-pay/shared";
 
 export function SendHistory() {
@@ -76,15 +78,21 @@ function SendRow({ send }: { send: SendRecord }) {
       ) : null}
 
       {send.state === "post_failed" ? (
-        <div className="flex items-center gap-2">
-          <p className="text-xs text-danger">{send.postError ?? "Post failed"}</p>
-          <button
-            type="button"
-            onClick={() => void postSendJournal(send.id)}
-            className="rounded-md border border-surface-hi bg-bg px-2 py-1 text-xs text-fg-muted hover:text-fg"
-          >
-            Retry
-          </button>
+        <div className="space-y-2">
+          <div className="flex items-center gap-2">
+            <p className="text-xs text-danger">{send.postError ?? "Post failed"}</p>
+            <button
+              type="button"
+              onClick={() => void postSendJournal(send.id)}
+              className="rounded-md border border-surface-hi bg-bg px-2 py-1 text-xs text-fg-muted hover:text-fg"
+            >
+              Retry accounting only
+            </button>
+          </div>
+          {send.outputs.some((output) => output.fiat.minor <= 0n) ||
+          send.postError?.includes("Accounting fiat value") ? (
+            <AccountingValueEditor send={send} />
+          ) : null}
         </div>
       ) : null}
 
@@ -98,7 +106,7 @@ function SendRow({ send }: { send: SendRecord }) {
               </span>
               {o.fiat.minor > 0n ? (
                 <span>
-                  ({o.fiat.currency} {(Number(o.fiat.minor) / 100).toFixed(2)})
+                  ({o.fiat.currency} {formatFiatMinor(o.fiat.minor)})
                 </span>
               ) : null}
             </li>
@@ -106,6 +114,62 @@ function SendRow({ send }: { send: SendRecord }) {
         </ul>
       ) : null}
     </li>
+  );
+}
+
+function AccountingValueEditor({ send }: { send: SendRecord }) {
+  const [values, setValues] = useState(() =>
+    send.outputs.map((output) =>
+      output.fiat.minor > 0n ? formatFiatMinor(output.fiat.minor) : "",
+    ),
+  );
+  const [error, setError] = useState<string | null>(null);
+
+  function save(): void {
+    const minorValues = values.map((value) => parseFiatMajorToMinor(value) ?? 0n);
+    try {
+      useSendsStore.getState().updateAccountingValues(send.id, minorValues);
+      setError(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not save accounting values");
+    }
+  }
+
+  return (
+    <div className="space-y-2 rounded-md border border-warn/40 bg-warn/10 p-3">
+      <p className="text-xs text-fg">
+        This committed payment has no fiat valuation. Enter the actual accounting
+        value; ChainPay will post the existing transaction hash and will not broadcast again.
+      </p>
+      {send.outputs.map((output, index) => (
+        <label key={`${output.payeeId}-${index}`} className="flex items-center gap-2 text-xs">
+          <span className="min-w-0 flex-1 truncate">
+            Output {index + 1} value ({output.fiat.currency})
+          </span>
+          <input
+            aria-label={`Output ${index + 1} accounting value in ${output.fiat.currency}`}
+            type="number"
+            min="0.01"
+            step="0.01"
+            value={values[index] ?? ""}
+            onChange={(event) =>
+              setValues((current) =>
+                current.map((value, i) => (i === index ? event.target.value : value)),
+              )
+            }
+            className="w-32 rounded-md border border-surface-hi bg-bg px-2 py-1 text-right text-fg"
+          />
+        </label>
+      ))}
+      <button
+        type="button"
+        onClick={save}
+        className="rounded-md border border-surface-hi bg-bg px-2 py-1 text-xs text-fg-muted hover:text-fg"
+      >
+        Save accounting value
+      </button>
+      {error ? <p className="text-xs text-danger">{error}</p> : null}
+    </div>
   );
 }
 

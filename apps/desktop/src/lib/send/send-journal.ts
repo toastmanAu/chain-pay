@@ -27,8 +27,18 @@ export const DEFAULT_SEND_ACCOUNT_MAP: SendAccountMap = {
   fxGainLoss: "FX Gain/Loss",
 };
 
+const postingBySend = new Map<string, Promise<void>>();
+
 export function buildSendJournal(send: SendRecord, map: SendAccountMap): AccountingJournalPreview {
   if (!send.txHash) throw new Error(`send ${send.id} has no txHash; cannot build journal`);
+  for (const output of send.outputs) {
+    if (output.fiat.minor <= 0n) {
+      throw new Error(
+        `Accounting fiat value is required for ${output.payeeId}; ` +
+          "enter a positive value before retrying",
+      );
+    }
+  }
   const txHash = send.txHash as TransactionHash;
   const payments: PaymentJournalInput[] = send.outputs.map((o) => ({
     payeeId: o.payeeId,
@@ -52,7 +62,7 @@ export function buildSendJournal(send: SendRecord, map: SendAccountMap): Account
  * Post a confirmed send's JE. Mirrors postBatchJournal: confirmed|post_failed →
  * posting → posted|post_failed. Never throws — failures land as post_failed.
  */
-export async function postSendJournal(sendId: string): Promise<void> {
+async function runPostSendJournal(sendId: string): Promise<void> {
   const store = useSendsStore.getState();
   const send = store.sends.find((s) => s.id === sendId);
   if (!send) return;
@@ -67,4 +77,21 @@ export async function postSendJournal(sendId: string): Promise<void> {
     const message = err instanceof Error ? err.message : "unknown posting error";
     useSendsStore.getState().markPostFailed(sendId, message);
   }
+}
+
+/**
+ * Single-flight accounting recovery. Repeated confirmation events or Retry
+ * clicks for the same send share one POST. This function has no dependency on
+ * the transaction builder or broadcaster: a send with a txHash is never sent
+ * to the chain again from the accounting recovery path.
+ */
+export function postSendJournal(sendId: string): Promise<void> {
+  const existing = postingBySend.get(sendId);
+  if (existing) return existing;
+
+  const posting = runPostSendJournal(sendId).finally(() => {
+    if (postingBySend.get(sendId) === posting) postingBySend.delete(sendId);
+  });
+  postingBySend.set(sendId, posting);
+  return posting;
 }

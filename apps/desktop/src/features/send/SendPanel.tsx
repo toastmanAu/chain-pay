@@ -13,6 +13,7 @@ import {
   type Affordability,
 } from "@/lib/send";
 import { ckbStringToShannons, shannonsToCkbString } from "@/lib/send/ckb-amount";
+import { parseFiatMajorToMinor } from "@/lib/send/fiat-value";
 
 const SHANNONS_PER_CKB = 100_000_000n;
 /** Minimum cell capacity: 61 CKB for a secp recipient cell. */
@@ -31,7 +32,7 @@ function makeRow(): PayeeRow {
     id: crypto.randomUUID(),
     address: "",
     amountCkb: "",
-    fiatAmount: "0",
+    fiatAmount: "",
     currency: "USD",
   };
 }
@@ -137,6 +138,13 @@ export function SendPanel() {
       if (shannons < MIN_RECIPIENT_CKB * SHANNONS_PER_CKB) {
         return `Minimum send per payee is ${MIN_RECIPIENT_CKB} CKB (minimum cell capacity).`;
       }
+      const fiatMinor = parseFiatMajorToMinor(r.fiatAmount);
+      if (fiatMinor === null || fiatMinor <= 0n) {
+        return "Each payee must have a positive fiat accounting value.";
+      }
+      if (!/^[A-Z]{3}$/.test(r.currency)) {
+        return "Each payee must have a three-letter fiat currency code.";
+      }
     }
     return null;
   }
@@ -181,7 +189,7 @@ export function SendPanel() {
         },
         fiat: {
           currency: r.currency,
-          minor: BigInt(Math.round(parseFloat(r.fiatAmount) * 100)),
+          minor: parseFiatMajorToMinor(r.fiatAmount) ?? 0n,
         },
       }));
 
@@ -283,7 +291,7 @@ export function SendPanel() {
         },
         fiat: {
           currency: r.currency,
-          minor: BigInt(Math.round(parseFloat(r.fiatAmount) * 100)),
+          minor: parseFiatMajorToMinor(r.fiatAmount) ?? 0n,
         },
       }));
 
@@ -420,7 +428,7 @@ export function SendPanel() {
             <div className="grid grid-cols-[1fr_120px_120px_80px_auto] gap-2 text-xs font-medium text-fg-muted">
               <span>Payee address</span>
               <span>CKB amount</span>
-              <span>Fiat amount</span>
+              <span>Fiat value (required)</span>
               <span>Currency</span>
               <span />
             </div>
@@ -444,9 +452,9 @@ export function SendPanel() {
                 />
                 <input
                   type="number"
-                  min="0"
+                  min="0.01"
                   step="0.01"
-                  placeholder="0.00"
+                  placeholder="0.01+"
                   value={r.fiatAmount}
                   onChange={(e) => updateRow(r.id, { fiatAmount: e.target.value })}
                   className={inputCls}

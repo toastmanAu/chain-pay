@@ -64,4 +64,21 @@ describe("SendHistory — Mark confirmed button", () => {
       screen.queryByRole("button", { name: /mark confirmed/i }),
     ).toBeNull();
   });
+
+  it("lets a post_failed send capture its missing valuation before accounting retry", () => {
+    const send = makeSend("send-zero", "post_failed");
+    send.outputs[0]!.fiat.minor = 0n;
+    send.postError = "Accounting fiat value is required";
+    useSendsStore.setState({ sends: [send] });
+    render(<SendHistory />);
+
+    fireEvent.change(
+      screen.getByRole("spinbutton", { name: /output 1 accounting value/i }),
+      { target: { value: "123.45" } },
+    );
+    fireEvent.click(screen.getByRole("button", { name: /save accounting value/i }));
+
+    expect(useSendsStore.getState().sends[0]!.outputs[0]!.fiat.minor).toBe(12345n);
+    expect(useSendsStore.getState().sends[0]!.txHash).toBe(send.txHash);
+  });
 });

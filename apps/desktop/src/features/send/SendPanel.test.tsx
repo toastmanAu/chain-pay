@@ -183,14 +183,15 @@ function renderSend(): void {
   );
 }
 
-/** Fill the first payee row with an address and a CKB amount (as a string). */
-function fillRow(address: string, ckb: string): void {
+/** Fill the first payee row with a complete, accounting-postable payment. */
+function fillRow(address: string, ckb: string, fiat = "1.00"): void {
   // Address is the first text input
   const textInputs = screen.getAllByRole("textbox");
   fireEvent.change(textInputs[0]!, { target: { value: address } });
   // CKB amount is the first number (spinbutton) input
   const numberInputs = screen.getAllByRole("spinbutton");
   fireEvent.change(numberInputs[0]!, { target: { value: ckb } });
+  fireEvent.change(numberInputs[1]!, { target: { value: fiat } });
 }
 
 // ---------------------------------------------------------------------------
@@ -373,6 +374,21 @@ describe("SendPanel — JoyID path (existing behaviour)", () => {
     const calls = buildAndSendSpy.mock.calls as Array<[unknown, unknown, { kind: string }]>;
     const signer = calls[0]![2];
     expect(signer!.kind).toBe("joyid");
+  });
+
+  it("blocks broadcast when the fiat accounting value is zero", async () => {
+    useSourcesStore.getState().addSource(JOYID_SOURCE);
+    renderSend();
+    fillRow("ckt1qrecipient", "100", "0");
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /^send$/i }));
+    });
+
+    expect(buildAndSendSpy).not.toHaveBeenCalled();
+    expect(
+      screen.getByText(/positive fiat accounting value/i),
+    ).toBeInTheDocument();
   });
 
   it("shows an error when there is no source selected", () => {

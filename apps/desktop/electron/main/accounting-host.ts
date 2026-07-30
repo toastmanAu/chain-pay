@@ -43,7 +43,16 @@ export async function postJournalToFrappe(
     const detail = await res.text();
     throw new Error(`Frappe post_journal failed (${res.status}): ${detail.slice(0, 300)}`);
   }
-  const body = (await res.json()) as { message: { je_name: string; idempotent: boolean } };
+  const body = (await res.json()) as {
+    message?: { je_name?: unknown; idempotent?: unknown };
+  };
+  if (
+    typeof body.message?.je_name !== "string" ||
+    body.message.je_name.length === 0 ||
+    typeof body.message.idempotent !== "boolean"
+  ) {
+    throw new Error("Frappe post_journal returned an invalid response");
+  }
   return { jeName: body.message.je_name, idempotent: body.message.idempotent };
 }
 

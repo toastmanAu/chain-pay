@@ -17,6 +17,22 @@ def _minor_to_major(currency: str, minor_str: str) -> float:
     return int(minor_str) / divisor
 
 
+def _submitted_journal_for_batch(batch_id: str) -> str | None:
+    existing = frappe.db.get_value(
+        "Journal Entry",
+        {"crypto_batch_id": batch_id},
+        ["name", "docstatus"],
+        as_dict=True,
+    )
+    if not existing:
+        return None
+    if existing.docstatus != 1:
+        frappe.throw(
+            f"Journal Entry {existing.name} for batch {batch_id} exists but is not submitted"
+        )
+    return existing.name
+
+
 @frappe.whitelist()
 def post_journal(batch_id: str, preview: dict) -> dict:
     """Create+submit a Journal Entry for a confirmed batch. Idempotent on batch_id.
@@ -36,7 +52,7 @@ def post_journal(batch_id: str, preview: dict) -> dict:
     if not entries:
         frappe.throw(f"preview for batch {batch_id} has no entries")
 
-    existing = frappe.db.get_value("Journal Entry", {"crypto_batch_id": batch_id}, "name")
+    existing = _submitted_journal_for_batch(batch_id)
     if existing:
         return {"je_name": existing, "idempotent": True}
 
@@ -54,9 +70,23 @@ def post_journal(batch_id: str, preview: dict) -> dict:
     # real-money/production use. Tracked as a Slice E blocker.
     for e in entries:
         account = e.get("account")
-        if not account or not frappe.db.exists("Account", {"name": account, "company": COMPANY}):
+        canonical_account = None
+        if account:
+            # Existing payroll callers may send the canonical ERPNext document
+            # name ("… - CPT"), while the desktop defaults intentionally send
+            # the stable account label. Both are company-bound and leaf-only.
+            canonical_account = frappe.db.get_value(
+                "Account",
+                {"name": account, "company": COMPANY, "is_group": 0},
+                "name",
+            ) or frappe.db.get_value(
+                "Account",
+                {"account_name": account, "company": COMPANY, "is_group": 0},
+                "name",
+            )
+        if not canonical_account:
             frappe.throw(f"unknown account: {account!r}")
-        row = {"account": account}
+        row = {"account": canonical_account}
         if e.get("debit"):
             amt = _minor_to_major(e["debit"]["currency"], e["debit"]["minor"])
             row["debit_in_account_currency"] = amt
@@ -84,7 +114,17 @@ def post_journal(batch_id: str, preview: dict) -> dict:
             "accounts": accounts,
         }
     )
-    je.insert(ignore_permissions=True)
+    try:
+        je.insert(ignore_permissions=True)
+    except frappe.UniqueValidationError:
+        # Another request may have won the race after the initial lookup. The
+        # unique crypto_batch_id index is authoritative; resolve the submitted
+        # winner instead of surfacing a false failure to the retrying client.
+        frappe.db.rollback()
+        existing = _submitted_journal_for_batch(batch_id)
+        if existing:
+            return {"je_name": existing, "idempotent": True}
+        raise
     je.submit()
     frappe.db.commit()
     return {"je_name": je.name, "idempotent": False}

@@ -14,6 +14,17 @@ cp .env.example docker/.env   # first time only; set BACKEND_PORT if host :8000 
 ```
 
 ERPNext is then at `http://chainpay.localhost:${BACKEND_PORT}` (default port 8000).
+
+For local desktop accounting, generate an ignored, mode-0600 credential file and
+launch Electron with it:
+
+```bash
+bash scripts/configure-local-accounting.sh
+npm run dev:desktop:accounting
+```
+
+The generated `apps/desktop/.env.accounting.local` is main-process-only and is
+ignored by Git. Regenerating it rotates the local Administrator API secret.
 Login: Administrator / `ADMIN_PASSWORD` from `docker/.env` (default: `admin`).
 
 See [../../docs/phase-5-slice-b-smoke-playbook.md](../../docs/phase-5-slice-b-smoke-playbook.md)
