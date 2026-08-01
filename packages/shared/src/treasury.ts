@@ -1,4 +1,4 @@
-import type { EvmAddress, Hex20, Identified, PayeeAddress, Timestamped, TransactionHash } from "./types";
+import type { EvmAddress, Hex20, Identified, Iso8601, PayeeAddress, Timestamped, TransactionHash } from "./types";
 import type { ChainId } from "./chainIds";
 
 export interface CkbMultisig {
@@ -66,6 +66,10 @@ export interface PendingTx extends Identified, Timestamped {
   payloadJson: string;
   signatures: PartialSignature[];
   broadcastedHash?: TransactionHash;
+  /** EVM/chain receipt block, stored as decimal text for lossless persistence. */
+  confirmedBlockNumber?: string;
+  confirmedAt?: Iso8601;
+  failureReason?: string;
 }
 
 export interface ApprovalQueueItem {

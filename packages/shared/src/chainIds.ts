@@ -13,6 +13,7 @@ export function chainFamily(id: ChainId): ChainFamily {
 
 export const KNOWN_EVM_CHAINS = {
   1: { name: "Ethereum", nativeAsset: "ETH" },
+  11155111: { name: "Sepolia", nativeAsset: "ETH" },
   10: { name: "Optimism", nativeAsset: "ETH" },
   137: { name: "Polygon", nativeAsset: "MATIC" },
   8453: { name: "Base", nativeAsset: "ETH" },

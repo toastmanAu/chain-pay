@@ -5,6 +5,10 @@ import { Dashboard } from "./features/dashboard/Dashboard";
 import { TreasuryList } from "./features/treasury/TreasuryList";
 import { SetupMultisig } from "./features/treasury/SetupMultisig";
 import { TreasuryDetail } from "./features/treasury/TreasuryDetail";
+import { SetupSafe } from "./features/treasury/SetupSafe";
+import { CreateSafePayment } from "./features/evm/CreateSafePayment";
+import { ApprovalQueue } from "./features/evm/ApprovalQueue";
+import { SafeApprovalDetail } from "./features/evm/SafeApprovalDetail";
 import { PayrollBatches } from "./features/payroll/PayrollBatches";
 import { PayPanel } from "./features/payments/PayPanel";
 import { SignPanel } from "./features/sign/SignPanel";
@@ -238,7 +242,11 @@ export function App() {
         <Route path="/dashboard" element={<Dashboard />} />
         <Route path="/treasury" element={<TreasuryList />} />
         <Route path="/treasury/new" element={<SetupMultisig />} />
+        <Route path="/treasury/new/safe" element={<SetupSafe />} />
+        <Route path="/treasury/:treasuryId/payment/new" element={<CreateSafePayment />} />
         <Route path="/treasury/:id" element={<TreasuryDetail />} />
+        <Route path="/approvals" element={<ApprovalQueue />} />
+        <Route path="/approvals/:id" element={<SafeApprovalDetail />} />
         <Route path="/payroll" element={<PayrollBatches />} />
         <Route path="/invoices/*" element={<InvoicesPage />} />
         <Route path="/payments" element={<PayPanel />} />

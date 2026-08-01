@@ -38,7 +38,7 @@ The trust-minimisation half is the differentiator. The CKB light client is **emb
 | 2.7c | Mainnet plumbing, network-switch UX, auto-broadcast with 5s countdown, lifecycle-bound retry | ✅ done — PR #6 merged `d090354` (2026-05-29); fast-path manual smoke surfaced and fixed 4 bugs (preload namespace, missing `app.quit` IPC, hooks-rules in mainnet-conditional renders) |
 | 3a | Invoice ingest — manual entry + payee flow, vendor flow, draft autosave, approve-and-queue, batch↔invoice confirmation sync | ✅ done — PR #7 merged `8a3b426` (2026-05-29); shell-level smoke clean on `main` |
 | 3b | Invoice ingest — OCR extraction + multi-invoice bundling | planned (deferred from 3a scope) |
-| 3 (EVM) | EVM (Safe) treasury — MetaMask + WalletConnect + Ledger signers | planned |
+| 3 (EVM) | EVM (Safe) treasury — external owner signers | 🟡 Slices A–C: Sepolia Safe monitoring, native-ETH SafeTx creation, persisted EIP-712 approvals, execution, and receipt confirmation; accounting next |
 | 4 | Frappe accounting bridge — persisted confirmed payments → server-derived journal entries | ✅ CKB path done; EVM awaits Phase 3 |
 | 5+ | BTC watch-only, SOL adapter, fiat ramps, mobile signer companion | planned |
 

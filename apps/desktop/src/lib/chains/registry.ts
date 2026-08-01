@@ -9,6 +9,7 @@ const adapters = new Map<ChainId, ChainAdapter>([
   ["ckb:mainnet", ckbAdapter("mainnet")],
   ["ckb:testnet", ckbAdapter("testnet")],
   ["evm:1", evmAdapter(1)],
+  ["evm:11155111", evmAdapter(11155111)],
   ["evm:42161", evmAdapter(42161)],
   ["evm:10", evmAdapter(10)],
   ["evm:8453", evmAdapter(8453)],

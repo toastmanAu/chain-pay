@@ -13,12 +13,20 @@ export function TreasuryList() {
           <h1 className="text-2xl font-semibold">Treasury</h1>
           <p className="text-sm text-fg-muted">Multisig wallets for payroll funding.</p>
         </div>
-        <Link
-          to="/treasury/new"
-          className="rounded-md bg-accent px-4 py-2 text-sm font-medium text-accent-fg hover:opacity-90"
-        >
-          New multisig
-        </Link>
+        <div className="flex gap-2">
+          <Link
+            to="/treasury/new/safe"
+            className="rounded-md border border-accent px-4 py-2 text-sm font-medium text-accent hover:bg-accent/10"
+          >
+            Add Sepolia Safe
+          </Link>
+          <Link
+            to="/treasury/new"
+            className="rounded-md bg-accent px-4 py-2 text-sm font-medium text-accent-fg hover:opacity-90"
+          >
+            New CKB multisig
+          </Link>
+        </div>
       </div>
 
       {treasuries.length === 0 ? (
@@ -40,9 +48,9 @@ function TreasuryRow({ treasury, onDelete }: { treasury: Treasury; onDelete: () 
   const m = treasury.multisig;
   const chainLabel = chainBadge(m.chain);
   const summary =
-    m.chain.startsWith("ckb:") && "m" in m
-      ? `${(m as CkbMultisig).m}-of-${(m as CkbMultisig).n}`
-      : "—";
+    "owners" in m
+      ? `${m.threshold}-of-${m.owners.length}`
+      : `${(m as CkbMultisig).m}-of-${(m as CkbMultisig).n}`;
 
   return (
     <li className="rounded-lg border border-surface-hi bg-surface transition-colors hover:border-surface-hi/80">

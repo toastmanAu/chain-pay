@@ -1,6 +1,8 @@
 import type { ChainAdapter } from "../types";
 import type { ChainId } from "@chain-pay/shared";
 import { isAddress } from "viem";
+import { getEvmPublicClient } from "./public-client";
+import { readEvmExecutionStatus } from "./execution-status";
 
 /**
  * EVM chain adapter. Treasury is a Safe contract; transactions are EIP-712
@@ -12,8 +14,10 @@ export function evmAdapter(chainId: number): ChainAdapter {
     chain,
     status: "stub",
 
-    async getBalance() {
-      throw new Error("evmAdapter.getBalance — Phase 3 (viem publicClient.getBalance)");
+    async getBalance(account) {
+      if (!isAddress(account, { strict: false })) throw new Error("invalid EVM address");
+      const value = await getEvmPublicClient(chainId).getBalance({ address: account });
+      return { asset: "ETH", value, decimals: 18 };
     },
 
     validateAddress(address) {
@@ -33,8 +37,20 @@ export function evmAdapter(chainId: number): ChainAdapter {
       throw new Error("evmAdapter.broadcastTransaction — Phase 3 (Safe execTransaction)");
     },
 
-    async getTransactionStatus() {
-      throw new Error("evmAdapter.getTransactionStatus — Phase 3");
+    async getTransactionStatus(hash) {
+      const status = await readEvmExecutionStatus(chainId, hash);
+      if (status.state === "pending") {
+        return { hash, state: "confirming", confirmations: 0 };
+      }
+      if (status.state === "failed") {
+        return { hash, state: "failed", confirmations: 0, blockNumber: status.blockNumber };
+      }
+      return {
+        hash,
+        state: "confirmed",
+        confirmations: status.confirmations,
+        blockNumber: status.blockNumber,
+      };
     },
   };
 }

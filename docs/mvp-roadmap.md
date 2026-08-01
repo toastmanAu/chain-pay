@@ -49,6 +49,12 @@ See [PHASE-1.md](../PHASE-1.md) for the next-session checklist. Highlights:
 
 ## Phase 3 — EVM (Safe) treasury
 
+- ✅ Slice A: import an existing Sepolia Safe, validate its contract interface,
+  and monitor live balance, owners, threshold, version, and block height
+- ✅ Slice B: build and review a native-ETH SafeTx, derive its canonical EIP-712
+  hash, collect one injected-wallet owner signature, and persist the approval
+- ✅ Slice C: revalidate and assemble threshold signatures, execute through an
+  injected owner wallet, persist the outer tx hash, and track its receipt
 - `@safe-global/protocol-kit` integration
 - EIP-712 SafeTx signing
 - viem + wagmi for read calls and signer transport
