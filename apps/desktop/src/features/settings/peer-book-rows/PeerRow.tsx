@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import { usePeerBookStore, type Peer } from "@/stores/peer-book";
 import { useTreasuryStore } from "@/stores/treasury";
+import { isMultisigTreasury } from "@chain-pay/shared";
 
 interface PeerRowProps {
   peer: Peer;
@@ -29,7 +30,7 @@ export function PeerRow({ peer }: PeerRowProps) {
   const signerOptions = useMemo(() => {
     const out: { hash: `0x${string}`; label: string }[] = [];
     for (const t of treasuries) {
-      if (!("pubkeyHashes" in t.multisig)) continue;
+      if (!isMultisigTreasury(t) || !("pubkeyHashes" in t.multisig)) continue;
       t.multisig.pubkeyHashes.forEach((hash, i) => {
         out.push({ hash, label: `${t.label} — slot ${i}` });
       });

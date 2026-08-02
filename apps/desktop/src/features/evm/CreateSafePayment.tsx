@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { formatEther, parseEther } from "viem";
-import type { EvmMultisig } from "@chain-pay/shared";
+import { isMultisigTreasury, type EvmMultisig } from "@chain-pay/shared";
 import { useTreasuryStore } from "@/stores/treasury";
 import { usePendingTransactionsStore } from "@/stores/pending-transactions";
 import { buildNativeSafePayment, type SafeConfig } from "@/lib/chains/evm/safe";
@@ -22,7 +22,7 @@ export function CreateSafePayment() {
   const [error, setError] = useState<string | null>(null);
   const navigate = useNavigate();
 
-  if (!treasury || !treasury.multisig.chain.startsWith("evm:")) {
+  if (!treasury || !isMultisigTreasury(treasury) || !treasury.multisig.chain.startsWith("evm:")) {
     return <MissingTreasury />;
   }
   const multisig = treasury.multisig as EvmMultisig;

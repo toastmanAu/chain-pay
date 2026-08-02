@@ -1,4 +1,9 @@
-import type { EvmMultisig, PendingTx, Treasury } from "@chain-pay/shared";
+import {
+  isMultisigTreasury,
+  type EvmMultisig,
+  type PendingTx,
+  type Treasury,
+} from "@chain-pay/shared";
 import type { SafePaymentPayload } from "./safe";
 import { serializeSafePayment } from "./safe";
 
@@ -10,7 +15,7 @@ export function pendingSafePayment(args: {
   accounting: NonNullable<PendingTx["accounting"]>;
   createdAt?: string;
 }): PendingTx {
-  if (!args.treasury.multisig.chain.startsWith("evm:")) {
+  if (!isMultisigTreasury(args.treasury) || !args.treasury.multisig.chain.startsWith("evm:")) {
     throw new Error("Safe payment requires an EVM treasury");
   }
   const multisig = args.treasury.multisig as EvmMultisig;

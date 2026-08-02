@@ -45,7 +45,8 @@ describe("SetupSafe", () => {
 
     await waitFor(() => expect(useTreasuryStore.getState().treasuries).toHaveLength(1));
     expect(readSafeSnapshot).toHaveBeenCalledWith(11155111, SAFE);
-    expect(useTreasuryStore.getState().treasuries[0]?.multisig).toMatchObject({
+    const saved = useTreasuryStore.getState().treasuries[0];
+    expect(saved && "multisig" in saved ? saved.multisig : undefined).toMatchObject({
       chain: "evm:11155111",
       address: SAFE,
       threshold: 2,

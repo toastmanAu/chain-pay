@@ -4,6 +4,15 @@ import {
   KEYVAULT_CHANNELS,
   type SignTxRequest,
 } from "../../../../packages/shared/src/keyvault-ipc";
+import {
+  BITCOIN_CHANNELS,
+  type BitcoinChain,
+  type BitcoinProviderStatus,
+  type BitcoinScanRequest,
+  type BitcoinScanResponse,
+  type BitcoinTransactionStatusRequest,
+  type BitcoinTransactionStatusResponse,
+} from "../../../../packages/shared/src";
 
 const platformApi = {
   platform: process.platform,
@@ -125,6 +134,16 @@ const chainpayApi = {
       rowCount?: number;
       sha256?: string;
     }> => ipcRenderer.invoke("accounting:exportCompliance", filters, format),
+  },
+  bitcoin: {
+    status: (chain: BitcoinChain): Promise<BitcoinProviderStatus> =>
+      ipcRenderer.invoke(BITCOIN_CHANNELS.status, chain),
+    scan: (request: BitcoinScanRequest): Promise<BitcoinScanResponse> =>
+      ipcRenderer.invoke(BITCOIN_CHANNELS.scan, request),
+    transactionStatus: (
+      request: BitcoinTransactionStatusRequest,
+    ): Promise<BitcoinTransactionStatusResponse> =>
+      ipcRenderer.invoke(BITCOIN_CHANNELS.transactionStatus, request),
   },
   keyvault: {
     /** Check whether a keyvault blob exists on disk. */

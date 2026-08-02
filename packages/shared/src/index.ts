@@ -12,3 +12,4 @@ export * from "./mobile-protocol";
 export * from "./invoice-regex";
 export * from "./accounting";
 export * from "./funding";
+export * from "./bitcoin-ipc";

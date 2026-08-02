@@ -1,6 +1,14 @@
 import { create } from "zustand";
 import { createJSONStorage, persist, type StateStorage } from "zustand/middleware";
-import type { MultisigConfig, Treasury } from "@chain-pay/shared";
+import {
+  isBitcoinWatchTreasury,
+  isMultisigTreasury,
+  type BitcoinWatchConfig,
+  type MultisigConfig,
+  type Treasury,
+} from "@chain-pay/shared";
+import { bitcoinWatchIdentity } from "../lib/chains/btc/watch-source";
+import { useBitcoinWatchStore } from "./bitcoin-watch";
 import { assertNotMultisigSigner } from "../lib/comm/refusal-invariant";
 import { getOwnIdentityHash } from "../lib/comm/own-identity-hash";
 
@@ -15,6 +23,7 @@ interface TreasuryStore {
   removeTreasury: (id: string) => void;
   setActiveTreasury: (id: string | null) => void;
   findByMultisig: (cfg: MultisigConfig) => Treasury | undefined;
+  findByBitcoinWatch: (cfg: BitcoinWatchConfig) => Treasury | undefined;
 }
 
 // Treasury.since (RFC 0017 time-lock) is bigint, which is not native to JSON.
@@ -61,11 +70,26 @@ export const useTreasuryStore = create<TreasuryStore>()(
       activeTreasuryId: null,
       setActiveTreasury: (id) => set({ activeTreasuryId: id }),
       addTreasury: (t) => {
+        const duplicate = get().treasuries.some((existing) => {
+          if (isBitcoinWatchTreasury(t)) {
+            return (
+              isBitcoinWatchTreasury(existing) &&
+              bitcoinWatchIdentity(existing.watch) === bitcoinWatchIdentity(t.watch)
+            );
+          }
+          return (
+            isMultisigTreasury(existing) &&
+            existing.multisig.chain === t.multisig.chain &&
+            existing.multisig.address.toLowerCase() === t.multisig.address.toLowerCase()
+          );
+        });
+        if (duplicate) throw new Error("A treasury with this watch source already exists");
+
         // Refusal invariant: refuse to add a treasury whose signer hash matches
         // the current comm-identity hash. Defense-in-depth alongside the
         // peer-book check.
         const commHash = getOwnIdentityHash();
-        if (commHash && "pubkeyHashes" in t.multisig) {
+        if (commHash && isMultisigTreasury(t) && "pubkeyHashes" in t.multisig) {
           for (const hashHex of t.multisig.pubkeyHashes) {
             const signerBytes = hexToBytes(hashHex);
             assertNotMultisigSigner(signerBytes, () => [
@@ -80,20 +104,31 @@ export const useTreasuryStore = create<TreasuryStore>()(
           activeTreasuryId: s.activeTreasuryId ?? t.id,
         }));
       },
-      removeTreasury: (id) =>
+      removeTreasury: (id) => {
+        useBitcoinWatchStore.getState().remove(id);
         set((s) => ({
           treasuries: s.treasuries.filter((t) => t.id !== id),
           activeTreasuryId: s.activeTreasuryId === id ? null : s.activeTreasuryId,
-        })),
+        }));
+      },
       findByMultisig: (cfg) =>
         get().treasuries.find(
-          (t) => t.multisig.chain === cfg.chain && t.multisig.address === cfg.address,
+          (t) =>
+            isMultisigTreasury(t) &&
+            t.multisig.chain === cfg.chain &&
+            t.multisig.address === cfg.address,
+        ),
+      findByBitcoinWatch: (cfg) =>
+        get().treasuries.find(
+          (t) =>
+            isBitcoinWatchTreasury(t) &&
+            bitcoinWatchIdentity(t.watch) === bitcoinWatchIdentity(cfg),
         ),
     }),
     {
       name: "chain-pay:treasuries",
       storage: jsonStorage,
-      version: 2,
+      version: 3,
       partialize: (state) => ({
         treasuries: state.treasuries,
         activeTreasuryId: state.activeTreasuryId,

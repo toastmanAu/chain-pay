@@ -1,6 +1,6 @@
 import type { Identified, Timestamped, Hex20 } from "./types";
 import type { ChainId } from "./chainIds";
-import type { Treasury } from "./treasury";
+import type { MultisigTreasury } from "./treasury";
 
 export interface FundableAccount {
   id: string;
@@ -39,7 +39,7 @@ export interface Source extends Identified, Timestamped {
   notes?: string;
 }
 
-export function treasuryAsFundable(t: Treasury): FundableAccount {
+export function treasuryAsFundable(t: MultisigTreasury): FundableAccount {
   return {
     id: t.id,
     label: t.label,

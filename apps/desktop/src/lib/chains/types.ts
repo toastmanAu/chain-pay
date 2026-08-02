@@ -49,8 +49,8 @@ export interface PaymentRequest {
 }
 
 /**
- * Stable surface for every chain integration. CKB and EVM are real in MVP;
- * BTC and SOL are stubs that throw on call.
+ * Stable surface for every chain integration. Bitcoin implements the read
+ * methods only; every spending method rejects because its adapter is watch-only.
  */
 export interface ChainAdapter {
   readonly chain: ChainId;

@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import type { EvmMultisig, Treasury } from "@chain-pay/shared";
+import { isMultisigTreasury, type EvmMultisig, type Treasury } from "@chain-pay/shared";
 import { readSafeSnapshot } from "@/lib/chains/evm/safe-reader";
 import { useTreasuryStore } from "@/stores/treasury";
 
@@ -24,6 +24,7 @@ export function SetupSafe() {
       const snapshot = await readSafeSnapshot(SEPOLIA_CHAIN_ID, address.trim());
       const duplicate = treasuries.some(
         (treasury) =>
+          isMultisigTreasury(treasury) &&
           treasury.multisig.chain === `evm:${SEPOLIA_CHAIN_ID}` &&
           treasury.multisig.address.toLowerCase() === snapshot.address.toLowerCase(),
       );

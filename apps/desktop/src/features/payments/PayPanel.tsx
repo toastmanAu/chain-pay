@@ -9,7 +9,7 @@ import {
   Transaction,
   WitnessArgs,
 } from "@ckb-ccc/core";
-import type { CkbMultisig, Treasury } from "@chain-pay/shared";
+import { isMultisigTreasury, type CkbMultisig, type Treasury } from "@chain-pay/shared";
 import { useTreasuryStore } from "@/stores/treasury";
 import { useSyncStore } from "@/stores/sync";
 import { lightClient } from "@/lib/light-client/client";
@@ -80,7 +80,7 @@ export function PayPanel() {
   const payeeStore = usePayeesStore();
   const batchStore = usePayrollBatchesStore();
 
-  const ckbTreasuries = treasuries.filter((t) => t.multisig.chain.startsWith("ckb:"));
+  const ckbTreasuries = treasuries.filter(isMultisigTreasury).filter((t) => t.multisig.chain.startsWith("ckb:"));
 
   const [treasuryId, setTreasuryId] = useState<string>(ckbTreasuries[0]?.id ?? "");
   const [recipients, setRecipients] = useState<RecipientRow[]>([{ address: "", amountCkb: "" }]);

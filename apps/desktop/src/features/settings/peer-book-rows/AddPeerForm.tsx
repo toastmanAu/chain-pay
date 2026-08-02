@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import { usePeerBookStore } from "@/stores/peer-book";
 import { useTreasuryStore } from "@/stores/treasury";
 import { peerHashFromAddress } from "@/lib/comm/peer-hash";
+import { isMultisigTreasury } from "@chain-pay/shared";
 
 interface SignerOption {
   hash: `0x${string}`;
@@ -13,7 +14,7 @@ function enumerateSignerHashes(
 ): SignerOption[] {
   const out: SignerOption[] = [];
   for (const t of treasuries) {
-    if (!("pubkeyHashes" in t.multisig)) continue;
+    if (!isMultisigTreasury(t) || !("pubkeyHashes" in t.multisig)) continue;
     t.multisig.pubkeyHashes.forEach((hash, i) => {
       out.push({ hash, label: `${t.label} — slot ${i}` });
     });

@@ -2,13 +2,24 @@ import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { formatEther } from "viem";
-import type { CkbMultisig, EvmMultisig, Treasury } from "@chain-pay/shared";
+import {
+  isBitcoinWatchTreasury,
+  isMultisigTreasury,
+  type BitcoinWatchTreasury,
+  type CkbMultisig,
+  type EvmMultisig,
+  type MultisigTreasury,
+} from "@chain-pay/shared";
 import { useTreasuryStore } from "@/stores/treasury";
 import { useSyncStore } from "@/stores/sync";
 import { lightClient } from "@/lib/light-client/client";
 import { treasuryLockScript } from "@/lib/chains/ckb/address";
 import type { CkbMultisigConfig } from "@/lib/chains/ckb/multisig";
 import { readSafeSnapshot } from "@/lib/chains/evm/safe-reader";
+import { useBitcoinWatchStore } from "@/stores/bitcoin-watch";
+import { bitcoinBridge } from "@/lib/chains/btc/ipc";
+import { syncBitcoinWatch } from "@/lib/chains/btc/sync";
+import { deriveBitcoinReceiveAddress } from "@/lib/chains/btc/watch-source";
 
 const SHANNONS_PER_CKB = 100_000_000n;
 
@@ -32,12 +43,14 @@ export function TreasuryDetail() {
     );
   }
 
+  if (isBitcoinWatchTreasury(treasury)) return <BitcoinWatchDetail treasury={treasury} />;
+  if (!isMultisigTreasury(treasury)) return null;
   if (treasury.multisig.chain.startsWith("evm:")) return <EvmTreasuryDetail treasury={treasury} />;
 
   return <CkbTreasuryDetail treasury={treasury} />;
 }
 
-function CkbTreasuryDetail({ treasury }: { treasury: Treasury }) {
+function CkbTreasuryDetail({ treasury }: { treasury: MultisigTreasury }) {
   const multisig = treasury.multisig as CkbMultisig;
   const cfg = useMemo<CkbMultisigConfig>(
     () => ({
@@ -162,7 +175,7 @@ function CkbTreasuryDetail({ treasury }: { treasury: Treasury }) {
   );
 }
 
-function EvmTreasuryDetail({ treasury }: { treasury: Treasury }) {
+function EvmTreasuryDetail({ treasury }: { treasury: MultisigTreasury }) {
   const multisig = treasury.multisig as EvmMultisig;
   const chainId = Number(multisig.chain.slice("evm:".length));
   const safeQuery = useQuery({
@@ -253,6 +266,162 @@ function EvmTreasuryDetail({ treasury }: { treasury: Treasury }) {
   );
 }
 
+function BitcoinWatchDetail({ treasury }: { treasury: BitcoinWatchTreasury }) {
+  const source = treasury.watch.source;
+  const record = useBitcoinWatchStore((state) => state.records[treasury.id]);
+  useEffect(() => {
+    useBitcoinWatchStore.getState().ensure(treasury.id, treasury.watch);
+  }, [treasury.id, treasury.watch]);
+  const providerQuery = useQuery({
+    queryKey: ["bitcoin-provider-status", treasury.watch.chain],
+    queryFn: () => bitcoinBridge().status(treasury.watch.chain),
+    retry: false,
+  });
+  const syncQuery = useQuery({
+    queryKey: ["bitcoin-watch-sync", treasury.id],
+    queryFn: () => syncBitcoinWatch({ treasuryId: treasury.id, config: treasury.watch }),
+    enabled: providerQuery.data?.configured === true,
+    retry: false,
+    refetchInterval: 60_000,
+  });
+  const snapshot = record?.snapshot;
+  let receiveAddress: string;
+  try {
+    receiveAddress = deriveBitcoinReceiveAddress(treasury.watch, record?.nextReceiveIndex ?? 0);
+  } catch {
+    receiveAddress = source.kind === "address" ? source.address : "Unavailable";
+  }
+  const providerState = providerQuery.isLoading
+    ? "Checking provider…"
+    : providerQuery.data?.configured
+      ? "Provider configured"
+      : "Provider not configured";
+
+  return (
+    <div className="space-y-6">
+      <header className="flex items-start justify-between gap-4">
+        <div>
+          <Link to="/treasury" className="text-xs text-fg-muted hover:text-fg">← Treasury</Link>
+          <h1 className="mt-1 text-2xl font-semibold">{treasury.label}</h1>
+          <p className="text-sm text-fg-muted">
+            {chainBadge(treasury.watch.chain)} · Bitcoin watch-only · {source.scriptType}
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={() => void syncQuery.refetch()}
+          disabled={!providerQuery.data?.configured || syncQuery.isFetching}
+          className="rounded-md border border-accent px-3 py-2 text-sm text-accent disabled:cursor-not-allowed disabled:opacity-40"
+        >
+          {syncQuery.isFetching ? "Syncing…" : "Refresh"}
+        </button>
+      </header>
+
+      <section className="grid grid-cols-3 gap-4">
+        <Tile
+          label="Balance"
+          value={snapshot ? `${formatBtc(snapshot.balanceSats)} BTC` : "—"}
+          hint={record?.lastSyncedAt ? `synced ${new Date(record.lastSyncedAt).toLocaleString()}` : providerState}
+          tone="accent"
+        />
+        <Tile label="UTXOs" value={String(snapshot?.utxos.length ?? 0)} hint="unspent outputs" />
+        <Tile
+          label="Tip"
+          value={snapshot ? formatThousands(BigInt(snapshot.tipHeight)) : "—"}
+          hint={snapshot ? `${snapshot.tipHash.slice(0, 12)}…` : "not synced"}
+        />
+      </section>
+
+      {!providerQuery.isLoading && !providerQuery.data?.configured ? (
+        <p role="alert" className="rounded-md border border-warn/40 bg-warn/5 p-3 text-sm text-warn">
+          Configure {treasury.watch.chain === "btc:mainnet" ? "BITCOIN_MAINNET_ESPLORA_URL" : "BITCOIN_TESTNET_ESPLORA_URL"} in the desktop main-process environment, then restart ChainPay.
+        </p>
+      ) : null}
+      {record?.error ? (
+        <p role="alert" className="rounded-md border border-danger/40 bg-danger/5 p-3 text-sm text-danger">
+          Bitcoin sync failed: {record.error}
+        </p>
+      ) : null}
+
+      <section className="rounded-lg border border-surface-hi bg-surface p-5">
+        <h2 className="text-sm font-medium text-fg-muted">Receive address</h2>
+        <div className="mt-2 break-all font-mono text-sm text-accent">{receiveAddress}</div>
+        <p className="mt-2 text-xs text-fg-muted">
+          {source.kind === "address"
+            ? "Fixed imported address."
+            : `Public derivation index ${record?.nextReceiveIndex ?? 0}; gap limit ${treasury.watch.gapLimit}.`}
+        </p>
+      </section>
+
+      <section className="rounded-lg border border-surface-hi bg-surface p-4">
+        <div className="text-xs uppercase tracking-wide text-fg-muted">Watch source</div>
+        <div className="mt-2 break-all font-mono text-xs text-accent">
+          {source.kind === "address" ? source.address : source.descriptor}
+        </div>
+        <p className="mt-3 text-xs text-fg-muted">
+          Watch-only. ChainPay cannot construct, sign, or broadcast Bitcoin transactions.
+        </p>
+      </section>
+
+      <section className="rounded-lg border border-surface-hi bg-surface p-5">
+        <h2 className="text-sm font-medium text-fg-muted">Unspent outputs</h2>
+        {snapshot?.utxos.length ? (
+          <div className="mt-3 overflow-x-auto">
+            <table className="w-full text-left text-xs">
+              <thead className="text-fg-muted"><tr><th className="pb-2">Outpoint</th><th className="pb-2">Amount</th><th className="pb-2">Confirmations</th></tr></thead>
+              <tbody>
+                {snapshot.utxos.map((utxo) => (
+                  <tr key={`${utxo.txid}:${utxo.vout}`} className="border-t border-surface-hi">
+                    <td className="py-2 font-mono">{utxo.txid.slice(0, 12)}…:{utxo.vout}</td>
+                    <td className="py-2 tabular-nums">{formatBtc(utxo.valueSats)} BTC</td>
+                    <td className="py-2 tabular-nums">{utxo.confirmed ? utxo.confirmations : "Unconfirmed"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : <p className="mt-3 text-sm text-fg-muted">No unspent outputs found.</p>}
+      </section>
+
+      <section className="rounded-lg border border-surface-hi bg-surface p-5">
+        <h2 className="text-sm font-medium text-fg-muted">Transaction history</h2>
+        {snapshot?.transactions.length ? (
+          <ul className="mt-3 divide-y divide-surface-hi">
+            {snapshot.transactions.map((transaction) => (
+              <li key={transaction.txid} className="flex items-center justify-between gap-4 py-3 text-xs">
+                <div className="min-w-0">
+                  <div className="truncate font-mono">{transaction.txid}</div>
+                  <div className="mt-1 text-fg-muted">
+                    {transaction.confirmed
+                      ? `${transaction.confirmations} confirmation${transaction.confirmations === 1 ? "" : "s"}${transaction.blockTime ? ` · ${new Date(transaction.blockTime * 1000).toLocaleString()}` : ""}`
+                      : "Unconfirmed or reorged"}
+                  </div>
+                </div>
+                <div className={`shrink-0 font-medium tabular-nums ${BigInt(transaction.netValueSats) >= 0n ? "text-accent" : "text-fg"}`}>
+                  {formatSignedBtc(transaction.netValueSats)} BTC
+                </div>
+              </li>
+            ))}
+          </ul>
+        ) : <p className="mt-3 text-sm text-fg-muted">No transactions found.</p>}
+      </section>
+    </div>
+  );
+}
+
+function formatBtc(satoshiText: string): string {
+  const sats = BigInt(satoshiText);
+  const whole = sats / 100_000_000n;
+  const fractional = (sats % 100_000_000n).toString().padStart(8, "0").replace(/0+$/, "");
+  return fractional ? `${formatThousands(whole)}.${fractional}` : formatThousands(whole);
+}
+
+function formatSignedBtc(satoshiText: string): string {
+  const sats = BigInt(satoshiText);
+  if (sats < 0n) return `-${formatBtc((-sats).toString())}`;
+  return `+${formatBtc(sats.toString())}`;
+}
+
 function formatEth(wei: bigint): string {
   const value = formatEther(wei);
   const [whole, fraction = ""] = value.split(".");
@@ -319,5 +488,7 @@ function chainBadge(chain: string): string {
   if (chain === "ckb:mainnet") return "CKB mainnet";
   if (chain === "ckb:testnet") return "CKB testnet";
   if (chain.startsWith("evm:")) return `EVM ${chain.slice(4)}`;
+  if (chain === "btc:mainnet") return "Bitcoin mainnet";
+  if (chain === "btc:testnet") return "Bitcoin testnet";
   return chain;
 }

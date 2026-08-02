@@ -28,11 +28,115 @@ export interface EvmMultisig {
 
 export type MultisigConfig = CkbMultisig | EvmMultisig;
 
-export interface Treasury extends Identified, Timestamped {
+export type BitcoinChain = "btc:mainnet" | "btc:testnet";
+
+export type BitcoinAddressScriptType = "p2pkh" | "p2sh" | "p2wpkh" | "p2wsh" | "p2tr";
+export type BitcoinDerivedScriptType = "p2pkh" | "p2sh-p2wpkh" | "p2wpkh" | "p2tr";
+
+export interface BitcoinAddressWatchSource {
+  kind: "address";
+  /** Canonical network-specific address. */
+  address: string;
+  scriptType: BitcoinAddressScriptType;
+}
+
+export interface BitcoinDescriptorWatchSource {
+  kind: "descriptor";
+  /** Canonical descriptor including its BIP-380 checksum. */
+  descriptor: string;
+  scriptType: BitcoinDerivedScriptType;
+  /** Public extended key only. Private extended keys are never accepted or persisted. */
+  extendedPublicKey: string;
+  /** Non-hardened path components applied after the imported extended public key. */
+  derivationPath: number[];
+  /** Optional BIP-380 key origin, without square brackets. */
+  keyOrigin?: string;
+}
+
+export type BitcoinWatchSource = BitcoinAddressWatchSource | BitcoinDescriptorWatchSource;
+
+export interface BitcoinWatchConfig {
+  chain: BitcoinChain;
+  source: BitcoinWatchSource;
+  /** Consecutive unused derived addresses that terminate a discovery scan. */
+  gapLimit: number;
+}
+
+export interface BitcoinWatchSyncState {
+  treasuryId: string;
+  status: "idle" | "syncing" | "ready" | "error";
+  nextReceiveIndex: number;
+  /** Next derived index to inspect when resuming an interrupted discovery pass. */
+  nextScanIndex: number;
+  lastUsedIndex: number | null;
+  scannedThrough: number;
+  consecutiveUnused: number;
+  tipHeight: number | null;
+  tipHash: string | null;
+  lastSyncedAt: Iso8601 | null;
+  error: string | null;
+  snapshot: BitcoinWatchSnapshot | null;
+}
+
+/** Decimal integer text is used at persistence and IPC boundaries to preserve exact satoshis. */
+export type BitcoinSatoshiText = string;
+
+export interface BitcoinWatchUtxo {
+  txid: string;
+  vout: number;
+  address: string;
+  valueSats: BitcoinSatoshiText;
+  confirmed: boolean;
+  blockHeight: number | null;
+  blockHash: string | null;
+  confirmations: number;
+}
+
+export interface BitcoinWatchTransaction {
+  txid: string;
+  /** Net value across all watched inputs and outputs; may be negative. */
+  netValueSats: BitcoinSatoshiText;
+  confirmed: boolean;
+  blockHeight: number | null;
+  blockHash: string | null;
+  blockTime: number | null;
+  confirmations: number;
+}
+
+export interface BitcoinWatchSnapshot {
+  tipHeight: number;
+  tipHash: string;
+  balanceSats: BitcoinSatoshiText;
+  addresses: string[];
+  utxos: BitcoinWatchUtxo[];
+  transactions: BitcoinWatchTransaction[];
+}
+
+interface TreasuryBase extends Identified, Timestamped {
   label: string;
-  multisig: MultisigConfig;
   /** Optional human notes — purpose, controlling org, signer rotation policy. */
   notes?: string;
+}
+
+/** Existing CKB and EVM treasury shape. `kind` is optional for persisted v1/v2 compatibility. */
+export interface MultisigTreasury extends TreasuryBase {
+  kind?: "multisig";
+  multisig: MultisigConfig;
+}
+
+export interface BitcoinWatchTreasury extends TreasuryBase {
+  kind: "bitcoin-watch";
+  watch: BitcoinWatchConfig;
+}
+
+export type Treasury = MultisigTreasury | BitcoinWatchTreasury;
+
+export function isMultisigTreasury(treasury: Treasury): treasury is MultisigTreasury {
+  return "multisig" in treasury;
+}
+
+export function isBitcoinWatchTreasury(treasury: Treasury): treasury is BitcoinWatchTreasury {
+  return "watch" in treasury && treasury.kind === "bitcoin-watch";
 }
 
 export interface PartialSignature {

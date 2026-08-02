@@ -3,7 +3,7 @@ import { Link, useParams } from "react-router-dom";
 import { formatEther, type Hex } from "viem";
 import QRCode from "qrcode";
 import { useQuery } from "@tanstack/react-query";
-import type { EvmMultisig } from "@chain-pay/shared";
+import { isMultisigTreasury, type EvmMultisig } from "@chain-pay/shared";
 import { usePendingTransactionsStore } from "@/stores/pending-transactions";
 import { useTreasuryStore } from "@/stores/treasury";
 import { parseSafePayment } from "@/lib/chains/evm/safe";
@@ -90,7 +90,12 @@ export function SafeApprovalDetail() {
     return () => { active = false; };
   }, [walletConnectStatus]);
 
-  if (!pending || !treasury || !treasury.multisig.chain.startsWith("evm:")) {
+  if (
+    !pending ||
+    !treasury ||
+    !isMultisigTreasury(treasury) ||
+    !treasury.multisig.chain.startsWith("evm:")
+  ) {
     return <MissingApproval />;
   }
   if (!payloadResult?.payload) {

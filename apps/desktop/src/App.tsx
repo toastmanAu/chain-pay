@@ -6,6 +6,7 @@ import { TreasuryList } from "./features/treasury/TreasuryList";
 import { SetupMultisig } from "./features/treasury/SetupMultisig";
 import { TreasuryDetail } from "./features/treasury/TreasuryDetail";
 import { SetupSafe } from "./features/treasury/SetupSafe";
+import { SetupBitcoin } from "./features/treasury/SetupBitcoin";
 import { CreateSafePayment } from "./features/evm/CreateSafePayment";
 import { ApprovalQueue } from "./features/evm/ApprovalQueue";
 import { SafeApprovalDetail } from "./features/evm/SafeApprovalDetail";
@@ -36,7 +37,7 @@ import { useBatchConfirmationToAccounting } from "./lib/accounting/use-batch-con
 import { useSafeConfirmationToAccounting } from "./lib/accounting/use-safe-confirmation-to-accounting";
 import { isExpired } from "./lib/comm/expires-at";
 import type { OutgoingPacket } from "./lib/comm/types";
-import type { TransferPacket } from "@chain-pay/shared";
+import { isMultisigTreasury, type TransferPacket } from "@chain-pay/shared";
 import type { MultisigRouting } from "./features/payments/useCommSendDispatch";
 
 function hexToBytes(hex: string): Uint8Array {
@@ -60,7 +61,7 @@ function useCommTransportBoot(): void {
       knownSignersGetter: () => {
         const treasuries = useTreasuryStore.getState().treasuries;
         return treasuries.flatMap((t) =>
-          "pubkeyHashes" in t.multisig
+          isMultisigTreasury(t) && "pubkeyHashes" in t.multisig
             ? t.multisig.pubkeyHashes.map((h) => ({
                 treasuryId: t.id,
                 pubkeyHash: hexToBytes(h),
@@ -101,7 +102,7 @@ function useCommTransportBoot(): void {
       const treasury = useTreasuryStore
         .getState()
         .treasuries.find((t) => t.id === batch.treasuryId);
-      if (!treasury || !("pubkeyHashes" in treasury.multisig)) return;
+      if (!treasury || !isMultisigTreasury(treasury) || !("pubkeyHashes" in treasury.multisig)) return;
       usePayrollBatchesStore.getState().drainIncomingSigsInto(batch.id, {
         m: treasury.multisig.m,
         pubkeyHashes: treasury.multisig.pubkeyHashes,
@@ -131,7 +132,7 @@ function useCommTransportBoot(): void {
       const treasury = useTreasuryStore
         .getState()
         .treasuries.find((t) => t.id === batch.treasuryId);
-      if (!treasury || !("pubkeyHashes" in treasury.multisig)) return;
+      if (!treasury || !isMultisigTreasury(treasury) || !("pubkeyHashes" in treasury.multisig)) return;
       if (peer.associatedSignerHash === undefined) return;
       const slotIndex = treasury.multisig.pubkeyHashes.indexOf(peer.associatedSignerHash);
       if (slotIndex < 0) return;
@@ -211,7 +212,7 @@ export function App() {
     const treasury = useTreasuryStore
       .getState()
       .treasuries.find((t) => t.id === batch.treasuryId);
-    if (!treasury || !("pubkeyHashes" in treasury.multisig)) return null;
+    if (!treasury || !isMultisigTreasury(treasury) || !("pubkeyHashes" in treasury.multisig)) return null;
     const createdAtSec = Math.floor(new Date(batch.createdAt).getTime() / 1000);
     return {
       txHash: batch.sighashDigest,
@@ -227,7 +228,7 @@ export function App() {
     const treasury = useTreasuryStore
       .getState()
       .treasuries.find((t) => t.id === batch.treasuryId);
-    if (!treasury || !("pubkeyHashes" in treasury.multisig)) return null;
+    if (!treasury || !isMultisigTreasury(treasury) || !("pubkeyHashes" in treasury.multisig)) return null;
     return { pubkeyHashes: treasury.multisig.pubkeyHashes };
   }, []);
 
@@ -246,6 +247,7 @@ export function App() {
         <Route path="/treasury" element={<TreasuryList />} />
         <Route path="/treasury/new" element={<SetupMultisig />} />
         <Route path="/treasury/new/safe" element={<SetupSafe />} />
+        <Route path="/treasury/new/bitcoin" element={<SetupBitcoin />} />
         <Route path="/treasury/:treasuryId/payment/new" element={<CreateSafePayment />} />
         <Route path="/treasury/:id" element={<TreasuryDetail />} />
         <Route path="/approvals" element={<ApprovalQueue />} />

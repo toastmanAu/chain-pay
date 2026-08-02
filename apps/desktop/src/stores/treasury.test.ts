@@ -3,7 +3,7 @@ import { useTreasuryStore } from "./treasury";
 import { useCommIdentityStore } from "./comm-identity";
 import { RefusalInvariantError } from "../lib/comm/errors";
 import { setOwnIdentityHashGetterForTests } from "../lib/comm/own-identity-hash";
-import type { Treasury } from "@chain-pay/shared";
+import type { MultisigTreasury, Treasury } from "@chain-pay/shared";
 import { MemoryStorage } from "./test-utils/memory-storage";
 
 // ─── Shared helpers ────────────────────────────────────────────────────────
@@ -19,7 +19,7 @@ const COMM_HASH = new Uint8Array(20).fill(0x55);
 const COMM_HASH_HEX: `0x${string}` = `0x${"55".repeat(20)}`;
 const OTHER_HASH_HEX: `0x${string}` = `0x${"aa".repeat(20)}`;
 
-const BASE_TREASURY: Treasury = {
+const BASE_TREASURY: MultisigTreasury = {
   id: "t-1",
   label: "Test Treasury",
   createdAt: "2026-05-23T00:00:00Z",
@@ -35,7 +35,7 @@ const BASE_TREASURY: Treasury = {
   },
 };
 
-const sample: Treasury = {
+const sample: MultisigTreasury = {
   id: "t1",
   label: "ops-testnet",
   createdAt: "2026-05-21T00:00:00Z",
@@ -77,7 +77,8 @@ describe("treasury store persistence", () => {
     const second = await import("./treasury");
     expect(second.useTreasuryStore.getState().treasuries).toHaveLength(1);
     expect(second.useTreasuryStore.getState().treasuries[0]?.id).toBe("t1");
-    expect(second.useTreasuryStore.getState().treasuries[0]?.multisig.address).toBe(
+    const restored = second.useTreasuryStore.getState().treasuries[0];
+    expect(restored && "multisig" in restored ? restored.multisig.address : undefined).toBe(
       sample.multisig.address,
     );
   });
@@ -94,7 +95,7 @@ describe("treasury store persistence", () => {
 
   it("round-trips bigint `since` values without precision loss", async () => {
     if (sample.multisig.chain !== "ckb:testnet") throw new Error("sample must be CKB");
-    const withSince: Treasury = {
+    const withSince: MultisigTreasury = {
       ...sample,
       id: "t2",
       multisig: { ...sample.multisig, since: 0x4000000000000064n },
@@ -106,8 +107,10 @@ describe("treasury store persistence", () => {
     vi.resetModules();
     const second = await import("./treasury");
     const revived = second.useTreasuryStore.getState().treasuries[0];
-    expect(revived?.multisig).toMatchObject({ chain: "ckb:testnet" });
-    if (revived?.multisig.chain === "ckb:testnet") {
+    expect(revived && "multisig" in revived ? revived.multisig : undefined).toMatchObject({
+      chain: "ckb:testnet",
+    });
+    if (revived && "multisig" in revived && revived.multisig.chain === "ckb:testnet") {
       expect(revived.multisig.since).toBe(0x4000000000000064n);
     }
   });
@@ -153,6 +156,31 @@ describe("treasury store CRUD", () => {
       address: "ckt1qtestnet",
     });
     expect(found).toEqual(BASE_TREASURY);
+  });
+
+  it("rejects duplicate Bitcoin watch sources and can find the canonical source", () => {
+    const bitcoin: Treasury = {
+      id: "btc-1",
+      kind: "bitcoin-watch",
+      label: "Reserve",
+      createdAt: "2026-08-03T00:00:00Z",
+      updatedAt: "2026-08-03T00:00:00Z",
+      watch: {
+        chain: "btc:mainnet",
+        gapLimit: 20,
+        source: {
+          kind: "address",
+          address: "bc1qcr8te4kr609gcawutmrza0j4xv80jy8z306fyu",
+          scriptType: "p2wpkh",
+        },
+      },
+    };
+    useTreasuryStore.getState().addTreasury(bitcoin);
+    expect(useTreasuryStore.getState().findByBitcoinWatch(bitcoin.watch)).toEqual(bitcoin);
+    expect(() =>
+      useTreasuryStore.getState().addTreasury({ ...bitcoin, id: "btc-2", label: "Duplicate" }),
+    ).toThrow(/already exists/i);
+    expect(useTreasuryStore.getState().treasuries).toHaveLength(1);
   });
 });
 

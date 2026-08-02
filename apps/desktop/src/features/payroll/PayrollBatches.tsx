@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import type { CkbMultisig, PayrollBatch, PayrollBatchState, Treasury } from "@chain-pay/shared";
-import { isPayrollBatch } from "@chain-pay/shared";
+import type { CkbMultisig, MultisigTreasury, PayrollBatch, PayrollBatchState, Treasury } from "@chain-pay/shared";
+import { isMultisigTreasury, isPayrollBatch } from "@chain-pay/shared";
 import { usePayrollBatchesStore } from "@/stores/payroll-batches";
 import { useTreasuryStore } from "@/stores/treasury";
 import { nextStates, isTerminal } from "@/lib/payroll/state-machine";
@@ -14,7 +14,7 @@ export function PayrollBatches() {
   const batches = usePayrollBatchesStore((s) => s.batches);
   const treasuries = useTreasuryStore((s) => s.treasuries);
   const ckbTreasuries = useMemo(
-    () => treasuries.filter((t) => t.multisig.chain.startsWith("ckb:")),
+    () => treasuries.filter(isMultisigTreasury).filter((t) => t.multisig.chain.startsWith("ckb:")),
     [treasuries],
   );
 
@@ -68,7 +68,7 @@ export function PayrollBatches() {
   );
 }
 
-function CreateBatchForm({ treasuries }: { treasuries: Array<{ id: string; label: string; multisig: { chain: string } }> }) {
+function CreateBatchForm({ treasuries }: { treasuries: MultisigTreasury[] }) {
   const addBatch = usePayrollBatchesStore((s) => s.addBatch);
   const [label, setLabel] = useState("");
   const [treasuryId, setTreasuryId] = useState(treasuries[0]?.id ?? "");
@@ -340,7 +340,7 @@ function lookupTreasuryLabel(
 
 function lookupTreasuryM(treasuries: Treasury[], id: string): number | null {
   const found = treasuries.find((t) => t.id === id);
-  if (!found) return null;
+  if (!found || !isMultisigTreasury(found)) return null;
   if (!found.multisig.chain.startsWith("ckb:")) return null;
   return (found.multisig as CkbMultisig).m;
 }
@@ -375,4 +375,3 @@ function monthEnd(d: Date): string {
   const day = String(next.getDate()).padStart(2, "0");
   return `${year}-${month}-${day}`;
 }
-
