@@ -57,6 +57,7 @@ Detailed roadmap: [docs/mvp-roadmap.md](docs/mvp-roadmap.md). Phase-specific not
 | Mainnet network switch (UX only, no real-fund tx yet) | `src/features/settings/NetworkSection.tsx`, `electron/main/network-state-store.ts` | Manual smoke 2026-05-29: testnet → mainnet → soft-fail UX → testnet round-trip with LC IDB wipe |
 | CKB → ERPNext accounting recovery | `crypto_payroll.api.post_confirmed_payment`, desktop accounting host | Confirmed tx `0xdbafdf…ae2a` recovered at USD 0.50; submitted JE `ACC-JV-2026-00023`; source records and tx hashes now idempotency-bound |
 | Sepolia Safe → ERPNext accounting recovery | `evm-safe-accounting.ts`, `crypto_payroll.api.post_confirmed_payment` | SafeTx + outer hash are independently idempotent; receipt gas is retained as executor-paid audit metadata and excluded from the Safe treasury credit |
+| ERPNext compliance export | `crypto_payroll.api.export_compliance`, desktop Reports screen | Server-owned CKB/Sepolia evidence exports as deterministic CSV/PDF; Electron verifies SHA-256 before saving |
 | WalletConnect Safe approvals | `walletconnect-safe-owner.ts`, `safe-approval-interchange.ts` | Sepolia-only restored sessions, live-owner checks, exact EIP-712 signing, and strict signature-only files for two-instance threshold collection |
 
 ### Why the JoyID → ckb-cli signer pivot

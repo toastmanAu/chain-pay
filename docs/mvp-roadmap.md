@@ -9,7 +9,7 @@
 | 2 | CKB multisig treasury | 2-of-3 testnet treasury can pay one address end-to-end |
 | 2.5 | Payroll batch over CKB multisig | N-to-many payroll tx broadcast from a treasury |
 | 3 | EVM (Safe) treasury | 2-of-3 Safe on Sepolia can pay one address; MetaMask + WalletConnect both work as signers |
-| 4 | Accounting bridge | CKB complete: submitted source record + server-derived JE; EVM follows Phase 3 |
+| 4 | Accounting bridge | CKB + EVM submitted records, server-derived JEs, and compliance export complete |
 | 5+ | Adapter expansion | BTC watch-only, SOL adapter, fiat ramp providers, compliance exports |
 
 ## Phase 0 — Scaffold (done)
@@ -80,13 +80,20 @@ smoke playbook for the live gate.
 - ✅ Enforce immutable-record, batch-ID, and transaction-hash idempotency
 - ✅ Sepolia Safe confirmed-payment ingestion with SafeTx + outer-hash
   idempotency and executor-paid gas metadata
-- Compliance export: CSV/PDF with payslip + crypto + FX + tx hash + network fee
+- ✅ Compliance export: deterministic CSV/printable PDF over submitted CKB and
+  Sepolia records, with payee reference, exact crypto/fiat units, available FX,
+  transaction/confirmation/fee evidence, and Journal Entry binding
 - REST endpoints wired per [api-contract.md](./api-contract.md)
 
 **Accounting verification gate:** A confirmed testnet payment produces one persisted
 source record and one balanced submitted Journal Entry; replay returns both
 existing records. Automated coverage now spans CKB and Sepolia Safe sources;
 run the Slice D smoke playbook for the live EVM gate.
+
+**Compliance verification gate:** With local ERPNext configured, export the
+same filtered report as CSV and PDF from **Reports**, verify exact CKB and
+Sepolia rows plus explicit `unavailable` legacy fields, restart ChainPay, and
+repeat. Follow the compliance-export smoke playbook.
 
 ## Phase 5+ — Adapter expansion
 

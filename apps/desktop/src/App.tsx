@@ -18,6 +18,7 @@ import { Settings } from "./features/settings/Settings";
 import { SourceList } from "./features/send/SourceList";
 import { SendPanel } from "./features/send/SendPanel";
 import { KeyvaultSetupPanel } from "./features/keyvault/KeyvaultSetupPanel";
+import { ComplianceExport } from "./features/reports/ComplianceExport";
 import { useSendConfirmationToAccounting } from "./lib/send/use-send-confirmation-to-accounting";
 import { useSyncStore } from "./stores/sync";
 import { useNetworkConfigStore } from "./stores/network-config";
@@ -254,6 +255,7 @@ export function App() {
         <Route path="/payments" element={<PayPanel />} />
         <Route path="/sign" element={<SignPanel />} />
         <Route path="/employees" element={<Employees />} />
+        <Route path="/reports" element={<ComplianceExport />} />
         <Route path="/settings" element={<Settings />} />
         <Route path="/send" element={<SendPanel />} />
         <Route path="/send/sources" element={<SourceList />} />

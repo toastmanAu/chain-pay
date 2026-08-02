@@ -12,6 +12,7 @@ from frappe.utils import get_datetime
 
 from crypto_payroll.setup.custom_fields import ensure_custom_fields
 from crypto_payroll.setup.seed import ensure_cost_center, ensure_fiscal_year
+from crypto_payroll.compliance import export_payload, normalise_filters
 
 COMPANY = "ChainPay Test"
 COMPANY_CURRENCY = "USD"
@@ -454,3 +455,10 @@ def post_confirmed_payment(record: dict) -> dict:
     result["record_name"] = persist_result["batch_name"]
     result["record_idempotent"] = persist_result["idempotent"]
     return result
+
+
+@frappe.whitelist()
+def export_compliance(filters: dict | str | None = None, format: str = "csv") -> dict:
+    """Export server-owned submitted payment evidence; callers provide filters only."""
+    frappe.only_for(["Accounts Manager", "Accounts User"])
+    return export_payload(normalise_filters(filters), str(format).lower())

@@ -106,7 +106,7 @@ export function Settings() {
         <Card title="CKB network" body="Testnet · embedded light client (reads)" />
         <Card title="EVM chains" body="Phase 3 — not connected" />
         <Card title="Signer transports" body="ckb-cli keystore (CKB); injected wallet + WalletConnect v2 (Sepolia Safe). JoyID and Ledger remain future transports." />
-        <Card title="Frappe backend" body="Not connected · Phase 4" />
+        <Card title="Frappe backend" body="Main-process accounting bridge · submitted records, Journal Entries, compliance exports" />
       </div>
       <CommChannelSection />
       <PeerBookSection />

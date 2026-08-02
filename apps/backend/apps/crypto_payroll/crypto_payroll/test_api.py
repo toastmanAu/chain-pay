@@ -1,18 +1,31 @@
 import copy
+from dataclasses import fields as dataclass_fields
 
 import frappe
 from frappe.tests.utils import FrappeTestCase
 
 from crypto_payroll.api import (
+    export_compliance,
     persist_confirmed_payment,
     post_confirmed_payment,
     post_journal,
 )
 from crypto_payroll.setup import seed
 from crypto_payroll.setup.custom_fields import ensure_custom_fields
+from crypto_payroll.compliance import (
+    ComplianceFilters,
+    ComplianceRow,
+    format_units,
+    render_pdf,
+)
 
 COMPANY = "ChainPay Test"
-_IDS = ["secure-A", "secure-B", "secure-C", "secure-D", "secure-E", "secure-EVM-A", "secure-EVM-B"]
+_IDS = [
+    "secure-A", "secure-B", "secure-C", "secure-D", "secure-E",
+    "secure-EVM-A", "secure-EVM-B", "secure-EXPORT-CKB", "secure-EXPORT-EVM",
+    "secure-EXPORT-FORMULA", "secure-EXPORT-TAMPER",
+    "secure-EXPORT-SOURCE-TAMPER",
+]
 
 
 def _record(batch_id="secure-A", tx_byte="aa", minor="50"):
@@ -107,6 +120,26 @@ class TestConfirmedPaymentAccounting(FrappeTestCase):
         self.assertEqual(batch.fiat_total_minor, "50")
         self.assertEqual(batch.payments[0].fiat_minor, "50")
         self.assertEqual(len(batch.record_digest), 64)
+
+    def test_compliance_unit_formatting_is_exact_and_never_float_rounded(self):
+        self.assertEqual(format_units("10000000000000000", 18), "0.01")
+        self.assertEqual(format_units("123450000", 8), "1.2345")
+        self.assertEqual(format_units("999999999999999999999999999999", 18), "999999999999.999999999999999999")
+        self.assertEqual(format_units("50", 2), "0.5")
+
+    def test_compliance_pdf_paginates_deterministically(self):
+        values = {
+            field.name: f"value-{field.name}" for field in dataclass_fields(ComplianceRow)
+        }
+        values["payee_reference"] = "José 💼"
+        row = ComplianceRow(**values)
+        first = render_pdf([row, row, row, row], ComplianceFilters())
+        second = render_pdf([row, row, row, row], ComplianceFilters())
+        self.assertEqual(first, second)
+        self.assertIn(b"/Count 3", first)
+        self.assertIn(b"Page 1 of 3", first)
+        self.assertIn(b"Page 3 of 3", first)
+        self.assertIn(b"Jos\\\\u00E9 \\\\U0001F4BC", first)
 
     def test_posts_server_derived_balanced_journal_for_fifty_cents(self):
         result = post_confirmed_payment(_record())
@@ -275,6 +308,149 @@ class TestConfirmedPaymentAccounting(FrappeTestCase):
         try:
             with self.assertRaises(frappe.PermissionError):
                 persist_confirmed_payment(_record())
+        finally:
+            frappe.local.flags.in_test = True
+            frappe.set_user("Administrator")
+
+    def test_compliance_csv_is_server_derived_stable_and_covers_ckb_and_evm(self):
+        ckb = _record("secure-EXPORT-CKB", "71", "12345")
+        ckb["confirmedAt"] = "2026-07-30T08:00:00Z"
+        evm = _evm_record("secure-EXPORT-EVM", "72", "73")
+        evm["confirmedAt"] = "2026-08-01T02:40:00Z"
+        ckb_result = post_confirmed_payment(ckb)
+        post_confirmed_payment(evm)
+        import json
+
+        frappe.db.set_value(
+            "Crypto Payment Batch",
+            ckb_result["record_name"],
+            "fx_snapshot",
+            json.dumps(
+                {
+                    "base": "CKB", "quote": "USD", "rate": "0.004321",
+                    "source": "server-fixture", "taken_at": "2026-07-30T08:00:00Z",
+                },
+                sort_keys=True,
+            ),
+            update_modified=False,
+        )
+        frappe.db.commit()
+
+        filters = {"from_date": "2026-07-01", "to_date": "2026-08-31"}
+        first = export_compliance(filters, "csv")
+        second = export_compliance(filters, "csv")
+        self.assertEqual(first, second)
+        self.assertGreaterEqual(first["row_count"], 2)
+        self.assertRegex(first["filename"], r"^chainpay-compliance-[a-zA-Z0-9.-]+\.csv$")
+
+        import base64
+        import csv
+        import io
+
+        content = base64.b64decode(first["bytes_base64"])
+        parsed = list(csv.DictReader(io.StringIO(content.decode("utf-8-sig"))))
+        ours = {row["batch_id"]: row for row in parsed if row["batch_id"].startswith("secure-EXPORT-")}
+        self.assertEqual(set(ours), {"secure-EXPORT-CKB", "secure-EXPORT-EVM"})
+        self.assertEqual(ours["secure-EXPORT-CKB"]["native_value"], "6100000000")
+        self.assertEqual(ours["secure-EXPORT-CKB"]["native_amount"], "61")
+        self.assertEqual(ours["secure-EXPORT-CKB"]["fiat_amount"], "123.45")
+        self.assertEqual(ours["secure-EXPORT-CKB"]["confirmed_block"], "unavailable")
+        self.assertEqual(ours["secure-EXPORT-CKB"]["network_fee_native_amount"], "unavailable")
+        self.assertEqual(ours["secure-EXPORT-CKB"]["fx_rate"], "0.004321")
+        self.assertEqual(ours["secure-EXPORT-CKB"]["fx_source"], "server-fixture")
+        self.assertEqual(ours["secure-EXPORT-CKB"]["fx_taken_at"], "2026-07-30T08:00:00Z")
+        self.assertEqual(ours["secure-EXPORT-EVM"]["native_amount"], "0.01")
+        self.assertEqual(ours["secure-EXPORT-EVM"]["confirmed_block"], "7123456")
+        self.assertEqual(ours["secure-EXPORT-EVM"]["network_fee_native_amount"], "0.0002 ETH")
+        self.assertEqual(ours["secure-EXPORT-EVM"]["network_fee_payer"], "executor")
+        self.assertEqual(ours["secure-EXPORT-EVM"]["fx_rate"], "unavailable")
+        self.assertTrue(ours["secure-EXPORT-CKB"]["journal_entry"].startswith("ACC-JV-"))
+
+    def test_compliance_pdf_is_deterministic_printable_and_filterable(self):
+        ckb = _record("secure-EXPORT-CKB", "74")
+        ckb["confirmedAt"] = "2026-07-30T08:00:00Z"
+        evm = _evm_record("secure-EXPORT-EVM", "75", "76")
+        evm["confirmedAt"] = "2026-08-01T02:40:00Z"
+        post_confirmed_payment(ckb)
+        post_confirmed_payment(evm)
+        filters = {
+            "from_date": "2026-08-01",
+            "to_date": "2026-08-01",
+            "chain": "evm:11155111",
+        }
+        first = export_compliance(filters, "pdf")
+        second = export_compliance(filters, "pdf")
+        import base64
+
+        pdf = base64.b64decode(first["bytes_base64"])
+        self.assertEqual(first, second)
+        self.assertGreaterEqual(first["row_count"], 1)
+        self.assertTrue(pdf.startswith(b"%PDF-1.4"))
+        self.assertTrue(pdf.endswith(b"%%EOF\n"))
+        self.assertIn(b"Page 1 of", pdf)
+        self.assertIn(b"secure-EXPORT-EVM", pdf)
+        self.assertNotIn(b"secure-EXPORT-CKB", pdf)
+
+    def test_compliance_export_rejects_bad_filters_empty_sets_and_formats(self):
+        with self.assertRaises(frappe.ValidationError):
+            export_compliance({"from_date": "2026-02-30"}, "csv")
+        with self.assertRaises(frappe.ValidationError):
+            export_compliance({"from_date": "2026-08-02", "to_date": "2026-08-01"}, "csv")
+        with self.assertRaises(frappe.ValidationError):
+            export_compliance({"chain": "evm:1"}, "csv")
+        with self.assertRaises(frappe.ValidationError):
+            export_compliance({"records": [{"fiat_minor": "999999"}]}, "csv")
+        with self.assertRaises(frappe.ValidationError):
+            export_compliance({}, "xlsx")
+        with self.assertRaises(frappe.ValidationError):
+            export_compliance({"from_date": "1990-01-01", "to_date": "1990-01-02"}, "csv")
+
+    def test_compliance_csv_neutralises_spreadsheet_formula_values(self):
+        record = _record("secure-EXPORT-FORMULA", "77")
+        record["lines"][0]["payeeId"] = "=HYPERLINK(\"https://attacker.invalid\")"
+        post_confirmed_payment(record)
+        result = export_compliance({"chain": "ckb:testnet"}, "csv")
+        import base64
+
+        content = base64.b64decode(result["bytes_base64"]).decode("utf-8-sig")
+        self.assertIn("'=HYPERLINK", content)
+
+    def test_compliance_export_rejects_a_tampered_journal_binding(self):
+        result = post_confirmed_payment(_record("secure-EXPORT-TAMPER", "78"))
+        frappe.db.set_value(
+            "Journal Entry", result["je_name"], "crypto_tx_hash", "0x" + "79" * 32,
+            update_modified=False,
+        )
+        frappe.db.commit()
+        with self.assertRaises(frappe.ValidationError):
+            export_compliance({"chain": "ckb:testnet"}, "csv")
+
+    def test_compliance_export_rejects_source_fields_changed_after_submission(self):
+        result = post_confirmed_payment(_record("secure-EXPORT-SOURCE-TAMPER", "7a"))
+        batch = frappe.get_doc("Crypto Payment Batch", result["record_name"])
+        frappe.db.set_value(
+            "Crypto Payment Line", batch.payments[0].name, "fiat_minor", "999999",
+            update_modified=False,
+        )
+        frappe.db.commit()
+        with self.assertRaises(frappe.ValidationError):
+            export_compliance({"chain": "ckb:testnet"}, "csv")
+
+    def test_compliance_export_requires_an_accounts_role(self):
+        throwaway_email = "roleless-accounting-user@chainpay.test"
+        if not frappe.db.exists("User", throwaway_email):
+            frappe.get_doc(
+                {
+                    "doctype": "User", "email": throwaway_email, "first_name": "Roleless",
+                    "send_welcome_email": 0,
+                }
+            ).insert(ignore_permissions=True)
+            frappe.db.commit()
+        frappe.local.flags.in_test = False
+        frappe.set_user(throwaway_email)
+        try:
+            with self.assertRaises(frappe.PermissionError):
+                export_compliance({}, "csv")
         finally:
             frappe.local.flags.in_test = True
             frappe.set_user("Administrator")

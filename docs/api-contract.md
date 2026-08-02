@@ -61,7 +61,19 @@ contain GL account selections. Frappe stores it as a submitted
 
 | Method | Endpoint | Body | Returns |
 |---|---|---|---|
-| GET | `crypto_payroll.api.compliance.audit_export` | `?from=YYYY-MM-DD&to=YYYY-MM-DD&format=csv\|pdf` | binary download |
+| POST | `crypto_payroll.api.export_compliance` | `{ filters: { from_date?, to_date?, chain? }, format: "csv"\|"pdf" }` | `{ filename, mime_type, bytes_base64, sha256, row_count }` |
+
+The endpoint accepts filters only. It selects submitted, confirmed
+`Crypto Payment Batch` records with posted Journal Entries, verifies each
+source→journal identity binding, and assembles rows server-side. Dates are
+inclusive `YYYY-MM-DD` values and `chain`, when supplied, is one of
+`ckb:mainnet`, `ckb:testnet`, or `evm:11155111`. Both Accounts Manager and
+Accounts User may export. Empty result sets and malformed/unknown filters are
+errors rather than ambiguous empty files.
+
+CSV and PDF contain the same ordered payment evidence. The response digest is
+checked again in Electron main before its native save dialog writes the file;
+credentials and report bytes do not cross into renderer JavaScript.
 
 ## Type references
 

@@ -98,6 +98,21 @@ the URL correctly.
 See the full walkthrough in
 [../../docs/phase-5-slice-c-smoke-playbook.md](../../docs/phase-5-slice-c-smoke-playbook.md).
 
+## Compliance exports
+
+The role-gated `crypto_payroll.api.export_compliance` endpoint builds CSV and
+printable PDF audit reports exclusively from submitted confirmed-payment
+records and their submitted Journal Entries. Callers provide optional date and
+chain filters; they cannot provide rows or accounting values. Exports retain
+exact crypto smallest-unit values, fiat minor units, transaction evidence,
+Safe/executor gas evidence where applicable, and immutable source/Journal
+references. Older records show `unavailable` for evidence that was never
+persisted instead of estimating it.
+
+The desktop **Reports** screen calls this endpoint through Electron main,
+verifies the returned SHA-256, and writes through the native save dialog. See
+[../../docs/phase-4-compliance-export-smoke-playbook.md](../../docs/phase-4-compliance-export-smoke-playbook.md).
+
 ## API surface (preview)
 
 Same as `chainPay` text spec — endpoints under `/api/method/crypto_payroll.api.*`. See [../../docs/api-contract.md](../../docs/api-contract.md).

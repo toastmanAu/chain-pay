@@ -1,5 +1,6 @@
+import { createHash } from "node:crypto";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { postJournalToFrappe } from "./accounting-host";
+import { fetchComplianceExport, postJournalToFrappe, saveComplianceExport } from "./accounting-host";
 
 const record = {
   batchId: "b1",
@@ -95,5 +96,121 @@ describe("postJournalToFrappe", () => {
       json: async () => ({ message: { idempotent: false } }),
     }));
     await expect(postJournalToFrappe(record)).rejects.toThrow(/invalid response/);
+  });
+});
+
+describe("fetchComplianceExport", () => {
+  beforeEach(() => {
+    process.env.FRAPPE_URL = "http://chainpay.localhost:8001";
+    process.env.FRAPPE_API_KEY = "key";
+    process.env.FRAPPE_API_SECRET = "secret";
+  });
+  afterEach(() => {
+    vi.restoreAllMocks();
+    delete process.env.FRAPPE_URL;
+    delete process.env.FRAPPE_API_KEY;
+    delete process.env.FRAPPE_API_SECRET;
+  });
+
+  function response(content: Uint8Array, format: "csv" | "pdf" = "csv") {
+    return {
+      message: {
+        filename: `chainpay-compliance-all-to-all-all-chains.${format}`,
+        mime_type: format === "csv" ? "text/csv;charset=utf-8" : "application/pdf",
+        bytes_base64: Buffer.from(content).toString("base64"),
+        sha256: createHash("sha256").update(content).digest("hex"),
+        row_count: 2,
+      },
+    };
+  }
+
+  it("sends filters only and verifies the returned CSV digest", async () => {
+    const bytes = Buffer.from("\ufeffbatch_id\r\nb-1\r\n", "utf8");
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => response(bytes) });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await fetchComplianceExport(
+      { fromDate: "2026-07-01", toDate: "2026-07-31", chain: "ckb:testnet" },
+      "csv",
+    );
+
+    expect(Buffer.from(result.bytes)).toEqual(bytes);
+    expect(result.rowCount).toBe(2);
+    const [, init] = fetchMock.mock.calls[0]!;
+    expect(JSON.parse(init.body)).toEqual({
+      filters: { from_date: "2026-07-01", to_date: "2026-07-31", chain: "ckb:testnet" },
+      format: "csv",
+    });
+    expect(init.headers.Authorization).toBe("token key:secret");
+    expect(init.headers.Host).toBeUndefined();
+  });
+
+  it("accepts a valid PDF and rejects mismatched content or digest", async () => {
+    const pdf = Buffer.from("%PDF-1.4\n%%EOF\n");
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true, json: async () => response(pdf, "pdf") }));
+    await expect(fetchComplianceExport({}, "pdf")).resolves.toMatchObject({ rowCount: 2 });
+
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ ...response(pdf, "pdf"), message: { ...response(pdf, "pdf").message, sha256: "0".repeat(64) } }),
+    }));
+    await expect(fetchComplianceExport({}, "pdf")).rejects.toThrow(/integrity/);
+
+    const notPdf = Buffer.from("not a pdf");
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true, json: async () => response(notPdf, "pdf") }));
+    await expect(fetchComplianceExport({}, "pdf")).rejects.toThrow(/invalid PDF/);
+  });
+
+  it("rejects malformed filters before contacting Frappe", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(fetchComplianceExport({ fromDate: "2026-08-03", toDate: "2026-08-02" }, "csv"))
+      .rejects.toThrow(/after/);
+    await expect(fetchComplianceExport({ chain: "evm:1" } as never, "csv"))
+      .rejects.toThrow(/chain/);
+    await expect(fetchComplianceExport({ fromDate: "not-a-date" }, "csv"))
+      .rejects.toThrow(/YYYY-MM-DD/);
+    await expect(fetchComplianceExport({ fromDate: "2026-02-30" }, "csv"))
+      .rejects.toThrow(/calendar date/);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("rejects malformed server envelopes and non-2xx errors", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ message: { filename: "../../escape.csv" } }),
+    }));
+    await expect(fetchComplianceExport({}, "csv")).rejects.toThrow(/invalid response/);
+
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
+      ok: false,
+      status: 403,
+      text: async () => "PermissionError",
+    }));
+    await expect(fetchComplianceExport({}, "csv")).rejects.toThrow(/403|PermissionError/);
+  });
+
+  it("writes verified bytes only after a save path is selected", async () => {
+    const bytes = Buffer.from("\ufeffbatch_id\r\nb-1\r\n", "utf8");
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true, json: async () => response(bytes) }));
+    const write = vi.fn().mockResolvedValue(undefined);
+    const saved = await saveComplianceExport({}, "csv", {
+      choosePath: vi.fn().mockResolvedValue({ canceled: false, filePath: "/tmp/report.csv" }),
+      write: write as never,
+    });
+    expect(write).toHaveBeenCalledWith("/tmp/report.csv", bytes, { mode: 0o600 });
+    expect(saved).toMatchObject({ canceled: false, filePath: "/tmp/report.csv", rowCount: 2 });
+  });
+
+  it("does not write when the native save dialog is canceled", async () => {
+    const bytes = Buffer.from("\ufeffbatch_id\r\nb-1\r\n", "utf8");
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true, json: async () => response(bytes) }));
+    const write = vi.fn();
+    const saved = await saveComplianceExport({}, "csv", {
+      choosePath: vi.fn().mockResolvedValue({ canceled: true }),
+      write: write as never,
+    });
+    expect(saved).toEqual({ canceled: true });
+    expect(write).not.toHaveBeenCalled();
   });
 });

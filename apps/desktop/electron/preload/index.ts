@@ -112,6 +112,19 @@ const chainpayApi = {
       recordName: string;
       recordIdempotent: boolean;
     }> => ipcRenderer.invoke("accounting:postJournal", record),
+    exportCompliance: (
+      filters: {
+        fromDate?: string;
+        toDate?: string;
+        chain?: "ckb:mainnet" | "ckb:testnet" | "evm:11155111";
+      },
+      format: "csv" | "pdf",
+    ): Promise<{
+      canceled: boolean;
+      filePath?: string;
+      rowCount?: number;
+      sha256?: string;
+    }> => ipcRenderer.invoke("accounting:exportCompliance", filters, format),
   },
   keyvault: {
     /** Check whether a keyvault blob exists on disk. */
