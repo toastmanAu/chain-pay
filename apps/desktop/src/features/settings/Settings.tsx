@@ -105,7 +105,7 @@ export function Settings() {
       <div className="grid grid-cols-2 gap-4">
         <Card title="CKB network" body="Testnet · embedded light client (reads)" />
         <Card title="EVM chains" body="Phase 3 — not connected" />
-        <Card title="Signer transports" body="ckb-cli keystore (CKB). JoyID, Ledger, MetaMask, WalletConnect — Phase 3+" />
+        <Card title="Signer transports" body="ckb-cli keystore (CKB); injected wallet + WalletConnect v2 (Sepolia Safe). JoyID and Ledger remain future transports." />
         <Card title="Frappe backend" body="Not connected · Phase 4" />
       </div>
       <CommChannelSection />

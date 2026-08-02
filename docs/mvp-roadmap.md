@@ -58,13 +58,19 @@ See [PHASE-1.md](../PHASE-1.md) for the next-session checklist. Highlights:
 - ✅ Slice D: persist immutable SafeTx + outer transaction receipt evidence,
   derive one idempotent ERPNext Journal Entry server-side, and recover posting
   failures without re-executing the Safe transaction
+- ✅ Slice E: WalletConnect v2 owner sessions with QR/deep-link pairing,
+  restart recovery, and strict signature-only approval interchange between
+  instances holding the same canonical SafeTx
 - `@safe-global/protocol-kit` integration
 - EIP-712 SafeTx signing
 - viem + wagmi for read calls and signer transport
 - Self-coordinate partial sigs by default; Safe Transaction Service as optional config
 - Multi-chain support (Ethereum, Arbitrum, Optimism, Base, Polygon)
 
-**Verification gate:** Sepolia 2-of-3 Safe; MetaMask owner signs from one app instance, WalletConnect owner signs from another; tx executes.
+**Verification gate:** Sepolia 2-of-3 Safe; MetaMask owner signs from one app
+instance, WalletConnect owner signs from another, signature files are exchanged,
+and the tx executes. Automated Slice E coverage is complete; run the two-instance
+smoke playbook for the live gate.
 
 ## Phase 4 — Frappe accounting bridge
 

@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import type { SafeConfig, SafeProtocolFactory, SafeTx } from "./safe";
-import { buildNativeSafePayment, canonicalSafeTxHash, parseSafePayment, safeTxHash, serializeSafePayment } from "./safe";
+import { buildNativeSafePayment, canonicalSafeTxHash, parseSafePayment, safeTxHash, safeTypedData, serializeSafePayment } from "./safe";
 
 const SAFE = "0x1234567890123456789012345678901234567890" as const;
 const RECIPIENT = "0x2222222222222222222222222222222222222222" as const;
@@ -77,6 +77,16 @@ describe("Safe payment construction", () => {
     expect(canonicalSafeTxHash(PAYLOAD)).toBe(
       "0x2659fe58d96bfc8360ad18e40b1dc13aa3645d92836b37c3aeed0f37334d17e1",
     );
+  });
+
+  it("builds a JSON-safe eth_signTypedData_v4 body for the same SafeTx", () => {
+    const typed = safeTypedData(PAYLOAD);
+    expect(() => JSON.stringify(typed)).not.toThrow();
+    expect(typed).toMatchObject({
+      primaryType: "SafeTx",
+      domain: { chainId: 11155111, verifyingContract: SAFE },
+      message: TX,
+    });
   });
 
   it("rejects malformed restored payloads", () => {

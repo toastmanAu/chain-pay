@@ -1,4 +1,4 @@
-import { getAddress, recoverAddress, type Address, type Hex } from "viem";
+import { getAddress, type Address, type Hex } from "viem";
 import type { EvmMultisig, PendingTx } from "@chain-pay/shared";
 import {
   assertSafeReviewBinding,
@@ -7,6 +7,7 @@ import {
   type Eip1193Provider,
 } from "./injected-owner-signer";
 import { canonicalSafeTxHash, parseSafePayment, type SafePaymentPayload, type SafeTx } from "./safe";
+import { verifySafeOwnerSignature } from "./safe-owner-signature";
 
 export interface SafeExecutionSignature {
   signer: Address;
@@ -130,19 +131,15 @@ async function verifiedExecutionSignatures(
     if (!multisig.owners.some((owner) => owner.toLowerCase() === signerKey)) {
       throw new Error(`Stored signer ${signer} is not a current Safe owner`);
     }
-    const data = bytesToHex(stored.bytes);
-    const recovered = await recoverAddress({ hash: digest, signature: data });
-    if (recovered.toLowerCase() !== signerKey) {
-      throw new Error(`Stored signature does not recover to Safe owner ${signer}`);
-    }
+    const { data } = await verifySafeOwnerSignature({
+      digest,
+      signer,
+      signature: stored.bytes,
+    });
     seen.add(signerKey);
     verified.push({ signer, data });
   }
   return verified;
-}
-
-function bytesToHex(bytes: Uint8Array): Hex {
-  return `0x${Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("")}`;
 }
 
 function normalizedOwners(owners: readonly string[]): string {

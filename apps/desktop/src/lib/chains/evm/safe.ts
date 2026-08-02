@@ -6,7 +6,7 @@ import { getEvmRpcUrl } from "./public-client";
 const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
 const UINT_RE = /^(0|[1-9]\d*)$/;
 const SUPPORTED_SAFE_VERSIONS = ["1.3.0", "1.4.1"] as const;
-const SAFE_TX_TYPES = [
+export const SAFE_TX_TYPES = [
   { type: "address", name: "to" },
   { type: "uint256", name: "value" },
   { type: "bytes", name: "data" },
@@ -17,6 +17,11 @@ const SAFE_TX_TYPES = [
   { type: "address", name: "gasToken" },
   { type: "address", name: "refundReceiver" },
   { type: "uint256", name: "nonce" },
+] as const;
+
+export const SAFE_EIP712_DOMAIN_TYPES = [
+  { type: "uint256", name: "chainId" },
+  { type: "address", name: "verifyingContract" },
 ] as const;
 
 export interface SafeConfig {
@@ -162,6 +167,19 @@ export function canonicalSafeTxHash(payload: SafePaymentPayload): Hex {
       nonce: BigInt(payload.tx.nonce),
     },
   });
+}
+
+/** JSON-safe EIP-712 request body for `eth_signTypedData_v4`. */
+export function safeTypedData(payload: SafePaymentPayload) {
+  return {
+    domain: { chainId: payload.chainId, verifyingContract: payload.safeAddress },
+    primaryType: "SafeTx" as const,
+    types: {
+      EIP712Domain: SAFE_EIP712_DOMAIN_TYPES,
+      SafeTx: SAFE_TX_TYPES,
+    },
+    message: { ...payload.tx },
+  };
 }
 
 export function serializeSafePayment(payload: SafePaymentPayload): string {

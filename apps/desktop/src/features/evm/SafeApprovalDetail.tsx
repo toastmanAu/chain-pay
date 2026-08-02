@@ -1,6 +1,7 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { formatEther, type Hex } from "viem";
+import QRCode from "qrcode";
 import { useQuery } from "@tanstack/react-query";
 import type { EvmMultisig } from "@chain-pay/shared";
 import { usePendingTransactionsStore } from "@/stores/pending-transactions";
@@ -10,6 +11,14 @@ import { MetaMaskSafeOwnerSigner } from "@/lib/signers/metamask-safe-owner";
 import { executeSafePayment } from "@/lib/chains/evm/safe-executor";
 import { readEvmExecutionStatus } from "@/lib/chains/evm/execution-status";
 import { postConfirmedSafePayment } from "@/lib/accounting/evm-safe-accounting";
+import {
+  walletConnectSafeOwnerSigner,
+  type WalletConnectStatus,
+} from "@/lib/signers/walletconnect-safe-owner";
+import {
+  parseSafeApproval,
+  serializeSafeApproval,
+} from "@/lib/chains/evm/safe-approval-interchange";
 
 export function SafeApprovalDetail() {
   const { id } = useParams<{ id: string }>();
@@ -27,6 +36,12 @@ export function SafeApprovalDetail() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const walletConnect = useMemo(() => walletConnectSafeOwnerSigner(), []);
+  const [walletConnectStatus, setWalletConnectStatus] = useState<WalletConnectStatus>(
+    walletConnect.snapshot(),
+  );
+  const [pairingQr, setPairingQr] = useState<string | null>(null);
+  const importInput = useRef<HTMLInputElement>(null);
   const payloadResult = useMemo(() => {
     if (!pending) return null;
     try {
@@ -54,6 +69,27 @@ export function SafeApprovalDetail() {
     }
   }, [confirmationQuery.data, markConfirmed, markFailed, pending]);
 
+  useEffect(() => {
+    const unsubscribe = walletConnect.subscribe(setWalletConnectStatus);
+    void walletConnect.restore().catch((caught) => {
+      setError(caught instanceof Error ? caught.message : String(caught));
+    });
+    return unsubscribe;
+  }, [walletConnect]);
+
+  useEffect(() => {
+    const uri = walletConnectStatus.state === "connecting" ? walletConnectStatus.pairingUri : undefined;
+    if (!uri) {
+      setPairingQr(null);
+      return;
+    }
+    let active = true;
+    void QRCode.toDataURL(uri, { width: 256, margin: 1 }).then((data) => {
+      if (active) setPairingQr(data);
+    });
+    return () => { active = false; };
+  }, [walletConnectStatus]);
+
   if (!pending || !treasury || !treasury.multisig.chain.startsWith("evm:")) {
     return <MissingApproval />;
   }
@@ -63,7 +99,20 @@ export function SafeApprovalDetail() {
   const payload = payloadResult.payload;
   const multisig = treasury.multisig as EvmMultisig;
 
-  const handleApprove = async () => {
+  const recordApproval = async (signature: { signerHash: string; bytes: Uint8Array }) => {
+    const added = await recordSignature(
+      pending.id,
+      { ...signature, signedAt: Date.now() },
+      multisig,
+    );
+    setNotice(
+      added
+        ? `Approval recorded from ${signature.signerHash}`
+        : "This owner already approved the payment",
+    );
+  };
+
+  const handleMetaMaskApprove = async () => {
     setBusy(true);
     setError(null);
     setNotice(null);
@@ -75,20 +124,86 @@ export function SafeApprovalDetail() {
         digest: pending.signingDigest,
         context: { pending, multisig },
       });
-      const added = recordSignature(
-        pending.id,
-        { ...signature, signedAt: Date.now() },
-        multisig,
-      );
-      setNotice(
-        added
-          ? `Approval recorded from ${signature.signerHash}`
-          : "This owner already approved the payment",
-      );
+      await recordApproval(signature);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : String(caught));
     } finally {
       setBusy(false);
+    }
+  };
+
+  const handleWalletConnectApprove = async () => {
+    setBusy(true);
+    setError(null);
+    setNotice(null);
+    try {
+      const signature = await walletConnect.sign({
+        chain: pending.chain,
+        digest: pending.signingDigest,
+        context: { pending, multisig },
+      });
+      await recordApproval(signature);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : String(caught));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handlePairWalletConnect = async () => {
+    setBusy(true);
+    setError(null);
+    setNotice(null);
+    try {
+      await walletConnect.connect();
+      setNotice("WalletConnect owner session connected");
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : String(caught));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleDisconnectWalletConnect = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      await walletConnect.disconnect();
+      setNotice("WalletConnect session disconnected");
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "WalletConnect disconnect failed");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleImportApproval = async (file: File | undefined) => {
+    if (!file) return;
+    setBusy(true);
+    setError(null);
+    setNotice(null);
+    try {
+      const signature = await parseSafeApproval({ text: await file.text(), pending, multisig });
+      await recordApproval(signature);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : String(caught));
+    } finally {
+      if (importInput.current) importInput.current.value = "";
+      setBusy(false);
+    }
+  };
+
+  const handleExportApproval = async (signature: (typeof pending.signatures)[number]) => {
+    setError(null);
+    try {
+      const text = await serializeSafeApproval({ pending, multisig, signature });
+      downloadText(
+        `chainpay-safe-approval-${pending.signingDigest.slice(2, 12)}-${signature.signerHash.slice(2, 10)}.json`,
+        text,
+      );
+      setNotice(`Approval exported for ${signature.signerHash}`);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : String(caught));
     }
   };
 
@@ -151,8 +266,15 @@ export function SafeApprovalDetail() {
           <h2 className="text-sm font-medium">Recorded owner approvals</h2>
           <ul className="mt-3 space-y-2">
             {pending.signatures.map((signature) => (
-              <li key={signature.signerHash} className="font-mono text-xs text-fg-muted">
-                {signature.signerHash}
+              <li key={signature.signerHash} className="flex items-center justify-between gap-3 text-xs text-fg-muted">
+                <span className="break-all font-mono">{signature.signerHash}</span>
+                <button
+                  type="button"
+                  onClick={() => void handleExportApproval(signature)}
+                  className="shrink-0 rounded border border-surface-hi px-2 py-1 hover:text-fg"
+                >
+                  Export approval
+                </button>
               </li>
             ))}
           </ul>
@@ -214,23 +336,136 @@ export function SafeApprovalDetail() {
           {pending.failureReason ?? "Safe execution failed"}
         </div>
       ) : (
-        <div className="flex justify-end">
+        <SignerActions
+          busy={busy}
+          walletConnectStatus={walletConnectStatus}
+          pairingQr={pairingQr}
+          onMetaMask={() => void handleMetaMaskApprove()}
+          onPair={() => void handlePairWalletConnect()}
+          onWalletConnect={() => void handleWalletConnectApprove()}
+          onDisconnect={() => void handleDisconnectWalletConnect()}
+          onImport={() => importInput.current?.click()}
+        />
+      )}
+
+      <input
+        ref={importInput}
+        type="file"
+        accept="application/json,.json"
+        aria-label="Import Safe approval file"
+        className="hidden"
+        onChange={(event) => void handleImportApproval(event.target.files?.[0])}
+      />
+
+      {pending.state !== "awaiting_signature" && walletConnectStatus.state === "connected" ? (
+        <div className="flex items-center justify-between gap-3 rounded-md border border-surface-hi bg-surface p-3 text-xs">
+          <span className="break-all font-mono text-fg-muted">WalletConnect: {walletConnectStatus.account}</span>
           <button
             type="button"
-            onClick={() => void handleApprove()}
+            onClick={() => void handleDisconnectWalletConnect()}
             disabled={busy}
-            className="rounded-md bg-accent px-4 py-2 text-sm font-medium text-accent-fg hover:opacity-90 disabled:opacity-40"
+            className={secondaryButtonCls}
           >
-            {busy ? "Waiting for wallet…" : "Connect owner wallet and approve"}
+            Disconnect WalletConnect
           </button>
         </div>
-      )}
+      ) : null}
 
       {notice ? <p role="status" className="text-sm text-accent">{notice}</p> : null}
       {error ? <p role="alert" className="text-sm text-danger">{error}</p> : null}
     </div>
   );
 }
+
+function SignerActions({
+  busy,
+  walletConnectStatus,
+  pairingQr,
+  onMetaMask,
+  onPair,
+  onWalletConnect,
+  onDisconnect,
+  onImport,
+}: {
+  busy: boolean;
+  walletConnectStatus: WalletConnectStatus;
+  pairingQr: string | null;
+  onMetaMask: () => void;
+  onPair: () => void;
+  onWalletConnect: () => void;
+  onDisconnect: () => void;
+  onImport: () => void;
+}) {
+  const pairingUri = walletConnectStatus.state === "connecting" ? walletConnectStatus.pairingUri : undefined;
+  return (
+    <section className="space-y-4 rounded-lg border border-surface-hi bg-surface p-5">
+      <div>
+        <h2 className="text-sm font-medium">Add an owner approval</h2>
+        <p className="mt-1 text-xs text-fg-muted">Every signature is recovered locally against the reviewed SafeTx before persistence.</p>
+      </div>
+      <div className="flex flex-wrap gap-2">
+        <button type="button" onClick={onMetaMask} disabled={busy} className={actionButtonCls}>
+          Approve with browser wallet
+        </button>
+        {walletConnectStatus.state === "connected" ? (
+          <>
+            <button type="button" onClick={onWalletConnect} disabled={busy} className={actionButtonCls}>
+              Approve with WalletConnect
+            </button>
+            <button type="button" onClick={onDisconnect} disabled={busy} className={secondaryButtonCls}>
+              Disconnect WalletConnect
+            </button>
+          </>
+        ) : (
+          <button
+            type="button"
+            onClick={onPair}
+            disabled={busy || walletConnectStatus.state === "unconfigured"}
+            className={actionButtonCls}
+          >
+            Pair WalletConnect
+          </button>
+        )}
+        <button type="button" onClick={onImport} disabled={busy} className={secondaryButtonCls}>
+          Import approval
+        </button>
+      </div>
+      {walletConnectStatus.state === "connected" ? (
+        <p className="break-all font-mono text-xs text-accent">Connected: {walletConnectStatus.account}</p>
+      ) : null}
+      {walletConnectStatus.state === "unconfigured" ? (
+        <p className="text-xs text-warn">WalletConnect unavailable: configure VITE_WALLETCONNECT_PROJECT_ID.</p>
+      ) : null}
+      {walletConnectStatus.state === "expired" ? (
+        <p className="text-xs text-warn">WalletConnect session expired. Pair the wallet again.</p>
+      ) : null}
+      {walletConnectStatus.state === "error" ? (
+        <p className="text-xs text-danger">{walletConnectStatus.message}</p>
+      ) : null}
+      {pairingUri ? (
+        <div className="space-y-3 rounded-md border border-surface-hi bg-bg p-4">
+          <p className="text-xs text-fg-muted">Scan with a WalletConnect-compatible wallet or open the deep link on this device.</p>
+          {pairingQr ? <img src={pairingQr} alt="WalletConnect pairing QR code" className="h-52 w-52 bg-white p-2" /> : null}
+          <a href={pairingUri} className="inline-block text-sm text-accent hover:underline">Open wallet deep link</a>
+        </div>
+      ) : null}
+    </section>
+  );
+}
+
+function downloadText(filename: string, text: string): void {
+  const url = URL.createObjectURL(new Blob([text], { type: "application/json" }));
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = filename;
+  anchor.click();
+  URL.revokeObjectURL(url);
+}
+
+const actionButtonCls =
+  "rounded-md bg-accent px-4 py-2 text-sm font-medium text-accent-fg hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40";
+const secondaryButtonCls =
+  "rounded-md border border-surface-hi bg-bg px-4 py-2 text-sm text-fg-muted hover:text-fg disabled:opacity-40";
 
 function ExecutionStatus({
   label,

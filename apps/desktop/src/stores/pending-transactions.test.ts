@@ -1,9 +1,14 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { EvmMultisig, PendingTx } from "@chain-pay/shared";
+import { privateKeyToAccount } from "viem/accounts";
+import { hexToBytes } from "@/lib/chains/evm/safe-owner-signature";
 import { MemoryStorage } from "./test-utils/memory-storage";
 
-const OWNER = "0x1111111111111111111111111111111111111111";
-const OTHER_OWNER = "0x2222222222222222222222222222222222222222";
+const ownerAccount = privateKeyToAccount(`0x${"01".repeat(32)}`);
+const otherOwnerAccount = privateKeyToAccount(`0x${"02".repeat(32)}`);
+const OWNER = ownerAccount.address;
+const OTHER_OWNER = otherOwnerAccount.address;
+const DIGEST = `0x${"ab".repeat(32)}` as const;
 const MULTISIG: EvmMultisig = {
   chain: "evm:11155111",
   address: "0x1234567890123456789012345678901234567890",
@@ -19,7 +24,7 @@ function pending(): PendingTx {
     treasuryId: "treasury-1",
     chain: "evm:11155111",
     state: "awaiting_signature",
-    signingDigest: `0x${"ab".repeat(32)}`,
+    signingDigest: DIGEST,
     outputs: [{ to: OTHER_OWNER, amount: { asset: "ETH", value: "1", decimals: 18 } }],
     payloadJson: "{}",
     signatures: [],
@@ -43,14 +48,14 @@ describe("pending transaction store", () => {
     const { usePendingTransactionsStore } = await import("./pending-transactions");
     const store = usePendingTransactionsStore.getState();
     store.addTransaction(pending());
-    const first = { signerHash: OWNER, bytes: new Uint8Array(65).fill(1), signedAt: 1 };
-    expect(store.recordEvmSignature("pending-1", first, MULTISIG)).toBe(true);
-    expect(store.recordEvmSignature("pending-1", first, MULTISIG)).toBe(false);
+    const first = { signerHash: OWNER, bytes: hexToBytes(await ownerAccount.sign({ hash: DIGEST })), signedAt: 1 };
+    await expect(store.recordEvmSignature("pending-1", first, MULTISIG)).resolves.toBe(true);
+    await expect(store.recordEvmSignature("pending-1", first, MULTISIG)).resolves.toBe(false);
     expect(usePendingTransactionsStore.getState().findById("pending-1")?.state).toBe("awaiting_signature");
 
-    store.recordEvmSignature(
+    await store.recordEvmSignature(
       "pending-1",
-      { signerHash: OTHER_OWNER, bytes: new Uint8Array(65).fill(2), signedAt: 2 },
+      { signerHash: OTHER_OWNER, bytes: hexToBytes(await otherOwnerAccount.sign({ hash: DIGEST })), signedAt: 2 },
       MULTISIG,
     );
     expect(usePendingTransactionsStore.getState().findById("pending-1")?.state).toBe("ready_to_broadcast");
@@ -60,27 +65,38 @@ describe("pending transaction store", () => {
     const { usePendingTransactionsStore } = await import("./pending-transactions");
     const store = usePendingTransactionsStore.getState();
     store.addTransaction(pending());
-    expect(() =>
+    await expect(
       store.recordEvmSignature(
         "pending-1",
         { signerHash: "0x3333333333333333333333333333333333333333", bytes: new Uint8Array(65), signedAt: 1 },
         MULTISIG,
       ),
-    ).toThrow("not an owner");
-    expect(() =>
+    ).rejects.toThrow("not an owner");
+    await expect(
       store.recordEvmSignature(
         "pending-1",
         { signerHash: OWNER, bytes: new Uint8Array(64), signedAt: 1 },
         MULTISIG,
       ),
-    ).toThrow("65 bytes");
+    ).rejects.toThrow("65 bytes");
+    await expect(
+      store.recordEvmSignature(
+        "pending-1",
+        {
+          signerHash: OWNER,
+          bytes: hexToBytes(await otherOwnerAccount.sign({ hash: DIGEST })),
+          signedAt: 1,
+        },
+        MULTISIG,
+      ),
+    ).rejects.toThrow("does not recover");
   });
 
   it("restores exact signature bytes after store recreation", async () => {
     const first = await import("./pending-transactions");
     first.usePendingTransactionsStore.getState().addTransaction(pending());
-    const bytes = Uint8Array.from({ length: 65 }, (_, index) => index);
-    first.usePendingTransactionsStore.getState().recordEvmSignature(
+    const bytes = hexToBytes(await ownerAccount.sign({ hash: DIGEST }));
+    await first.usePendingTransactionsStore.getState().recordEvmSignature(
       "pending-1",
       { signerHash: OWNER, bytes, signedAt: 123 },
       MULTISIG,

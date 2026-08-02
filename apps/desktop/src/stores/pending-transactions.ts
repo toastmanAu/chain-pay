@@ -8,6 +8,7 @@ import type {
   PendingTx,
   TransactionHash,
 } from "@chain-pay/shared";
+import { verifySafeOwnerSignature } from "@/lib/chains/evm/safe-owner-signature";
 
 interface PendingTransactionsStore {
   transactions: PendingTx[];
@@ -26,7 +27,7 @@ interface PendingTransactionsStore {
     id: string,
     signature: PartialSignature,
     multisig: EvmMultisig,
-  ) => boolean;
+  ) => Promise<boolean>;
 }
 
 export interface EvmConfirmationEvidence {
@@ -137,7 +138,7 @@ export const usePendingTransactionsStore = create<PendingTransactionsStore>()(
         updateLifecycle(set, get, id, ["broadcasted", "confirming"], "failed", {
           failureReason: reason,
         }),
-      recordEvmSignature: (id, signature, multisig) => {
+      recordEvmSignature: async (id, signature, multisig) => {
         const transaction = get().transactions.find((candidate) => candidate.id === id);
         if (!transaction) throw new Error(`pending transaction not found: ${id}`);
         if (transaction.chain !== multisig.chain) throw new Error("treasury chain does not match transaction");
@@ -151,11 +152,24 @@ export const usePendingTransactionsStore = create<PendingTransactionsStore>()(
         if (!multisig.owners.some((owner) => owner.toLowerCase() === signer.toLowerCase())) {
           throw new Error("connected signer is not an owner of this Safe");
         }
-        if (transaction.signatures.some((existing) => existing.signerHash.toLowerCase() === signer.toLowerCase())) {
+        const verified = await verifySafeOwnerSignature({
+          digest: transaction.signingDigest,
+          signer,
+          signature: signature.bytes,
+        });
+        const current = get().transactions.find((candidate) => candidate.id === id);
+        if (!current) throw new Error(`pending transaction not found: ${id}`);
+        if (current.state !== "awaiting_signature" && current.state !== "ready_to_broadcast") {
+          throw new Error(`cannot add a signature while transaction is ${current.state}`);
+        }
+        if (current.signatures.some((existing) => existing.signerHash.toLowerCase() === signer.toLowerCase())) {
           return false;
         }
 
-        const signatures = [...transaction.signatures, { ...signature, signerHash: signer }];
+        const signatures = [
+          ...current.signatures,
+          { ...signature, signerHash: verified.signer, bytes: verified.bytes },
+        ];
         set((state) => ({
           transactions: state.transactions.map((candidate) =>
             candidate.id === id

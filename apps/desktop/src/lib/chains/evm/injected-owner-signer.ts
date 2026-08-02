@@ -1,6 +1,7 @@
-import { getAddress, isAddress, recoverAddress, type Address, type Hex } from "viem";
+import { getAddress, isAddress, type Address, type Hex } from "viem";
 import type { EvmMultisig, PartialSignature, PendingTx } from "@chain-pay/shared";
 import { canonicalSafeTxHash, parseSafePayment, type SafePaymentPayload, type SafeTx } from "./safe";
+import { verifySafeOwnerSignature } from "./safe-owner-signature";
 
 export interface Eip1193Provider {
   request(args: { method: string; params?: readonly unknown[] | object }): Promise<unknown>;
@@ -56,17 +57,15 @@ export async function approveSafePayment(
   if (signature.signer.toLowerCase() !== signer.toLowerCase()) {
     throw new Error("Wallet returned a signature for a different account");
   }
-  if (!/^0x[0-9a-fA-F]{130}$/.test(signature.data)) {
-    throw new Error("Wallet returned a malformed Safe owner signature");
-  }
-  const recovered = await recoverAddress({ hash: recomputedDigest, signature: signature.data });
-  if (recovered.toLowerCase() !== signer.toLowerCase()) {
-    throw new Error("Safe EIP-712 signature does not recover to the connected owner");
-  }
+  const verified = await verifySafeOwnerSignature({
+    digest: recomputedDigest,
+    signer,
+    signature: signature.data,
+  });
 
   return {
     signerHash: signer,
-    bytes: hexToBytes(signature.data),
+    bytes: verified.bytes,
     signedAt: Date.now(),
   };
 }
@@ -152,12 +151,4 @@ export function assertSafeReviewBinding(
   if (payload.tx.data !== "0x" || payload.tx.operation !== 0) {
     throw new Error("Slice B only signs native ETH transfers with empty calldata");
   }
-}
-
-function hexToBytes(hex: Hex): Uint8Array {
-  const bytes = new Uint8Array((hex.length - 2) / 2);
-  for (let index = 0; index < bytes.length; index++) {
-    bytes[index] = Number.parseInt(hex.slice(2 + index * 2, 4 + index * 2), 16);
-  }
-  return bytes;
 }
