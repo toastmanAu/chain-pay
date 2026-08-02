@@ -29,4 +29,5 @@ def ensure_custom_fields() -> None:
     """
     _ensure_journal_field("crypto_batch_id", "Crypto Batch ID", "user_remark")
     _ensure_journal_field("crypto_tx_hash", "Crypto Transaction Hash", "crypto_batch_id")
+    _ensure_journal_field("crypto_safe_tx_hash", "Crypto SafeTx Hash", "crypto_tx_hash")
     frappe.db.commit()

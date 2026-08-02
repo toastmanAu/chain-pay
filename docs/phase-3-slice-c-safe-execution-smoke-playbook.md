@@ -3,7 +3,7 @@
 This slice reconstructs a threshold-approved native-ETH SafeTx, revalidates
 every persisted EOA signature, submits it through an injected owner wallet,
 and tracks the outer Sepolia transaction to a successful or reverted receipt.
-EVM accounting ingestion remains a later slice.
+For the accounting continuation, use the Slice D playbook.
 
 ## Prerequisites
 
@@ -34,7 +34,8 @@ EVM accounting ingestion remains a later slice.
 - The recipient balance increased by the exact reviewed native-ETH value.
 - The SafeTx hash shown by ChainPay is distinct from the outer Ethereum
   transaction hash.
-- No ERPNext source payment or Journal Entry is expected in this slice.
+- With Slice D and Frappe configured, continue through the automatic accounting
+  post using `docs/phase-3-slice-d-safe-accounting-smoke-playbook.md`.
 
 ## Negative checks
 

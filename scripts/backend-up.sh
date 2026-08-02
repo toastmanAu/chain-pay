@@ -60,7 +60,7 @@ bench_site migrate
 log "Seeding test Company + GL accounts"
 bench_site execute crypto_payroll.setup.seed.run
 
-log "Ensuring Journal Entry source-id fields (batch ID + tx hash)…"
+log "Ensuring Journal Entry source-id fields (batch ID + chain tx + SafeTx hash)…"
 bench_site execute crypto_payroll.setup.custom_fields.ensure_custom_fields
 
 log "Running smoke checks"

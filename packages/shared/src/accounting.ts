@@ -9,6 +9,20 @@ export interface ConfirmedPaymentLine {
   crypto: Money;
 }
 
+export interface EvmConfirmedPaymentMetadata {
+  safeAddress: string;
+  safeTxHash: TransactionHash;
+  outerTxHash: TransactionHash;
+  executorAddress: string;
+  recipientAddress: string;
+  confirmedBlockNumber: string;
+  gasUsed: string;
+  effectiveGasPriceWei: string;
+  gasFeeWei: string;
+  /** Safe executions in this slice are submitted and paid by an owner wallet. */
+  gasPayer: "executor";
+}
+
 /**
  * Immutable accounting source record sent to Frappe after chain confirmation.
  * Ledger accounts are deliberately absent: account selection belongs to the
@@ -22,6 +36,8 @@ export interface ConfirmedPaymentRecord {
   txHash: TransactionHash;
   confirmedAt: string;
   lines: ConfirmedPaymentLine[];
+  /** Required by the backend when chain is evm:11155111; absent for CKB records. */
+  evm?: EvmConfirmedPaymentMetadata;
 }
 
 export interface PaymentJournalInput {

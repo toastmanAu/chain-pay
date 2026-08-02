@@ -12,7 +12,7 @@ from crypto_payroll.setup import seed
 from crypto_payroll.setup.custom_fields import ensure_custom_fields
 
 COMPANY = "ChainPay Test"
-_IDS = ["secure-A", "secure-B", "secure-C", "secure-D", "secure-E"]
+_IDS = ["secure-A", "secure-B", "secure-C", "secure-D", "secure-E", "secure-EVM-A", "secure-EVM-B"]
 
 
 def _record(batch_id="secure-A", tx_byte="aa", minor="50"):
@@ -30,6 +30,40 @@ def _record(batch_id="secure-A", tx_byte="aa", minor="50"):
                 "crypto": {"asset": "CKB", "value": "6100000000", "decimals": 8},
             }
         ],
+    }
+
+
+def _evm_record(batch_id="secure-EVM-A", outer_byte="11", safe_byte="22"):
+    return {
+        "batchId": batch_id,
+        "sourceType": "send",
+        "label": f"Safe payment {batch_id}",
+        "chain": "evm:11155111",
+        "txHash": "0x" + outer_byte * 32,
+        "confirmedAt": "2026-08-01T02:40:00Z",
+        "lines": [
+            {
+                "payeeId": "vendor-evm",
+                "fiat": {"currency": "USD", "minor": "2550"},
+                "crypto": {
+                    "asset": "ETH",
+                    "value": "10000000000000000",
+                    "decimals": 18,
+                },
+            }
+        ],
+        "evm": {
+            "safeAddress": "0x1234567890123456789012345678901234567890",
+            "safeTxHash": "0x" + safe_byte * 32,
+            "outerTxHash": "0x" + outer_byte * 32,
+            "executorAddress": "0x1111111111111111111111111111111111111111",
+            "recipientAddress": "0x2222222222222222222222222222222222222222",
+            "confirmedBlockNumber": "7123456",
+            "gasUsed": "100000",
+            "effectiveGasPriceWei": "2000000000",
+            "gasFeeWei": "200000000000000",
+            "gasPayer": "executor",
+        },
     }
 
 
@@ -98,6 +132,41 @@ class TestConfirmedPaymentAccounting(FrappeTestCase):
         self.assertEqual(
             frappe.db.count("Crypto Payment Batch", {"external_id": "secure-B"}), 1
         )
+
+    def test_persists_and_posts_safe_payment_without_charging_executor_gas_to_safe(self):
+        result = post_confirmed_payment(_evm_record())
+        batch = frappe.get_doc("Crypto Payment Batch", result["record_name"])
+        self.assertEqual(batch.safe_tx_hash, "0x" + "22" * 32)
+        self.assertEqual(batch.tx_hash, "0x" + "11" * 32)
+        self.assertEqual(batch.executor_address, "0x1111111111111111111111111111111111111111")
+        self.assertEqual(batch.gas_fee_wei, "200000000000000")
+        self.assertEqual(batch.gas_payer, "executor")
+
+        je = frappe.get_doc("Journal Entry", result["je_name"])
+        self.assertEqual(je.crypto_safe_tx_hash, "0x" + "22" * 32)
+        self.assertEqual(je.crypto_tx_hash, "0x" + "11" * 32)
+        # Only the $25.50 Safe transfer is booked. Executor-paid gas is audit
+        # metadata and must not increase the Safe treasury credit.
+        self.assertEqual(float(je.total_debit), 25.5)
+        self.assertEqual(float(je.total_credit), 25.5)
+        self.assertIn("gas paid by executor", je.user_remark)
+
+    def test_safe_and_outer_hashes_are_both_idempotency_keys(self):
+        first = post_confirmed_payment(_evm_record())
+        second = post_confirmed_payment(_evm_record())
+        self.assertEqual(first["je_name"], second["je_name"])
+        self.assertTrue(second["record_idempotent"])
+        self.assertTrue(second["idempotent"])
+
+        changed_outer = _evm_record("secure-EVM-B", "33", "22")
+        with self.assertRaises(frappe.ValidationError):
+            persist_confirmed_payment(changed_outer)
+
+    def test_rejects_inconsistent_executor_paid_gas(self):
+        bad = _evm_record()
+        bad["evm"]["gasFeeWei"] = "1"
+        with self.assertRaises(frappe.ValidationError):
+            persist_confirmed_payment(bad)
 
     def test_replay_with_changed_amount_is_rejected(self):
         persist_confirmed_payment(_record("secure-C", "cc", "50"))

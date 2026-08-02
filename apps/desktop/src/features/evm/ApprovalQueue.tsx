@@ -54,6 +54,9 @@ function stateLabel(state: string): string {
   if (state === "ready_to_broadcast") return "threshold met";
   if (state === "broadcasted" || state === "confirming") return "confirming";
   if (state === "confirmed") return "confirmed";
+  if (state === "posting") return "posting";
+  if (state === "posted") return "posted";
+  if (state === "post_failed") return "accounting failed";
   if (state === "failed") return "failed";
   return "awaiting signature";
 }

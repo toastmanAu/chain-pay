@@ -9,6 +9,7 @@ import { parseSafePayment } from "@/lib/chains/evm/safe";
 import { MetaMaskSafeOwnerSigner } from "@/lib/signers/metamask-safe-owner";
 import { executeSafePayment } from "@/lib/chains/evm/safe-executor";
 import { readEvmExecutionStatus } from "@/lib/chains/evm/execution-status";
+import { postConfirmedSafePayment } from "@/lib/accounting/evm-safe-accounting";
 
 export function SafeApprovalDetail() {
   const { id } = useParams<{ id: string }>();
@@ -47,7 +48,7 @@ export function SafeApprovalDetail() {
   useEffect(() => {
     if (!pending || pending.state !== "confirming" || !confirmationQuery.data) return;
     if (confirmationQuery.data.state === "confirmed") {
-      markConfirmed(pending.id, confirmationQuery.data.blockNumber);
+      markConfirmed(pending.id, confirmationQuery.data);
     } else if (confirmationQuery.data.state === "failed") {
       markFailed(pending.id, confirmationQuery.data.reason);
     }
@@ -134,6 +135,15 @@ export function SafeApprovalDetail() {
         <ReviewRow label="Calldata" value={payload.tx.data} mono />
         <ReviewRow label="Safe version" value={payload.safeVersion} />
         <ReviewRow label="SafeTx hash" value={pending.signingDigest} mono />
+        {pending.accounting ? (
+          <>
+            <ReviewRow label="Payee reference" value={pending.accounting.payeeId} />
+            <ReviewRow
+              label="Accounting value"
+              value={`${(pending.accounting.fiat.minor / 100n).toString()}.${(pending.accounting.fiat.minor % 100n).toString().padStart(2, "0")} ${pending.accounting.fiat.currency}`}
+            />
+          </>
+        ) : null}
       </section>
 
       {pending.signatures.length > 0 ? (
@@ -169,13 +179,36 @@ export function SafeApprovalDetail() {
           hash={pending.broadcastedHash}
           detail={confirmationQuery.error ? (confirmationQuery.error as Error).message : "Polling for transaction receipt…"}
         />
-      ) : pending.state === "confirmed" ? (
+      ) : pending.state === "confirmed" || pending.state === "posting" ? (
         <ExecutionStatus
-          label="Confirmed"
+          label={pending.state === "posting" ? "Posting to ERPNext" : "Confirmed"}
           hash={pending.broadcastedHash}
-          detail={`Included in block ${pending.confirmedBlockNumber ?? "—"}`}
+          detail={
+            pending.state === "posting"
+              ? "The immutable confirmed-payment record and server-derived Journal Entry are being posted."
+              : `Included in block ${pending.confirmedBlockNumber ?? "—"}`
+          }
           success
         />
+      ) : pending.state === "posted" ? (
+        <ExecutionStatus
+          label="Posted"
+          hash={pending.broadcastedHash}
+          detail={`ERPNext Journal Entry ${pending.journalEntryName ?? "—"}`}
+          success
+        />
+      ) : pending.state === "post_failed" ? (
+        <div className="space-y-3 rounded-md border border-danger/40 bg-danger/5 p-4 text-sm">
+          <p role="alert" className="text-danger">{pending.postError ?? "ERPNext accounting post failed"}</p>
+          <p className="text-xs text-fg-muted">The Safe payment is already confirmed. Retry only re-posts accounting and cannot execute it again.</p>
+          <button
+            type="button"
+            onClick={() => void postConfirmedSafePayment(pending.id)}
+            className="rounded-md bg-accent px-3 py-1.5 text-sm font-medium text-accent-fg"
+          >
+            Retry accounting
+          </button>
+        </div>
       ) : pending.state === "failed" ? (
         <div role="alert" className="rounded-md border border-danger/40 bg-danger/5 p-4 text-sm text-danger">
           {pending.failureReason ?? "Safe execution failed"}

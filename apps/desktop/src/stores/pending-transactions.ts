@@ -3,6 +3,7 @@ import { create } from "zustand";
 import { createJSONStorage, persist, type StateStorage } from "zustand/middleware";
 import type {
   EvmMultisig,
+  EvmAddress,
   PartialSignature,
   PendingTx,
   TransactionHash,
@@ -15,7 +16,11 @@ interface PendingTransactionsStore {
   findById: (id: string) => PendingTx | undefined;
   markBroadcasted: (id: string, hash: TransactionHash) => void;
   markConfirming: (id: string) => void;
-  markConfirmed: (id: string, blockNumber: bigint) => void;
+  markConfirmed: (id: string, confirmation: EvmConfirmationEvidence) => void;
+  markPosting: (id: string) => void;
+  markPosted: (id: string, journalEntryName: string, recordName: string) => void;
+  markPostFailed: (id: string, reason: string) => void;
+  recoverInterruptedPostings: () => void;
   markFailed: (id: string, reason: string) => void;
   recordEvmSignature: (
     id: string,
@@ -23,6 +28,18 @@ interface PendingTransactionsStore {
     multisig: EvmMultisig,
   ) => boolean;
 }
+
+export interface EvmConfirmationEvidence {
+  blockNumber: bigint;
+  confirmedAt: string;
+  executorAddress: EvmAddress;
+  gasUsed: bigint;
+  effectiveGasPriceWei: bigint;
+  gasFeeWei: bigint;
+}
+
+export const INTERRUPTED_EVM_POST_ERROR =
+  "Accounting post was interrupted before ChainPay received the result. Retry is safe and will reuse the immutable source record and Journal Entry.";
 
 const storageImpl: StateStorage = {
   getItem: (name) => globalThis.localStorage?.getItem(name) ?? null,
@@ -32,6 +49,7 @@ const storageImpl: StateStorage = {
 
 function replacer(_key: string, value: unknown): unknown {
   if (value instanceof Uint8Array) return { __chainPayBytes: bytesToHex(value) };
+  if (typeof value === "bigint") return { __chainPayBigInt: value.toString() };
   return value;
 }
 
@@ -43,6 +61,15 @@ function reviver(_key: string, value: unknown): unknown {
     typeof value.__chainPayBytes === "string"
   ) {
     return hexToBytes(value.__chainPayBytes);
+  }
+  if (
+    typeof value === "object" &&
+    value !== null &&
+    "__chainPayBigInt" in value &&
+    typeof value.__chainPayBigInt === "string" &&
+    /^-?\d+$/.test(value.__chainPayBigInt)
+  ) {
+    return BigInt(value.__chainPayBigInt);
   }
   return value;
 }
@@ -72,11 +99,40 @@ export const usePendingTransactionsStore = create<PendingTransactionsStore>()(
       },
       markConfirming: (id) =>
         updateLifecycle(set, get, id, ["broadcasted"], "confirming", {}),
-      markConfirmed: (id, blockNumber) =>
+      markConfirmed: (id, confirmation) =>
         updateLifecycle(set, get, id, ["confirming"], "confirmed", {
-          confirmedBlockNumber: blockNumber.toString(),
-          confirmedAt: new Date().toISOString(),
+          confirmedBlockNumber: confirmation.blockNumber.toString(),
+          confirmedAt: confirmation.confirmedAt,
+          executorAddress: getAddress(confirmation.executorAddress),
+          receiptGasUsed: confirmation.gasUsed.toString(),
+          receiptEffectiveGasPriceWei: confirmation.effectiveGasPriceWei.toString(),
+          receiptGasFeeWei: confirmation.gasFeeWei.toString(),
         }),
+      markPosting: (id) =>
+        updateLifecycle(set, get, id, ["confirmed", "post_failed"], "posting", {
+          postError: undefined,
+        }),
+      markPosted: (id, journalEntryName, recordName) =>
+        updateLifecycle(set, get, id, ["posting"], "posted", {
+          journalEntryName,
+          accountingRecordName: recordName,
+          postError: undefined,
+        }),
+      markPostFailed: (id, reason) =>
+        updateLifecycle(set, get, id, ["posting"], "post_failed", { postError: reason }),
+      recoverInterruptedPostings: () =>
+        set((state) => ({
+          transactions: state.transactions.map((transaction) =>
+            transaction.state === "posting"
+              ? {
+                  ...transaction,
+                  state: "post_failed" as const,
+                  postError: INTERRUPTED_EVM_POST_ERROR,
+                  updatedAt: new Date().toISOString(),
+                }
+              : transaction,
+          ),
+        })),
       markFailed: (id, reason) =>
         updateLifecycle(set, get, id, ["broadcasted", "confirming"], "failed", {
           failureReason: reason,
@@ -121,8 +177,10 @@ export const usePendingTransactionsStore = create<PendingTransactionsStore>()(
     {
       name: "chain-pay:pending-transactions",
       storage: createJSONStorage(() => storageImpl, { replacer, reviver }),
-      version: 1,
+      version: 2,
+      migrate: (persisted) => persisted as PendingTransactionsStore,
       partialize: (state) => ({ transactions: state.transactions }),
+      onRehydrateStorage: () => (state) => state?.recoverInterruptedPostings(),
     },
   ),
 );

@@ -1,5 +1,6 @@
 import type { EvmAddress, Hex20, Identified, Iso8601, PayeeAddress, Timestamped, TransactionHash } from "./types";
 import type { ChainId } from "./chainIds";
+import type { FiatAmount } from "./money";
 
 export interface CkbMultisig {
   chain: "ckb:mainnet" | "ckb:testnet";
@@ -51,6 +52,9 @@ export type PendingTxState =
   | "broadcasted"
   | "confirming"
   | "confirmed"
+  | "posting"
+  | "posted"
+  | "post_failed"
   | "failed"
   | "cancelled";
 
@@ -69,6 +73,16 @@ export interface PendingTx extends Identified, Timestamped {
   /** EVM/chain receipt block, stored as decimal text for lossless persistence. */
   confirmedBlockNumber?: string;
   confirmedAt?: Iso8601;
+  /** User-reviewed accounting identity and fiat valuation, committed before signing. */
+  accounting?: { payeeId: string; fiat: FiatAmount };
+  /** Receipt evidence for an EVM execution; all integer values are decimal text. */
+  executorAddress?: EvmAddress;
+  receiptGasUsed?: string;
+  receiptEffectiveGasPriceWei?: string;
+  receiptGasFeeWei?: string;
+  accountingRecordName?: string;
+  journalEntryName?: string;
+  postError?: string | undefined;
   failureReason?: string;
 }
 

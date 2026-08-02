@@ -18,6 +18,7 @@ COMPANY_CURRENCY = "USD"
 EXPENSE_ACCOUNT = "Salary or Wage Expense"
 TREASURY_ACCOUNT = "Crypto Treasury Asset"
 _TX_HASH = re.compile(r"^0x[0-9a-fA-F]{64}$")
+_EVM_ADDRESS = re.compile(r"^0x[0-9a-fA-F]{40}$")
 
 
 def _minor_to_major(minor: str) -> Decimal:
@@ -49,8 +50,8 @@ def _normalise_record(record: dict | str) -> dict:
         frappe.throw("record.sourceType must be send or payroll")
 
     chain = str(record.get("chain") or "")
-    if chain not in {"ckb:mainnet", "ckb:testnet"}:
-        frappe.throw("record.chain must be ckb:mainnet or ckb:testnet")
+    if chain not in {"ckb:mainnet", "ckb:testnet", "evm:11155111"}:
+        frappe.throw("record.chain must be a supported CKB network or evm:11155111")
 
     tx_hash = str(record.get("txHash") or "").lower()
     if not _TX_HASH.fullmatch(tx_hash):
@@ -108,8 +109,14 @@ def _normalise_record(record: dict | str) -> dict:
         if crypto_decimals < 0 or crypto_decimals > 30:
             frappe.throw(f"record.lines[{index}].crypto.decimals is invalid")
         crypto_asset = str(crypto.get("asset") or "").upper()
-        if crypto_asset != "CKB" or crypto_decimals != 8:
-            frappe.throw(f"record.lines[{index}] must contain CKB with 8 decimals")
+        expected_asset, expected_decimals = (
+            ("ETH", 18) if chain == "evm:11155111" else ("CKB", 8)
+        )
+        if crypto_asset != expected_asset or crypto_decimals != expected_decimals:
+            frappe.throw(
+                f"record.lines[{index}] must contain {expected_asset} "
+                f"with {expected_decimals} decimals"
+            )
         payee_id = str(raw.get("payeeId") or "").strip()
         if not payee_id or len(payee_id) > 140:
             frappe.throw(f"record.lines[{index}].payeeId is required")
@@ -125,6 +132,52 @@ def _normalise_record(record: dict | str) -> dict:
             }
         )
 
+    evm = None
+    if chain == "evm:11155111":
+        raw_evm = record.get("evm")
+        if not isinstance(raw_evm, dict):
+            frappe.throw("record.evm is required for a Sepolia payment")
+        address_fields = ("safeAddress", "executorAddress", "recipientAddress")
+        addresses = {}
+        for field in address_fields:
+            value = str(raw_evm.get(field) or "").lower()
+            if not _EVM_ADDRESS.fullmatch(value):
+                frappe.throw(f"record.evm.{field} must be a 20-byte EVM address")
+            addresses[field] = value
+        safe_tx_hash = str(raw_evm.get("safeTxHash") or "").lower()
+        outer_tx_hash = str(raw_evm.get("outerTxHash") or "").lower()
+        if not _TX_HASH.fullmatch(safe_tx_hash):
+            frappe.throw("record.evm.safeTxHash must be a 32-byte hash")
+        if outer_tx_hash != tx_hash:
+            frappe.throw("record.evm.outerTxHash must match record.txHash")
+        try:
+            confirmed_block = int(str(raw_evm.get("confirmedBlockNumber")))
+            gas_used = int(str(raw_evm.get("gasUsed")))
+            gas_price = int(str(raw_evm.get("effectiveGasPriceWei")))
+            gas_fee = int(str(raw_evm.get("gasFeeWei")))
+        except (TypeError, ValueError):
+            frappe.throw("record.evm receipt values must be decimal integers")
+        if confirmed_block <= 0 or gas_used <= 0 or gas_price <= 0:
+            frappe.throw("record.evm block and gas values must be positive")
+        if gas_fee != gas_used * gas_price:
+            frappe.throw("record.evm.gasFeeWei must equal gasUsed × effectiveGasPriceWei")
+        if raw_evm.get("gasPayer") != "executor":
+            frappe.throw("record.evm.gasPayer must be executor")
+        evm = {
+            "safe_address": addresses["safeAddress"],
+            "safe_tx_hash": safe_tx_hash,
+            "outer_tx_hash": outer_tx_hash,
+            "executor_address": addresses["executorAddress"],
+            "recipient_address": addresses["recipientAddress"],
+            "confirmed_block_number": str(confirmed_block),
+            "gas_used": str(gas_used),
+            "effective_gas_price_wei": str(gas_price),
+            "gas_fee_wei": str(gas_fee),
+            "gas_payer": "executor",
+        }
+    elif record.get("evm") is not None:
+        frappe.throw("record.evm is only valid for EVM payments")
+
     return {
         "batch_id": batch_id,
         "source_type": source_type,
@@ -135,6 +188,7 @@ def _normalise_record(record: dict | str) -> dict:
         "fiat_currency": currency,
         "fiat_total_minor": str(total_minor),
         "lines": lines,
+        "evm": evm,
     }
 
 
@@ -154,9 +208,17 @@ def _existing_batch(normalised: dict, digest: str):
     tx_name = frappe.db.get_value(
         "Crypto Payment Batch", {"tx_hash": normalised["tx_hash"]}, "name"
     )
-    if tx_name and name and tx_name != name:
-        frappe.throw("transaction hash is already attached to a different payment record")
-    name = name or tx_name
+    safe_name = None
+    if normalised["evm"]:
+        safe_name = frappe.db.get_value(
+            "Crypto Payment Batch",
+            {"safe_tx_hash": normalised["evm"]["safe_tx_hash"]},
+            "name",
+        )
+    identities = {candidate for candidate in (name, tx_name, safe_name) if candidate}
+    if len(identities) > 1:
+        frappe.throw("confirmed payment identifiers belong to different source records")
+    name = name or tx_name or safe_name
     if not name:
         return None
     batch = frappe.get_doc("Crypto Payment Batch", name)
@@ -171,7 +233,7 @@ def _existing_batch(normalised: dict, digest: str):
 
 @frappe.whitelist()
 def persist_confirmed_payment(record: dict) -> dict:
-    """Persist and submit an immutable confirmed CKB payment, idempotently."""
+    """Persist and submit an immutable confirmed chain payment, idempotently."""
     frappe.only_for(["Accounts Manager", "Accounts User"])
     normalised = _normalise_record(record)
     digest = _digest(normalised)
@@ -179,22 +241,25 @@ def persist_confirmed_payment(record: dict) -> dict:
     if existing:
         return {"batch_name": existing.name, "idempotent": True}
 
-    batch = frappe.get_doc(
-        {
-            "doctype": "Crypto Payment Batch",
-            "label": normalised["label"],
-            "external_id": normalised["batch_id"],
-            "source_type": normalised["source_type"],
-            "chain": normalised["chain"],
-            "confirmed_at": normalised["confirmed_at"],
-            "fiat_currency": normalised["fiat_currency"],
-            "fiat_total_minor": normalised["fiat_total_minor"],
-            "record_digest": digest,
-            "state": "confirmed",
-            "tx_hash": normalised["tx_hash"],
-            "payments": normalised["lines"],
-        }
-    )
+    values = {
+        "doctype": "Crypto Payment Batch",
+        "label": normalised["label"],
+        "external_id": normalised["batch_id"],
+        "source_type": normalised["source_type"],
+        "chain": normalised["chain"],
+        "confirmed_at": normalised["confirmed_at"],
+        "fiat_currency": normalised["fiat_currency"],
+        "fiat_total_minor": normalised["fiat_total_minor"],
+        "record_digest": digest,
+        "state": "confirmed",
+        "tx_hash": normalised["tx_hash"],
+        "payments": normalised["lines"],
+    }
+    if normalised["evm"]:
+        values.update(
+            {key: value for key, value in normalised["evm"].items() if key != "outer_tx_hash"}
+        )
+    batch = frappe.get_doc(values)
     try:
         batch.insert(ignore_permissions=True)
         batch.submit()
@@ -221,37 +286,46 @@ def _load_confirmed_batch(batch_id: str):
 
 
 def _submitted_journal(
-    batch_id: str, tx_hash: str, expected_total: Decimal | None = None
+    batch_id: str,
+    tx_hash: str,
+    safe_tx_hash: str | None = None,
+    expected_total: Decimal | None = None,
 ) -> str | None:
+    fields = [
+        "name",
+        "docstatus",
+        "crypto_batch_id",
+        "crypto_tx_hash",
+        "crypto_safe_tx_hash",
+        "total_debit",
+        "total_credit",
+    ]
     by_batch = frappe.db.get_value(
         "Journal Entry",
         {"crypto_batch_id": batch_id},
-        [
-            "name",
-            "docstatus",
-            "crypto_batch_id",
-            "crypto_tx_hash",
-            "total_debit",
-            "total_credit",
-        ],
+        fields,
         as_dict=True,
     )
     by_tx = frappe.db.get_value(
         "Journal Entry",
         {"crypto_tx_hash": tx_hash},
-        [
-            "name",
-            "docstatus",
-            "crypto_batch_id",
-            "crypto_tx_hash",
-            "total_debit",
-            "total_credit",
-        ],
+        fields,
         as_dict=True,
     )
-    if by_batch and by_tx and by_batch.name != by_tx.name:
-        frappe.throw("accounting idempotency conflict between batch ID and transaction hash")
-    existing = by_batch or by_tx
+    by_safe = None
+    if safe_tx_hash:
+        by_safe = frappe.db.get_value(
+            "Journal Entry",
+            {"crypto_safe_tx_hash": safe_tx_hash},
+            fields,
+            as_dict=True,
+        )
+    identities = {
+        candidate.name for candidate in (by_batch, by_tx, by_safe) if candidate
+    }
+    if len(identities) > 1:
+        frappe.throw("accounting idempotency conflict between confirmed source identifiers")
+    existing = by_batch or by_tx or by_safe
     if not existing:
         return None
     if existing.docstatus != 1:
@@ -275,7 +349,11 @@ def _submitted_journal(
             update_modified=False,
         )
         by_batch.crypto_tx_hash = tx_hash
-    if existing.crypto_batch_id != batch_id or existing.crypto_tx_hash != tx_hash:
+    if (
+        existing.crypto_batch_id != batch_id
+        or existing.crypto_tx_hash != tx_hash
+        or (safe_tx_hash and existing.crypto_safe_tx_hash != safe_tx_hash)
+    ):
         frappe.throw("Journal Entry source identity does not match the confirmed payment")
     return existing.name
 
@@ -292,7 +370,10 @@ def post_journal(batch_id: str) -> dict:
         (_minor_to_major(line.fiat_minor) for line in batch.payments), Decimal(0)
     )
 
-    existing = _submitted_journal(batch_id, batch.tx_hash, source_total)
+    safe_tx_hash = batch.safe_tx_hash or None
+    existing = _submitted_journal(
+        batch_id, batch.tx_hash, safe_tx_hash=safe_tx_hash, expected_total=source_total
+    )
     if existing:
         batch.db_set("journal_entry", existing, update_modified=False)
         batch.db_set("journal_posted", 1, update_modified=False)
@@ -331,7 +412,15 @@ def post_journal(batch_id: str) -> dict:
             "posting_date": batch.confirmed_at.date(),
             "crypto_batch_id": batch_id,
             "crypto_tx_hash": batch.tx_hash,
-            "user_remark": f"ChainPay {batch.source_type} {batch_id} · {batch.tx_hash}",
+            "crypto_safe_tx_hash": safe_tx_hash,
+            "user_remark": (
+                f"ChainPay {batch.source_type} {batch_id} · {batch.tx_hash}"
+                + (
+                    f" · SafeTx {safe_tx_hash} · gas paid by executor {batch.executor_address}"
+                    if safe_tx_hash
+                    else ""
+                )
+            ),
             "accounts": accounts,
         }
     )
@@ -343,7 +432,12 @@ def post_journal(batch_id: str) -> dict:
         frappe.db.commit()
     except frappe.UniqueValidationError:
         frappe.db.rollback()
-        existing = _submitted_journal(batch_id, batch.tx_hash, source_total)
+        existing = _submitted_journal(
+            batch_id,
+            batch.tx_hash,
+            safe_tx_hash=safe_tx_hash,
+            expected_total=source_total,
+        )
         if existing:
             return {"je_name": existing, "idempotent": True}
         raise

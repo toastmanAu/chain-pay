@@ -16,6 +16,8 @@ export function CreateSafePayment() {
   const addTransaction = usePendingTransactionsStore((state) => state.addTransaction);
   const [recipient, setRecipient] = useState("");
   const [amount, setAmount] = useState("");
+  const [payeeId, setPayeeId] = useState("");
+  const [fiatValue, setFiatValue] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const navigate = useNavigate();
@@ -33,6 +35,8 @@ export function CreateSafePayment() {
     setError(null);
     try {
       const valueWei = parsePositiveEth(amount);
+      const fiatMinor = parsePositiveUsd(fiatValue);
+      const accountingPayeeId = parsePayeeId(payeeId);
       const snapshot = await readSafeSnapshot(chainId, multisig.address);
       if (valueWei > snapshot.balanceWei) {
         throw new Error(`Safe balance is ${formatEther(snapshot.balanceWei)} ETH`);
@@ -50,6 +54,10 @@ export function CreateSafePayment() {
         treasury,
         payload: built.payload,
         signingDigest: built.signingDigest,
+        accounting: {
+          payeeId: accountingPayeeId,
+          fiat: { currency: "USD", minor: fiatMinor },
+        },
       });
       addTransaction(pending);
       navigate(`/approvals/${pending.id}`);
@@ -103,6 +111,25 @@ export function CreateSafePayment() {
             className={inputCls}
           />
         </Field>
+        <Field label="Payee / accounting reference" hint="Stored with the immutable source record">
+          <input
+            aria-label="Payee / accounting reference"
+            value={payeeId}
+            onChange={(event) => setPayeeId(event.target.value)}
+            placeholder="vendor-1"
+            className={inputCls}
+          />
+        </Field>
+        <Field label="Accounting value" hint="USD · used for the server-derived Journal Entry">
+          <input
+            aria-label="Accounting value"
+            value={fiatValue}
+            onChange={(event) => setFiatValue(event.target.value)}
+            inputMode="decimal"
+            placeholder="25.00"
+            className={inputCls}
+          />
+        </Field>
 
         {error ? (
           <div role="alert" className="rounded-md border border-danger/40 bg-danger/5 p-3 text-sm text-danger">
@@ -119,7 +146,7 @@ export function CreateSafePayment() {
           </Link>
           <button
             type="submit"
-            disabled={!recipient.trim() || !amount.trim() || busy}
+            disabled={!recipient.trim() || !amount.trim() || !payeeId.trim() || !fiatValue.trim() || busy}
             className="rounded-md bg-accent px-4 py-2 text-sm font-medium text-accent-fg hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
           >
             {busy ? "Building SafeTx…" : "Build and review"}
@@ -128,6 +155,22 @@ export function CreateSafePayment() {
       </form>
     </div>
   );
+}
+
+function parsePositiveUsd(value: string): bigint {
+  const match = /^(\d+)(?:\.(\d{1,2}))?$/.exec(value.trim());
+  if (!match) throw new Error("Enter a valid USD amount with at most 2 decimal places");
+  const minor = BigInt(match[1]!) * 100n + BigInt((match[2] ?? "").padEnd(2, "0"));
+  if (minor <= 0n) throw new Error("Accounting value must be greater than zero");
+  return minor;
+}
+
+function parsePayeeId(value: string): string {
+  const trimmed = value.trim();
+  if (!trimmed || trimmed.length > 140) {
+    throw new Error("Payee / accounting reference must be 1–140 characters");
+  }
+  return trimmed;
 }
 
 function parsePositiveEth(value: string): bigint {

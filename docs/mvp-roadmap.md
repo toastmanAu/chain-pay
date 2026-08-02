@@ -55,6 +55,9 @@ See [PHASE-1.md](../PHASE-1.md) for the next-session checklist. Highlights:
   hash, collect one injected-wallet owner signature, and persist the approval
 - ✅ Slice C: revalidate and assemble threshold signatures, execute through an
   injected owner wallet, persist the outer tx hash, and track its receipt
+- ✅ Slice D: persist immutable SafeTx + outer transaction receipt evidence,
+  derive one idempotent ERPNext Journal Entry server-side, and recover posting
+  failures without re-executing the Safe transaction
 - `@safe-global/protocol-kit` integration
 - EIP-712 SafeTx signing
 - viem + wagmi for read calls and signer transport
@@ -69,13 +72,15 @@ See [PHASE-1.md](../PHASE-1.md) for the next-session checklist. Highlights:
 - ✅ Persist confirmed CKB payment records and child lines as submitted DocTypes
 - ✅ Derive Journal Entries server-side without caller-selected accounts/amounts
 - ✅ Enforce immutable-record, batch-ID, and transaction-hash idempotency
-- EVM confirmed-payment ingestion follows Phase 3
+- ✅ Sepolia Safe confirmed-payment ingestion with SafeTx + outer-hash
+  idempotency and executor-paid gas metadata
 - Compliance export: CSV/PDF with payslip + crypto + FX + tx hash + network fee
 - REST endpoints wired per [api-contract.md](./api-contract.md)
 
-**CKB verification gate:** A confirmed testnet payment produces one persisted
+**Accounting verification gate:** A confirmed testnet payment produces one persisted
 source record and one balanced submitted Journal Entry; replay returns both
-existing records. Full phase gate still requires the EVM path after Phase 3.
+existing records. Automated coverage now spans CKB and Sepolia Safe sources;
+run the Slice D smoke playbook for the live EVM gate.
 
 ## Phase 5+ — Adapter expansion
 

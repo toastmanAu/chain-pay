@@ -86,6 +86,8 @@ describe("CreateSafePayment", () => {
     );
     fireEvent.change(screen.getByLabelText("Recipient"), { target: { value: RECIPIENT } });
     fireEvent.change(screen.getByLabelText("Amount"), { target: { value: "0.01" } });
+    fireEvent.change(screen.getByLabelText("Payee / accounting reference"), { target: { value: "vendor-1" } });
+    fireEvent.change(screen.getByLabelText("Accounting value"), { target: { value: "25.50" } });
     fireEvent.click(screen.getByRole("button", { name: "Build and review" }));
 
     expect(await screen.findByText("approval route")).toBeInTheDocument();
@@ -99,6 +101,7 @@ describe("CreateSafePayment", () => {
       treasuryId: "safe-1",
       state: "awaiting_signature",
       outputs: [{ to: RECIPIENT, amount: { asset: "ETH", value: PAYLOAD.tx.value, decimals: 18 } }],
+      accounting: { payeeId: "vendor-1", fiat: { currency: "USD", minor: 2550n } },
     });
   });
 
@@ -119,6 +122,8 @@ describe("CreateSafePayment", () => {
     );
     fireEvent.change(screen.getByLabelText("Recipient"), { target: { value: RECIPIENT } });
     fireEvent.change(screen.getByLabelText("Amount"), { target: { value: "1" } });
+    fireEvent.change(screen.getByLabelText("Payee / accounting reference"), { target: { value: "vendor-1" } });
+    fireEvent.change(screen.getByLabelText("Accounting value"), { target: { value: "25.00" } });
     fireEvent.click(screen.getByRole("button", { name: "Build and review" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("Safe balance is");
     expect(buildNativeSafePayment).not.toHaveBeenCalled();

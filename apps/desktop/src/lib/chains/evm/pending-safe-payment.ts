@@ -7,6 +7,7 @@ export function pendingSafePayment(args: {
   treasury: Treasury;
   payload: SafePaymentPayload;
   signingDigest: `0x${string}`;
+  accounting: NonNullable<PendingTx["accounting"]>;
   createdAt?: string;
 }): PendingTx {
   if (!args.treasury.multisig.chain.startsWith("evm:")) {
@@ -34,6 +35,7 @@ export function pendingSafePayment(args: {
     ],
     payloadJson: serializeSafePayment(args.payload),
     signatures: [],
+    accounting: args.accounting,
     createdAt,
     updatedAt: createdAt,
   };

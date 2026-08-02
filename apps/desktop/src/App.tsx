@@ -32,6 +32,7 @@ import { usePayrollBatchesStore } from "./stores/payroll-batches";
 import { useCommSendRetry } from "./features/payments/useCommSendRetry";
 import { useBatchConfirmationSync } from "./lib/invoices/use-batch-confirmation-to-invoice";
 import { useBatchConfirmationToAccounting } from "./lib/accounting/use-batch-confirmation-to-accounting";
+import { useSafeConfirmationToAccounting } from "./lib/accounting/use-safe-confirmation-to-accounting";
 import { isExpired } from "./lib/comm/expires-at";
 import type { OutgoingPacket } from "./lib/comm/types";
 import type { TransferPacket } from "@chain-pay/shared";
@@ -234,6 +235,7 @@ export function App() {
   useBatchConfirmationSync();
   useBatchConfirmationToAccounting();
   useSendConfirmationToAccounting();
+  useSafeConfirmationToAccounting();
 
   return (
     <AppShell>

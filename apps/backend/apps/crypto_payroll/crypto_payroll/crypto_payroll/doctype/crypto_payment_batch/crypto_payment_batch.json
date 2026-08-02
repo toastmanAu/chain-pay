@@ -27,6 +27,15 @@
       "default": "draft", "reqd": 1 },
     { "fieldname": "pending_tx_id", "fieldtype": "Data",  "label": "Pending tx id (multisig coordinator)" },
     { "fieldname": "tx_hash",       "fieldtype": "Data",  "label": "Broadcast tx hash", "unique": 1 },
+    { "fieldname": "safe_tx_hash",  "fieldtype": "Data",  "label": "SafeTx hash", "unique": 1, "read_only": 1 },
+    { "fieldname": "safe_address",  "fieldtype": "Data",  "label": "Safe address", "read_only": 1 },
+    { "fieldname": "executor_address", "fieldtype": "Data", "label": "Gas-paying executor", "read_only": 1 },
+    { "fieldname": "recipient_address", "fieldtype": "Data", "label": "EVM recipient", "read_only": 1 },
+    { "fieldname": "confirmed_block_number", "fieldtype": "Data", "label": "Confirmed block", "read_only": 1 },
+    { "fieldname": "gas_used", "fieldtype": "Data", "label": "Receipt gas used", "read_only": 1 },
+    { "fieldname": "effective_gas_price_wei", "fieldtype": "Data", "label": "Effective gas price (wei)", "read_only": 1 },
+    { "fieldname": "gas_fee_wei", "fieldtype": "Data", "label": "Executor-paid gas fee (wei)", "read_only": 1 },
+    { "fieldname": "gas_payer", "fieldtype": "Select", "label": "Gas payer", "options": "\nexecutor", "read_only": 1 },
     { "fieldname": "journal_posted","fieldtype": "Check", "label": "Accounting journal posted", "default": 0, "allow_on_submit": 1 }
   ],
   "permissions": [

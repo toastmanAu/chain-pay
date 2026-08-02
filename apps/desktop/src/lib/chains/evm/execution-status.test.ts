@@ -10,6 +10,7 @@ function operations(
   return {
     receipt: vi.fn().mockResolvedValue(receipt),
     blockNumber: vi.fn().mockResolvedValue(tip),
+    blockTimestamp: vi.fn().mockResolvedValue(1_785_552_000n),
   };
 }
 
@@ -25,9 +26,24 @@ describe("readEvmExecutionStatus", () => {
       readEvmExecutionStatus(
         11155111,
         HASH,
-        operations({ status: "success", blockNumber: 100n }),
+        operations({
+          status: "success",
+          blockNumber: 100n,
+          from: "0x1111111111111111111111111111111111111111",
+          gasUsed: 100_000n,
+          effectiveGasPrice: 2_000_000_000n,
+        }),
       ),
-    ).resolves.toEqual({ state: "confirmed", blockNumber: 100n, confirmations: 6 });
+    ).resolves.toEqual({
+      state: "confirmed",
+      blockNumber: 100n,
+      confirmations: 6,
+      confirmedAt: "2026-08-01T02:40:00.000Z",
+      executorAddress: "0x1111111111111111111111111111111111111111",
+      gasUsed: 100_000n,
+      effectiveGasPriceWei: 2_000_000_000n,
+      gasFeeWei: 200_000_000_000_000n,
+    });
   });
 
   it("reports reverted execution as failed", async () => {
@@ -35,7 +51,13 @@ describe("readEvmExecutionStatus", () => {
       readEvmExecutionStatus(
         11155111,
         HASH,
-        operations({ status: "reverted", blockNumber: 100n }),
+        operations({
+          status: "reverted",
+          blockNumber: 100n,
+          from: "0x1111111111111111111111111111111111111111",
+          gasUsed: 100_000n,
+          effectiveGasPrice: 2_000_000_000n,
+        }),
       ),
     ).resolves.toEqual({
       state: "failed",

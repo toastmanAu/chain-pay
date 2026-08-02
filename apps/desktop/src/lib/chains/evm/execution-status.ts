@@ -1,14 +1,30 @@
-import { TransactionReceiptNotFoundError, type Hex } from "viem";
+import { TransactionReceiptNotFoundError, type Address, type Hex } from "viem";
 import { getEvmPublicClient } from "./public-client";
 
 export type EvmExecutionStatus =
   | { state: "pending" }
-  | { state: "confirmed"; blockNumber: bigint; confirmations: number }
+  | {
+      state: "confirmed";
+      blockNumber: bigint;
+      confirmations: number;
+      confirmedAt: string;
+      executorAddress: Address;
+      gasUsed: bigint;
+      effectiveGasPriceWei: bigint;
+      gasFeeWei: bigint;
+    }
   | { state: "failed"; blockNumber: bigint; reason: string };
 
 export interface EvmReceiptOperations {
-  receipt(hash: Hex): Promise<{ status: "success" | "reverted"; blockNumber: bigint } | null>;
+  receipt(hash: Hex): Promise<{
+    status: "success" | "reverted";
+    blockNumber: bigint;
+    from: Address;
+    gasUsed: bigint;
+    effectiveGasPrice: bigint;
+  } | null>;
   blockNumber(): Promise<bigint>;
+  blockTimestamp(blockNumber: bigint): Promise<bigint>;
 }
 
 export async function readEvmExecutionStatus(
@@ -26,11 +42,17 @@ export async function readEvmExecutionStatus(
     };
   }
   const tip = await operations.blockNumber();
+  const timestamp = await operations.blockTimestamp(receipt.blockNumber);
   const count = tip >= receipt.blockNumber ? tip - receipt.blockNumber + 1n : 1n;
   return {
     state: "confirmed",
     blockNumber: receipt.blockNumber,
     confirmations: Number(count > BigInt(Number.MAX_SAFE_INTEGER) ? BigInt(Number.MAX_SAFE_INTEGER) : count),
+    confirmedAt: new Date(Number(timestamp) * 1_000).toISOString(),
+    executorAddress: receipt.from,
+    gasUsed: receipt.gasUsed,
+    effectiveGasPriceWei: receipt.effectiveGasPrice,
+    gasFeeWei: receipt.gasUsed * receipt.effectiveGasPrice,
   };
 }
 
@@ -46,5 +68,6 @@ function receiptOperations(chainId: number): EvmReceiptOperations {
       }
     },
     blockNumber: () => client.getBlockNumber(),
+    blockTimestamp: async (blockNumber) => (await client.getBlock({ blockNumber })).timestamp,
   };
 }

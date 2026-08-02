@@ -5,7 +5,8 @@ Crypto-native payroll & accounting suite. CKB and EVM multisig treasuries, **emb
 > [!NOTE]
 > The CKB path is shipped end-to-end on testnet: multisig payroll, single-sig
 > JoyID sends, PQ-secure signature relay, invoice ingest, and server-derived
-> ERPNext journal posting. EVM treasuries remain the next major chain phase.
+> ERPNext journal posting. The Sepolia Safe path now runs through native-ETH
+> execution and retry-safe ERPNext posting; additional signers and networks remain.
 
 ## Why ChainPay exists
 
@@ -38,8 +39,8 @@ The trust-minimisation half is the differentiator. The CKB light client is **emb
 | 2.7c | Mainnet plumbing, network-switch UX, auto-broadcast with 5s countdown, lifecycle-bound retry | ✅ done — PR #6 merged `d090354` (2026-05-29); fast-path manual smoke surfaced and fixed 4 bugs (preload namespace, missing `app.quit` IPC, hooks-rules in mainnet-conditional renders) |
 | 3a | Invoice ingest — manual entry + payee flow, vendor flow, draft autosave, approve-and-queue, batch↔invoice confirmation sync | ✅ done — PR #7 merged `8a3b426` (2026-05-29); shell-level smoke clean on `main` |
 | 3b | Invoice ingest — OCR extraction + multi-invoice bundling | planned (deferred from 3a scope) |
-| 3 (EVM) | EVM (Safe) treasury — external owner signers | 🟡 Slices A–C: Sepolia Safe monitoring, native-ETH SafeTx creation, persisted EIP-712 approvals, execution, and receipt confirmation; accounting next |
-| 4 | Frappe accounting bridge — persisted confirmed payments → server-derived journal entries | ✅ CKB path done; EVM awaits Phase 3 |
+| 3 (EVM) | EVM (Safe) treasury — external owner signers | 🟡 Slices A–D: Sepolia Safe monitoring, native-ETH approvals/execution, receipt confirmation, and retry-safe ERPNext accounting; WalletConnect remains |
+| 4 | Frappe accounting bridge — persisted confirmed payments → server-derived journal entries | ✅ CKB + Sepolia Safe paths, immutable source records and idempotent JEs |
 | 5+ | BTC watch-only, SOL adapter, fiat ramps, mobile signer companion | planned |
 
 Detailed roadmap: [docs/mvp-roadmap.md](docs/mvp-roadmap.md). Phase-specific notes: [PHASE-1.md](PHASE-1.md). Comm-channel design (CEMP-PQ integration): [docs/comm-channel-design.md](docs/comm-channel-design.md).
@@ -55,6 +56,7 @@ Detailed roadmap: [docs/mvp-roadmap.md](docs/mvp-roadmap.md). Phase-specific not
 | Invoice ingest (manual entry, both flows) | `src/features/invoices/` | 450 tests green on `main` post-merge; routes verified on shell smoke |
 | Mainnet network switch (UX only, no real-fund tx yet) | `src/features/settings/NetworkSection.tsx`, `electron/main/network-state-store.ts` | Manual smoke 2026-05-29: testnet → mainnet → soft-fail UX → testnet round-trip with LC IDB wipe |
 | CKB → ERPNext accounting recovery | `crypto_payroll.api.post_confirmed_payment`, desktop accounting host | Confirmed tx `0xdbafdf…ae2a` recovered at USD 0.50; submitted JE `ACC-JV-2026-00023`; source records and tx hashes now idempotency-bound |
+| Sepolia Safe → ERPNext accounting recovery | `evm-safe-accounting.ts`, `crypto_payroll.api.post_confirmed_payment` | SafeTx + outer hash are independently idempotent; receipt gas is retained as executor-paid audit metadata and excluded from the Safe treasury credit |
 
 ### Why the JoyID → ckb-cli signer pivot
 

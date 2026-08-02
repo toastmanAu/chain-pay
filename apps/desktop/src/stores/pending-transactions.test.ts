@@ -23,6 +23,7 @@ function pending(): PendingTx {
     outputs: [{ to: OTHER_OWNER, amount: { asset: "ETH", value: "1", decimals: 18 } }],
     payloadJson: "{}",
     signatures: [],
+    accounting: { payeeId: "vendor-1", fiat: { currency: "USD", minor: 2550n } },
     createdAt: now,
     updatedAt: now,
   };
@@ -92,6 +93,7 @@ describe("pending transaction store", () => {
     expect(restored?.bytes).toBeInstanceOf(Uint8Array);
     expect(Array.from(restored?.bytes ?? [])).toEqual(Array.from(bytes));
     expect(restored?.signerHash).toBe(OWNER);
+    expect(second.usePendingTransactionsStore.getState().findById("pending-1")?.accounting?.fiat.minor).toBe(2550n);
   });
 
   it("persists the broadcast-to-confirmed lifecycle", async () => {
@@ -102,7 +104,14 @@ describe("pending transaction store", () => {
     usePendingTransactionsStore.setState({ transactions: [ready] });
     store.markBroadcasted("pending-1", `0x${"cd".repeat(32)}`);
     store.markConfirming("pending-1");
-    store.markConfirmed("pending-1", 7_123_456n);
+    store.markConfirmed("pending-1", {
+      blockNumber: 7_123_456n,
+      confirmedAt: "2026-08-01T01:02:03.000Z",
+      executorAddress: "0x1111111111111111111111111111111111111111",
+      gasUsed: 100_000n,
+      effectiveGasPriceWei: 2_000_000_000n,
+      gasFeeWei: 200_000_000_000_000n,
+    });
     expect(usePendingTransactionsStore.getState().findById("pending-1")).toMatchObject({
       state: "confirmed",
       broadcastedHash: `0x${"cd".repeat(32)}`,
@@ -125,5 +134,21 @@ describe("pending transaction store", () => {
     expect(() => usePendingTransactionsStore.getState().markConfirming("pending-1")).toThrow(
       "awaiting_signature → confirming",
     );
+  });
+
+  it("recovers an interrupted accounting post as retry-safe post_failed", async () => {
+    const first = await import("./pending-transactions");
+    first.usePendingTransactionsStore.setState({
+      transactions: [{ ...pending(), state: "confirmed" }],
+    });
+    first.usePendingTransactionsStore.getState().markPosting("pending-1");
+
+    vi.resetModules();
+    const second = await import("./pending-transactions");
+    await second.usePendingTransactionsStore.persist.rehydrate();
+    expect(second.usePendingTransactionsStore.getState().findById("pending-1")).toMatchObject({
+      state: "post_failed",
+      postError: expect.stringContaining("Retry is safe"),
+    });
   });
 });

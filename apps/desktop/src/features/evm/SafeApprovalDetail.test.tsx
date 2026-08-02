@@ -10,10 +10,11 @@ import { useTreasuryStore } from "@/stores/treasury";
 import { usePendingTransactionsStore } from "@/stores/pending-transactions";
 import { serializeSafePayment, type SafePaymentPayload } from "@/lib/chains/evm/safe";
 
-const { signMock, executeMock, statusMock } = vi.hoisted(() => ({
+const { signMock, executeMock, statusMock, postAccountingMock } = vi.hoisted(() => ({
   signMock: vi.fn(),
   executeMock: vi.fn(),
   statusMock: vi.fn(),
+  postAccountingMock: vi.fn(),
 }));
 vi.mock("@/lib/signers/metamask-safe-owner", () => ({
   MetaMaskSafeOwnerSigner: class {
@@ -23,6 +24,9 @@ vi.mock("@/lib/signers/metamask-safe-owner", () => ({
 }));
 vi.mock("@/lib/chains/evm/safe-executor", () => ({ executeSafePayment: executeMock }));
 vi.mock("@/lib/chains/evm/execution-status", () => ({ readEvmExecutionStatus: statusMock }));
+vi.mock("@/lib/accounting/evm-safe-accounting", () => ({
+  postConfirmedSafePayment: postAccountingMock,
+}));
 
 const OWNER = "0x1111111111111111111111111111111111111111";
 const SAFE = "0x1234567890123456789012345678901234567890";
@@ -67,6 +71,7 @@ const PENDING: PendingTx = {
   outputs: [{ to: RECIPIENT, amount: { asset: "ETH", value: PAYLOAD.tx.value, decimals: 18 } }],
   payloadJson: serializeSafePayment(PAYLOAD),
   signatures: [],
+  accounting: { payeeId: "vendor-1", fiat: { currency: "USD", minor: 2550n } },
   createdAt: "2026-08-01T00:00:00.000Z",
   updatedAt: "2026-08-01T00:00:00.000Z",
 };
@@ -129,7 +134,16 @@ describe("SafeApprovalDetail", () => {
   });
 
   it("resumes receipt polling and records confirmation", async () => {
-    statusMock.mockResolvedValueOnce({ state: "confirmed", blockNumber: 7_123_456n, confirmations: 1 });
+    statusMock.mockResolvedValueOnce({
+      state: "confirmed",
+      blockNumber: 7_123_456n,
+      confirmations: 1,
+      confirmedAt: "2026-08-01T01:02:03.000Z",
+      executorAddress: OWNER,
+      gasUsed: 100_000n,
+      effectiveGasPriceWei: 2_000_000_000n,
+      gasFeeWei: 200_000_000_000_000n,
+    });
     usePendingTransactionsStore.setState({
       transactions: [
         {
@@ -144,9 +158,27 @@ describe("SafeApprovalDetail", () => {
       expect(usePendingTransactionsStore.getState().findById(PENDING.id)).toMatchObject({
         state: "confirmed",
         confirmedBlockNumber: "7123456",
+        executorAddress: OWNER,
+        receiptGasUsed: "100000",
       }),
     );
     expect(await screen.findByText("Confirmed")).toBeInTheDocument();
+  });
+
+  it("shows a retry-safe accounting failure without offering chain execution", () => {
+    usePendingTransactionsStore.setState({
+      transactions: [{
+        ...PENDING,
+        state: "post_failed",
+        broadcastedHash: `0x${"cd".repeat(32)}`,
+        postError: "Frappe unavailable",
+      }],
+    });
+    renderDetail();
+    expect(screen.getByRole("alert")).toHaveTextContent("Frappe unavailable");
+    expect(screen.queryByRole("button", { name: "Execute on Sepolia" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Retry accounting" }));
+    expect(postAccountingMock).toHaveBeenCalledWith(PENDING.id);
   });
 });
 
