@@ -4,6 +4,8 @@ export const BITCOIN_CHANNELS = {
   status: "bitcoin:status",
   scan: "bitcoin:scan",
   transactionStatus: "bitcoin:transaction-status",
+  reviewBroadcast: "bitcoin:review-broadcast",
+  confirmBroadcast: "bitcoin:confirm-broadcast",
 } as const;
 
 export interface BitcoinProviderStatus {
@@ -37,3 +39,96 @@ export interface BitcoinTransactionStatusResponse {
   blockHeight: number | null;
   blockHash: string | null;
 }
+
+export type BitcoinBroadcastErrorCode =
+  | "invalid_request"
+  | "malformed"
+  | "unsigned"
+  | "unsupported"
+  | "wrong_network"
+  | "not_watched"
+  | "duplicate_input"
+  | "already_known"
+  | "non_final"
+  | "policy"
+  | "oversized"
+  | "review_changed"
+  | "provider_unavailable"
+  | "provider_rejected"
+  | "txid_mismatch";
+
+export interface BitcoinBroadcastError {
+  code: BitcoinBroadcastErrorCode;
+  message: string;
+}
+
+export interface BitcoinBroadcastReviewRequest {
+  chain: BitcoinChain;
+  treasuryId: string;
+  /** Public addresses already derived for the selected watch-only treasury. */
+  watchedAddresses: string[];
+  /** A final raw transaction only. PSBTs and signing material are never accepted. */
+  rawTxHex: string;
+}
+
+export interface BitcoinBroadcastReviewInput {
+  txid: string;
+  vout: number;
+  address: string | null;
+  valueSats: string;
+  scriptType: "p2pkh" | "p2wpkh" | "p2sh-p2wpkh" | "p2tr-keypath";
+  watched: boolean;
+}
+
+export interface BitcoinBroadcastReviewOutput {
+  vout: number;
+  address: string | null;
+  valueSats: string;
+  scriptType: "p2pkh" | "p2sh" | "p2wpkh" | "p2wsh" | "p2tr" | "op_return";
+  watched: boolean;
+  /** A watched destination is a change candidate, not a claim about signer intent. */
+  changeCandidate: boolean;
+}
+
+export interface BitcoinBroadcastReview {
+  digest: string;
+  treasuryId: string;
+  chain: BitcoinChain;
+  txid: string;
+  wtxid: string;
+  version: number;
+  lockTime: number;
+  sizeBytes: number;
+  weight: number;
+  vsize: number;
+  inputValueSats: string;
+  outputValueSats: string;
+  feeSats: string;
+  feeRateSatsPerVbyte: string;
+  tipHeight: number;
+  tipHash: string;
+  watchSetHash: string;
+  inputs: BitcoinBroadcastReviewInput[];
+  outputs: BitcoinBroadcastReviewOutput[];
+  warnings: string[];
+}
+
+export type BitcoinBroadcastReviewResponse =
+  | { ok: true; review: BitcoinBroadcastReview }
+  | { ok: false; error: BitcoinBroadcastError };
+
+export interface BitcoinBroadcastConfirmRequest extends BitcoinBroadcastReviewRequest {
+  /** Digest displayed to and explicitly approved by the operator. */
+  reviewDigest: string;
+}
+
+export interface BitcoinBroadcastReceipt {
+  txid: string;
+  reviewDigest: string;
+  state: "submitted" | "already_broadcast";
+  submittedAt: string;
+}
+
+export type BitcoinBroadcastConfirmResponse =
+  | { ok: true; receipt: BitcoinBroadcastReceipt }
+  | { ok: false; error: BitcoinBroadcastError; review?: BitcoinBroadcastReview };

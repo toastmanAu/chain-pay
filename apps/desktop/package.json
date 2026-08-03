@@ -25,6 +25,8 @@
     "@hookform/resolvers": "^3.9.0",
     "@joyid/ckb": "^1.1.4",
     "@nervosnetwork/ckb-light-client-js": "^0.5.5",
+    "@noble/curves-v1": "npm:@noble/curves@1.9.7",
+    "@noble/curves-v2": "npm:@noble/curves@2.2.0",
     "@safe-global/api-kit": "^3.0.0",
     "@safe-global/protocol-kit": "^5.0.0",
     "@scure/bip32": "2.2.0",

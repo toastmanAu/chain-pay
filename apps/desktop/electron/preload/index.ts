@@ -12,6 +12,10 @@ import {
   type BitcoinScanResponse,
   type BitcoinTransactionStatusRequest,
   type BitcoinTransactionStatusResponse,
+  type BitcoinBroadcastConfirmRequest,
+  type BitcoinBroadcastConfirmResponse,
+  type BitcoinBroadcastReviewRequest,
+  type BitcoinBroadcastReviewResponse,
 } from "../../../../packages/shared/src";
 
 const platformApi = {
@@ -144,6 +148,10 @@ const chainpayApi = {
       request: BitcoinTransactionStatusRequest,
     ): Promise<BitcoinTransactionStatusResponse> =>
       ipcRenderer.invoke(BITCOIN_CHANNELS.transactionStatus, request),
+    reviewBroadcast: (request: BitcoinBroadcastReviewRequest): Promise<BitcoinBroadcastReviewResponse> =>
+      ipcRenderer.invoke(BITCOIN_CHANNELS.reviewBroadcast, request),
+    confirmBroadcast: (request: BitcoinBroadcastConfirmRequest): Promise<BitcoinBroadcastConfirmResponse> =>
+      ipcRenderer.invoke(BITCOIN_CHANNELS.confirmBroadcast, request),
   },
   keyvault: {
     /** Check whether a keyvault blob exists on disk. */

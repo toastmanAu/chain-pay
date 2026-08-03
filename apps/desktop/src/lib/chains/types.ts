@@ -50,7 +50,8 @@ export interface PaymentRequest {
 
 /**
  * Stable surface for every chain integration. Bitcoin implements the read
- * methods only; every spending method rejects because its adapter is watch-only.
+ * methods; its separately bound manual-broadcast workflow deliberately does
+ * not widen these generic construction or signing methods.
  */
 export interface ChainAdapter {
   readonly chain: ChainId;

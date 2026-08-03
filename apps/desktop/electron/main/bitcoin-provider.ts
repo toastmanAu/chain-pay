@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { Address, NETWORK, TEST_NETWORK } from "@scure/btc-signer";
+import { Address, NETWORK, OutScript, TEST_NETWORK } from "@scure/btc-signer";
 import type {
   BitcoinAddressActivity,
   BitcoinChain,
@@ -7,13 +7,26 @@ import type {
   BitcoinWatchTransaction,
   BitcoinWatchUtxo,
   BitcoinTransactionStatusResponse,
+  BitcoinBroadcastConfirmRequest,
+  BitcoinBroadcastConfirmResponse,
+  BitcoinBroadcastReview,
+  BitcoinBroadcastReviewRequest,
 } from "@chain-pay/shared";
+import {
+  BitcoinBroadcastValidationError,
+  buildBitcoinBroadcastReview,
+  parseFinalBitcoinTransaction,
+  toHex,
+  validateBitcoinAddresses,
+  type ResolvedBitcoinPrevout,
+} from "./bitcoin-broadcast";
 
 const HASH = /^[0-9a-f]{64}$/;
 const MAX_ADDRESSES_PER_SCAN = 10_000;
 const MAX_HISTORY_PAGES = 10_000;
 const MAX_RESPONSE_BYTES = 16 * 1024 * 1024;
 const REQUEST_TIMEOUT_MS = 20_000;
+const rawScriptSchema = z.string().regex(/^(?:[0-9a-f]{2})*$/).max(20_000);
 
 const statusSchema = z.object({
   confirmed: z.boolean(),
@@ -39,6 +52,22 @@ const txSchema = z.object({
   status: statusSchema,
 });
 
+const prevoutTxSchema = z.object({
+  txid: z.string().regex(HASH),
+  vout: z.array(z.object({
+    scriptpubkey: rawScriptSchema,
+    scriptpubkey_address: z.string().optional(),
+    value: z.number().int().nonnegative().safe(),
+  })),
+  status: statusSchema,
+}).passthrough();
+
+const blockSchema = z.object({
+  id: z.string().regex(HASH),
+  height: z.number().int().nonnegative().safe(),
+  mediantime: z.number().int().nonnegative().safe(),
+}).passthrough();
+
 const utxoSchema = z.object({
   txid: z.string().regex(HASH),
   vout: z.number().int().nonnegative().safe(),
@@ -61,12 +90,147 @@ export interface BitcoinProviderConfig {
 
 export class BitcoinProviderError extends Error {
   constructor(
-    readonly code: "not_configured" | "unavailable" | "invalid_response" | "invalid_request",
+    readonly code: "not_configured" | "unavailable" | "invalid_response" | "invalid_request" | "rejected" | "txid_mismatch",
     message: string,
   ) {
     super(message);
     this.name = "BitcoinProviderError";
   }
+}
+
+export async function reviewBitcoinBroadcast(args: {
+  request: BitcoinBroadcastReviewRequest;
+  config: BitcoinProviderConfig;
+  fetchImpl?: typeof fetch;
+}): Promise<BitcoinBroadcastReview> {
+  const prepared = await prepareBitcoinBroadcast({ ...args, allowKnown: false });
+  return prepared.review;
+}
+
+export async function confirmBitcoinBroadcast(args: {
+  request: BitcoinBroadcastConfirmRequest;
+  config: BitcoinProviderConfig;
+  fetchImpl?: typeof fetch;
+  now?: () => Date;
+}): Promise<BitcoinBroadcastConfirmResponse> {
+  const prepared = await prepareBitcoinBroadcast({ ...args, allowKnown: true });
+  if (prepared.review.digest !== args.request.reviewDigest) {
+    return {
+      ok: false,
+      error: { code: "review_changed", message: "Transaction review changed; inspect and approve the refreshed review" },
+      review: prepared.review,
+    };
+  }
+  const submittedAt = (args.now ?? (() => new Date()))().toISOString();
+  if (prepared.alreadyKnown) {
+    return {
+      ok: true,
+      receipt: { txid: prepared.review.txid, reviewDigest: prepared.review.digest, state: "already_broadcast", submittedAt },
+    };
+  }
+  try {
+    const returnedTxid = await prepared.client.postText("/tx", prepared.parsed.rawHex);
+    if (!HASH.test(returnedTxid) || returnedTxid !== prepared.review.txid) {
+      throw new BitcoinProviderError("txid_mismatch", "Bitcoin provider returned a mismatched transaction id");
+    }
+    return {
+      ok: true,
+      receipt: { txid: returnedTxid, reviewDigest: prepared.review.digest, state: "submitted", submittedAt },
+    };
+  } catch (error) {
+    if (error instanceof BitcoinProviderError && error.code === "txid_mismatch") throw error;
+    const knownAfterConflict = await prepared.client.optionalJson(`/tx/${prepared.review.txid}/status`, statusSchema);
+    if (knownAfterConflict) {
+      return {
+        ok: true,
+        receipt: { txid: prepared.review.txid, reviewDigest: prepared.review.digest, state: "already_broadcast", submittedAt },
+      };
+    }
+    if (error instanceof BitcoinProviderError && error.code === "rejected") throw error;
+    throw unavailable();
+  }
+}
+
+async function prepareBitcoinBroadcast(args: {
+  request: BitcoinBroadcastReviewRequest;
+  config: BitcoinProviderConfig;
+  fetchImpl?: typeof fetch;
+  allowKnown: boolean;
+}): Promise<{
+  review: BitcoinBroadcastReview;
+  alreadyKnown: boolean;
+  parsed: ReturnType<typeof parseFinalBitcoinTransaction>;
+  client: EsploraClient;
+}> {
+  const { request } = args;
+  validateBitcoinAddresses(request.chain, request.watchedAddresses);
+  const parsed = parseFinalBitcoinTransaction(request.rawTxHex);
+  const client = new EsploraClient(args.config, args.fetchImpl ?? fetch);
+  const [tipHeightText, tipHashText, existing] = await Promise.all([
+    client.text("/blocks/tip/height"),
+    client.text("/blocks/tip/hash"),
+    client.optionalJson(`/tx/${parsed.transaction.id}/status`, statusSchema),
+  ]);
+  if (existing && !args.allowKnown) {
+    throw new BitcoinBroadcastValidationError("already_known", "Transaction is already known to the selected Bitcoin provider");
+  }
+  const tipHeight = parseHeight(tipHeightText);
+  const tipHash = parseHash(tipHashText);
+  const block = await client.json(`/block/${tipHash}`, blockSchema);
+  if (block.id !== tipHash || block.height !== tipHeight) throw invalidResponse();
+
+  const transactionIds = [...new Set(parsed.raw.inputs.map((input) => toHex(input.txid)))];
+  const transactions = new Map<string, z.infer<typeof prevoutTxSchema>>();
+  await mapWithConcurrency(transactionIds, 4, async (txid) => {
+    const transaction = await client.optionalJson(`/tx/${txid}`, prevoutTxSchema);
+    if (!transaction) {
+      throw new BitcoinBroadcastValidationError(
+        "wrong_network",
+        "A transaction prevout is unavailable on the selected Bitcoin network",
+      );
+    }
+    if (transaction.txid !== txid) throw invalidResponse();
+    transactions.set(txid, transaction);
+  });
+  const addressCoder = Address(request.chain === "btc:mainnet" ? NETWORK : TEST_NETWORK);
+  const prevouts: ResolvedBitcoinPrevout[] = parsed.raw.inputs.map((input) => {
+    const txid = toHex(input.txid);
+    const output = transactions.get(txid)?.vout[input.index];
+    if (!output) throw invalidResponse();
+    const script = Uint8Array.from(Buffer.from(output.scriptpubkey, "hex"));
+    let derivedAddress: string | null = null;
+    try {
+      derivedAddress = addressCoder.encode(
+        OutScript.decode(script) as Parameters<typeof addressCoder.encode>[0],
+      );
+    } catch {
+      // The validation layer will return a precise unsupported-script error.
+    }
+    if (output.scriptpubkey_address && derivedAddress !== output.scriptpubkey_address) throw invalidResponse();
+    return {
+      txid,
+      vout: input.index,
+      script,
+      address: derivedAddress,
+      value: BigInt(output.value),
+    };
+  });
+  const review = buildBitcoinBroadcastReview({
+    chain: request.chain,
+    treasuryId: request.treasuryId,
+    watchedAddresses: request.watchedAddresses,
+    parsed,
+    prevouts,
+    tip: { height: tipHeight, hash: tipHash, medianTimePast: block.mediantime },
+  });
+  const [finalTipHeight, finalTipHash] = await Promise.all([
+    client.text("/blocks/tip/height"),
+    client.text("/blocks/tip/hash"),
+  ]);
+  if (parseHeight(finalTipHeight) !== tipHeight || parseHash(finalTipHash) !== tipHash) {
+    throw new BitcoinProviderError("unavailable", "Bitcoin chain tip changed during review; retry");
+  }
+  return { review, alreadyKnown: existing !== null, parsed, client };
 }
 
 export function providerConfigFromEnvironment(
@@ -86,6 +250,8 @@ export function providerConfigFromEnvironment(
   if (parsed.protocol !== "https:" && !(local && parsed.protocol === "http:")) return null;
   parsed.username = "";
   parsed.password = "";
+  parsed.search = "";
+  parsed.hash = "";
   const baseUrl = parsed.toString().replace(/\/$/, "");
   const bearerToken = env[`BITCOIN_${suffix}_ESPLORA_BEARER_TOKEN`]?.trim();
   return { baseUrl, ...(bearerToken ? { bearerToken } : {}) };
@@ -186,9 +352,10 @@ export async function getBitcoinTransactionStatus(args: {
   const client = new EsploraClient(args.config, args.fetchImpl ?? fetch);
   const [tipHeightText, status] = await Promise.all([
     client.text("/blocks/tip/height"),
-    client.json(`/tx/${args.txid}/status`, statusSchema),
+    client.optionalJson(`/tx/${args.txid}/status`, statusSchema),
   ]);
   const tipHeight = parseHeight(tipHeightText);
+  if (!status) return { state: "unknown", confirmations: 0, blockHeight: null, blockHash: null };
   if (!status.confirmed) {
     return { state: "pending", confirmations: 0, blockHeight: null, blockHash: null };
   }
@@ -234,21 +401,50 @@ class EsploraClient {
     }
   }
 
-  private async request(path: string): Promise<Response> {
+  async optionalJson<T>(path: string, schema: z.ZodType<T>): Promise<T | null> {
+    const response = await this.request(path, "GET", undefined, true);
+    if (response.status === 404) return null;
+    const contentLength = Number(response.headers.get("content-length") ?? "0");
+    if (contentLength > MAX_RESPONSE_BYTES) throw invalidResponse();
+    const text = await response.text();
+    if (text.length > MAX_RESPONSE_BYTES) throw invalidResponse();
+    try {
+      return schema.parse(JSON.parse(text));
+    } catch {
+      throw invalidResponse();
+    }
+  }
+
+  async postText(path: string, body: string): Promise<string> {
+    const response = await this.request(path, "POST", body);
+    const text = await response.text();
+    if (text.length > MAX_RESPONSE_BYTES) throw invalidResponse();
+    return text.trim();
+  }
+
+  private async request(path: string, method: "GET" | "POST" = "GET", body?: string, allowNotFound = false): Promise<Response> {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
     try {
       const response = await this.fetchImpl(`${this.config.baseUrl}${path}`, {
-        method: "GET",
+        method,
         headers: {
           accept: "application/json, text/plain",
+          ...(method === "POST" ? { "content-type": "text/plain" } : {}),
           ...(this.config.bearerToken
             ? { authorization: `Bearer ${this.config.bearerToken}` }
             : {}),
         },
+        ...(body === undefined ? {} : { body }),
         signal: controller.signal,
       });
-      if (!response.ok) throw unavailable();
+      if (allowNotFound && response.status === 404) return response;
+      if (!response.ok) {
+        if (method === "POST" && response.status >= 400 && response.status < 500) {
+          throw new BitcoinProviderError("rejected", "Bitcoin provider rejected the transaction");
+        }
+        throw unavailable();
+      }
       return response;
     } catch (error) {
       if (error instanceof BitcoinProviderError) throw error;

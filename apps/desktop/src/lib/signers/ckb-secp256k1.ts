@@ -1,4 +1,4 @@
-import { secp256k1 } from "@noble/curves/secp256k1";
+import { secp256k1 } from "@noble/curves-v1/secp256k1.js";
 import { bytesConcat, bytesFrom, hexFrom, HasherCkb, numBeToBytes, type Hex } from "@ckb-ccc/core";
 import type { Hex20 } from "@chain-pay/shared";
 

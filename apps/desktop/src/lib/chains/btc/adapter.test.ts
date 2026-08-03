@@ -7,6 +7,8 @@ const TESTNET = "tb1qfm4w4trj4g5du3zpmz58fkxk3vnvsq4wq7wc9f";
 function installBridge(): {
   scan: ReturnType<typeof vi.fn>;
   transactionStatus: ReturnType<typeof vi.fn>;
+  reviewBroadcast: ReturnType<typeof vi.fn>;
+  confirmBroadcast: ReturnType<typeof vi.fn>;
 } {
   const scan = vi.fn(async (request: { addresses: string[] }) => ({
     activity: request.addresses.map((address) => ({ address, used: true })),
@@ -25,12 +27,20 @@ function installBridge(): {
     blockHeight: 99,
     blockHash: "b".repeat(64),
   }));
+  const reviewBroadcast = vi.fn();
+  const confirmBroadcast = vi.fn();
   (globalThis as unknown as { window: { chainpay: { bitcoin: unknown } } }).window = {
     chainpay: {
-      bitcoin: { status: vi.fn(async () => ({ configured: true })), scan, transactionStatus },
+      bitcoin: {
+        status: vi.fn(async () => ({ configured: true })),
+        scan,
+        transactionStatus,
+        reviewBroadcast,
+        confirmBroadcast,
+      },
     },
   };
-  return { scan, transactionStatus };
+  return { scan, transactionStatus, reviewBroadcast, confirmBroadcast };
 }
 
 afterEach(() => {

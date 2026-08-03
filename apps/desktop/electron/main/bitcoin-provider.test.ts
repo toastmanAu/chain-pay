@@ -4,6 +4,8 @@ import {
   getBitcoinTransactionStatus,
   providerConfigFromEnvironment,
   scanBitcoinAddresses,
+  reviewBitcoinBroadcast,
+  confirmBitcoinBroadcast,
 } from "./bitcoin-provider";
 
 const ADDRESS_A = "bc1qcr8te4kr609gcawutmrza0j4xv80jy8z306fyu";
@@ -11,6 +13,10 @@ const ADDRESS_B = "bc1qnjg0jd8228aq7egyzacy8cys3knf9xvrerkf9g";
 const TIP_HASH = "a".repeat(64);
 const BLOCK_HASH = "b".repeat(64);
 const ORPHAN_HASH = "c".repeat(64);
+const BIP143_SIGNED = "01000000000101db6b1b20aa0fd7b23880be2ecbd4a98130974cf4748fb66092ac4d3ceb1a5477010000001716001479091972186c449eb1ded22b78e40d009bdf0089feffffff02b8b4eb0b000000001976a914a457b684d7f0d539a46a45bbc043f35b59d0d96388ac0008af2f000000001976a914fd270b1ee6abcaea97fea7ad0402e8bd8ad6d77c88ac02473044022047ac8e878352d3ebbde1c94ce3a10d057c24175747116f8288e5d794d12d482f0220217f36a485cae903c713331d877c1f64677e3622ad4010726870540656fe9dcb012103ad1d8e89212f0b92c74d23bb710c00662ad1470198ac48c43f7d6f93a2a2687392040000";
+const BIP143_TXID = "ef48d9d0f595052e0f8cdcf825f7a5e50b6a388a81f206f3f4846e5ecd7a0c23";
+const BIP143_PREV_TXID = "77541aeb3c4dac9260b68f74f44c973081a9d4cb2ebe8038b2d70faa201b6bdb";
+const BIP143_ADDRESS = "38BW8nqpHSWpkf5sXrQd2xYwvnPJwP59ic";
 
 function tx(index: number, overrides: Record<string, unknown> = {}) {
   return {
@@ -37,7 +43,7 @@ function json(value: unknown): Response {
 describe("Esplora Bitcoin provider", () => {
   it("validates configuration without ever returning provider credentials", () => {
     const config = providerConfigFromEnvironment("btc:mainnet", {
-      BITCOIN_MAINNET_ESPLORA_URL: "https://user:password@example.com/api/",
+      BITCOIN_MAINNET_ESPLORA_URL: "https://user:password@example.com/api/?token=must-not-survive#fragment",
       BITCOIN_MAINNET_ESPLORA_BEARER_TOKEN: "top-secret",
     });
     expect(config).toEqual({ baseUrl: "https://example.com/api", bearerToken: "top-secret" });
@@ -169,4 +175,169 @@ describe("Esplora Bitcoin provider", () => {
       }),
     ).resolves.toMatchObject({ state: "pending", confirmations: 0, blockHeight: null });
   });
+
+  it("reviews every prevout, binds the tip, and broadcasts only the approved digest", async () => {
+    let postedBody: string | null = null;
+    const fetchImpl = bitcoinBroadcastFetch({
+      onPost(body) { postedBody = body; },
+    });
+    const request = {
+      chain: "btc:mainnet" as const,
+      treasuryId: "btc-treasury",
+      watchedAddresses: [BIP143_ADDRESS],
+      rawTxHex: BIP143_SIGNED,
+    };
+    const review = await reviewBitcoinBroadcast({ request, config: { baseUrl: "https://example.com/api", bearerToken: "top-secret" }, fetchImpl });
+    expect(review).toMatchObject({ txid: BIP143_TXID, feeSats: "3400", tipHeight: 2_000, tipHash: TIP_HASH });
+
+    const result = await confirmBitcoinBroadcast({
+      request: { ...request, reviewDigest: review.digest },
+      config: { baseUrl: "https://example.com/api", bearerToken: "top-secret" },
+      fetchImpl,
+      now: () => new Date("2026-08-03T00:00:00.000Z"),
+    });
+    expect(result).toEqual({
+      ok: true,
+      receipt: {
+        txid: BIP143_TXID,
+        reviewDigest: review.digest,
+        state: "submitted",
+        submittedAt: "2026-08-03T00:00:00.000Z",
+      },
+    });
+    expect(postedBody).toBe(BIP143_SIGNED);
+  });
+
+  it("does not submit when the immutable review digest is stale or tampered", async () => {
+    let postCount = 0;
+    const fetchImpl = bitcoinBroadcastFetch({ onPost() { postCount++; } });
+    const result = await confirmBitcoinBroadcast({
+      request: {
+        chain: "btc:mainnet",
+        treasuryId: "btc-treasury",
+        watchedAddresses: [BIP143_ADDRESS],
+        rawTxHex: BIP143_SIGNED,
+        reviewDigest: "0".repeat(64),
+      },
+      config: { baseUrl: "https://example.com/api" },
+      fetchImpl,
+    });
+    expect(result).toMatchObject({ ok: false, error: { code: "review_changed" }, review: { txid: BIP143_TXID } });
+    expect(postCount).toBe(0);
+  });
+
+  it("is idempotent for an already-known transaction and rejects a provider txid mismatch", async () => {
+    const knownFetch = bitcoinBroadcastFetch({ known: true });
+    const request = {
+      chain: "btc:mainnet" as const,
+      treasuryId: "btc-treasury",
+      watchedAddresses: [BIP143_ADDRESS],
+      rawTxHex: BIP143_SIGNED,
+      reviewDigest: "unused",
+    };
+    // Obtain the same deterministic digest with the known check disabled.
+    const review = await reviewBitcoinBroadcast({
+      request,
+      config: { baseUrl: "https://example.com/api" },
+      fetchImpl: bitcoinBroadcastFetch({}),
+    });
+    const known = await confirmBitcoinBroadcast({
+      request: { ...request, reviewDigest: review.digest },
+      config: { baseUrl: "https://example.com/api" },
+      fetchImpl: knownFetch,
+    });
+    expect(known).toMatchObject({ ok: true, receipt: { state: "already_broadcast", txid: BIP143_TXID } });
+
+    await expect(confirmBitcoinBroadcast({
+      request: { ...request, reviewDigest: review.digest },
+      config: { baseUrl: "https://example.com/api" },
+      fetchImpl: bitcoinBroadcastFetch({ returnedTxid: "9".repeat(64) }),
+    })).rejects.toMatchObject({ code: "txid_mismatch", message: "Bitcoin provider returned a mismatched transaction id" });
+  });
+
+  it("rejects already-known reviews and prevouts absent from the selected network", async () => {
+    const request = {
+      chain: "btc:mainnet" as const,
+      treasuryId: "btc-treasury",
+      watchedAddresses: [BIP143_ADDRESS],
+      rawTxHex: BIP143_SIGNED,
+    };
+    await expect(reviewBitcoinBroadcast({
+      request,
+      config: { baseUrl: "https://example.com/api" },
+      fetchImpl: bitcoinBroadcastFetch({ known: true }),
+    })).rejects.toMatchObject({ code: "already_known" });
+    await expect(reviewBitcoinBroadcast({
+      request,
+      config: { baseUrl: "https://example.com/api" },
+      fetchImpl: bitcoinBroadcastFetch({ missingPrevout: true }),
+    })).rejects.toMatchObject({ code: "wrong_network" });
+  });
+
+  it("keeps provider rejection distinct from provider unavailability", async () => {
+    const baseRequest = {
+      chain: "btc:mainnet" as const,
+      treasuryId: "btc-treasury",
+      watchedAddresses: [BIP143_ADDRESS],
+      rawTxHex: BIP143_SIGNED,
+    };
+    const review = await reviewBitcoinBroadcast({ request: baseRequest, config: { baseUrl: "https://example.com/api" }, fetchImpl: bitcoinBroadcastFetch({}) });
+    await expect(confirmBitcoinBroadcast({
+      request: { ...baseRequest, reviewDigest: review.digest },
+      config: { baseUrl: "https://example.com/api" },
+      fetchImpl: bitcoinBroadcastFetch({ postStatus: 400 }),
+    })).rejects.toMatchObject({ code: "rejected" });
+    await expect(confirmBitcoinBroadcast({
+      request: { ...baseRequest, reviewDigest: review.digest },
+      config: { baseUrl: "https://example.com/api" },
+      fetchImpl: bitcoinBroadcastFetch({ postStatus: 503 }),
+    })).rejects.toMatchObject({ code: "unavailable" });
+  });
+
+  it("reports unknown when a submitted transaction disappears from the provider", async () => {
+    await expect(getBitcoinTransactionStatus({
+      txid: BIP143_TXID,
+      config: { baseUrl: "https://example.com/api" },
+      fetchImpl: vi.fn<typeof fetch>(async (input) => String(input).endsWith("/blocks/tip/height")
+        ? new Response("2000")
+        : new Response("not found", { status: 404 })),
+    })).resolves.toEqual({ state: "unknown", confirmations: 0, blockHeight: null, blockHash: null });
+  });
 });
+
+function bitcoinBroadcastFetch(options: {
+  known?: boolean;
+  returnedTxid?: string;
+  missingPrevout?: boolean;
+  postStatus?: number;
+  onPost?: (body: string) => void;
+}): typeof fetch {
+  return vi.fn<typeof fetch>(async (input, init) => {
+    const url = String(input);
+    expect(url).not.toContain("top-secret");
+    if (url.endsWith("/blocks/tip/height")) return new Response("2000");
+    if (url.endsWith("/blocks/tip/hash")) return new Response(TIP_HASH);
+    if (url.endsWith(`/block/${TIP_HASH}`)) return json({ id: TIP_HASH, height: 2_000, mediantime: 1_700_000_000 });
+    if (url.endsWith(`/tx/${BIP143_TXID}/status`)) {
+      return options.known ? json({ confirmed: false }) : new Response("not found", { status: 404 });
+    }
+    if (url.endsWith(`/tx/${BIP143_PREV_TXID}`)) {
+      if (options.missingPrevout) return new Response("not found", { status: 404 });
+      return json({
+        txid: BIP143_PREV_TXID,
+        vout: [
+          { scriptpubkey: "6a", value: 0 },
+          { scriptpubkey: "a9144733f37cf4db86fbc2efed2500b4f4e49f31202387", scriptpubkey_address: BIP143_ADDRESS, value: 1_000_000_000 },
+        ],
+        status: { confirmed: true, block_height: 1_000, block_hash: BLOCK_HASH },
+      });
+    }
+    if (url.endsWith("/tx") && init?.method === "POST") {
+      options.onPost?.(String(init.body));
+      expect(new Headers(init.headers).get("authorization")).toBe(init.headers && new Headers(init.headers).has("authorization") ? "Bearer top-secret" : null);
+      if (options.postStatus) return new Response("sanitized upstream detail", { status: options.postStatus });
+      return new Response(options.returnedTxid ?? BIP143_TXID);
+    }
+    return new Response("not found", { status: 404 });
+  });
+}

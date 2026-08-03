@@ -4,7 +4,9 @@ import { bitcoinBridge } from "./ipc";
 import { parseBitcoinAddress } from "./watch-source";
 
 const WATCH_ONLY_ERROR =
-  "Bitcoin support is watch-only; transaction construction, signing, PSBT, and broadcast are disabled";
+  "Bitcoin support is watch-only; transaction construction, fee estimation, signing, and PSBT handling are disabled";
+const MANUAL_BROADCAST_ERROR =
+  "Bitcoin watch-only broadcast requires the treasury-bound manual review and explicit confirmation workflow";
 
 export function bitcoinAdapter(chain: BitcoinChain): ChainAdapter {
   return {
@@ -30,7 +32,7 @@ export function bitcoinAdapter(chain: BitcoinChain): ChainAdapter {
       throw new Error(WATCH_ONLY_ERROR);
     },
     async broadcastTransaction() {
-      throw new Error(WATCH_ONLY_ERROR);
+      throw new Error(MANUAL_BROADCAST_ERROR);
     },
     async getTransactionStatus(hash) {
       const txid = hash.startsWith("0x") ? hash.slice(2) : hash;
