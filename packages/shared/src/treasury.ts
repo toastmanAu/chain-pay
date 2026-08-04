@@ -112,6 +112,54 @@ export interface BitcoinWatchSnapshot {
   transactions: BitcoinWatchTransaction[];
 }
 
+export type SolanaChain = "sol:mainnet" | "sol:devnet";
+export type SolanaLamportText = string;
+export type SolanaSlotText = string;
+
+export interface SolanaWatchConfig {
+  chain: SolanaChain;
+  /** Canonical base58 encoding of exactly one 32-byte public key. */
+  address: string;
+}
+
+export type SolanaTransactionState = "processed" | "confirmed" | "finalized" | "failed" | "unknown";
+
+export interface SolanaWatchTransaction {
+  signature: string;
+  slot: SolanaSlotText;
+  blockTime: number | null;
+  state: SolanaTransactionState;
+  /** Exact watched-account balance delta, or null when transaction details are unavailable. */
+  netLamports: SolanaLamportText | null;
+  /** Whole transaction fee; ownership is described separately. */
+  feeLamports: SolanaLamportText | null;
+  feePaidByWatched: boolean | null;
+}
+
+export interface SolanaWatchSnapshot {
+  address: string;
+  slot: SolanaSlotText;
+  blockhash: string;
+  lastValidBlockHeight: SolanaSlotText;
+  balanceLamports: SolanaLamportText;
+  transactions: SolanaWatchTransaction[];
+  /** Oldest fetched signature; persisted so bounded history can resume safely. */
+  historyCursor: string | null;
+  historyTruncated: boolean;
+}
+
+export interface SolanaWatchSyncState {
+  treasuryId: string;
+  status: "idle" | "syncing" | "ready" | "error";
+  slot: SolanaSlotText | null;
+  blockhash: string | null;
+  lastSyncedAt: Iso8601 | null;
+  error: string | null;
+  rollbackDetected: boolean;
+  rollbackSignatures: string[];
+  snapshot: SolanaWatchSnapshot | null;
+}
+
 interface TreasuryBase extends Identified, Timestamped {
   label: string;
   /** Optional human notes — purpose, controlling org, signer rotation policy. */
@@ -129,7 +177,12 @@ export interface BitcoinWatchTreasury extends TreasuryBase {
   watch: BitcoinWatchConfig;
 }
 
-export type Treasury = MultisigTreasury | BitcoinWatchTreasury;
+export interface SolanaWatchTreasury extends TreasuryBase {
+  kind: "solana-watch";
+  watch: SolanaWatchConfig;
+}
+
+export type Treasury = MultisigTreasury | BitcoinWatchTreasury | SolanaWatchTreasury;
 
 export function isMultisigTreasury(treasury: Treasury): treasury is MultisigTreasury {
   return "multisig" in treasury;
@@ -137,6 +190,10 @@ export function isMultisigTreasury(treasury: Treasury): treasury is MultisigTrea
 
 export function isBitcoinWatchTreasury(treasury: Treasury): treasury is BitcoinWatchTreasury {
   return "watch" in treasury && treasury.kind === "bitcoin-watch";
+}
+
+export function isSolanaWatchTreasury(treasury: Treasury): treasury is SolanaWatchTreasury {
+  return "watch" in treasury && treasury.kind === "solana-watch";
 }
 
 export interface PartialSignature {

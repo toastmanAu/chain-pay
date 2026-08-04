@@ -1,5 +1,5 @@
 import { Link } from "react-router-dom";
-import { isBitcoinWatchTreasury, type CkbMultisig, type Treasury } from "@chain-pay/shared";
+import { isBitcoinWatchTreasury, isSolanaWatchTreasury, type CkbMultisig, type Treasury } from "@chain-pay/shared";
 import { useTreasuryStore } from "@/stores/treasury";
 
 export function TreasuryList() {
@@ -14,6 +14,12 @@ export function TreasuryList() {
           <p className="text-sm text-fg-muted">Multisig wallets for payroll funding.</p>
         </div>
         <div className="flex gap-2">
+          <Link
+            to="/treasury/new/solana"
+            className="rounded-md border border-accent px-4 py-2 text-sm font-medium text-accent hover:bg-accent/10"
+          >
+            Add Solana watch
+          </Link>
           <Link
             to="/treasury/new/bitcoin"
             className="rounded-md border border-accent px-4 py-2 text-sm font-medium text-accent hover:bg-accent/10"
@@ -37,7 +43,7 @@ export function TreasuryList() {
 
       {treasuries.length === 0 ? (
         <div className="rounded-lg border border-surface-hi bg-surface p-6 text-sm text-fg-muted">
-          No treasuries yet. Create a CKB or EVM multisig, or add a Bitcoin watch-only treasury.
+          No treasuries yet. Create a CKB or EVM multisig, or add a Bitcoin or Solana watch-only treasury.
         </div>
       ) : (
         <ul className="space-y-2">
@@ -73,6 +79,25 @@ function TreasuryRow({ treasury, onDelete }: { treasury: Treasury; onDelete: () 
             onClick={onDelete}
             className="shrink-0 rounded-md border border-surface-hi px-2 py-1 text-xs text-fg-muted hover:border-danger hover:text-danger"
           >
+            Remove
+          </button>
+        </div>
+      </li>
+    );
+  }
+  if (isSolanaWatchTreasury(treasury)) {
+    return (
+      <li className="rounded-lg border border-surface-hi bg-surface transition-colors hover:border-surface-hi/80">
+        <div className="flex items-start justify-between gap-4 p-4">
+          <Link to={`/treasury/${treasury.id}`} className="min-w-0 flex-1">
+            <div className="flex items-center gap-2">
+              <span className="text-sm font-medium text-fg hover:text-accent">{treasury.label}</span>
+              <span className="rounded-md bg-surface-hi px-2 py-0.5 text-xs text-fg-muted">{chainBadge(treasury.watch.chain)}</span>
+              <span className="text-xs text-fg-muted">watch-only</span>
+            </div>
+            <div className="mt-1 truncate font-mono text-xs text-fg-muted">{treasury.watch.address}</div>
+          </Link>
+          <button type="button" onClick={onDelete} className="shrink-0 rounded-md border border-surface-hi px-2 py-1 text-xs text-fg-muted hover:border-danger hover:text-danger">
             Remove
           </button>
         </div>
@@ -115,5 +140,7 @@ function chainBadge(chain: string): string {
   if (chain.startsWith("evm:")) return `EVM ${chain.slice(4)}`;
   if (chain === "btc:mainnet") return "Bitcoin mainnet";
   if (chain === "btc:testnet") return "Bitcoin testnet";
+  if (chain === "sol:mainnet") return "Solana mainnet";
+  if (chain === "sol:devnet") return "Solana devnet";
   return chain;
 }

@@ -182,6 +182,26 @@ describe("treasury store CRUD", () => {
     ).toThrow(/already exists/i);
     expect(useTreasuryStore.getState().treasuries).toHaveLength(1);
   });
+
+  it("binds Solana watch identity to both network and canonical public address", () => {
+    const solana: Treasury = {
+      id: "sol-1",
+      kind: "solana-watch",
+      label: "SOL reserve",
+      createdAt: "2026-08-04T00:00:00Z",
+      updatedAt: "2026-08-04T00:00:00Z",
+      watch: { chain: "sol:devnet", address: "11111111111111111111111111111111" },
+    };
+    useTreasuryStore.getState().addTreasury(solana);
+    expect(useTreasuryStore.getState().findBySolanaWatch(solana.watch)).toEqual(solana);
+    expect(() => useTreasuryStore.getState().addTreasury({ ...solana, id: "sol-2" })).toThrow(/already exists/i);
+    expect(() => useTreasuryStore.getState().addTreasury({
+      ...solana,
+      id: "sol-3",
+      watch: { chain: "sol:mainnet" as const, address: "11111111111111111111111111111111" },
+    })).not.toThrow();
+    expect(useTreasuryStore.getState().treasuries).toHaveLength(2);
+  });
 });
 
 describe("treasury store — refusal invariant against comm identity", () => {

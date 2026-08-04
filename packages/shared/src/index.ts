@@ -13,3 +13,4 @@ export * from "./invoice-regex";
 export * from "./accounting";
 export * from "./funding";
 export * from "./bitcoin-ipc";
+export * from "./solana-ipc";

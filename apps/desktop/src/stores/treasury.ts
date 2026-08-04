@@ -3,12 +3,16 @@ import { createJSONStorage, persist, type StateStorage } from "zustand/middlewar
 import {
   isBitcoinWatchTreasury,
   isMultisigTreasury,
+  isSolanaWatchTreasury,
   type BitcoinWatchConfig,
   type MultisigConfig,
+  type SolanaWatchConfig,
   type Treasury,
 } from "@chain-pay/shared";
 import { bitcoinWatchIdentity } from "../lib/chains/btc/watch-source";
 import { useBitcoinWatchStore } from "./bitcoin-watch";
+import { solanaWatchIdentity } from "../lib/chains/sol/address";
+import { useSolanaWatchStore } from "./solana-watch";
 import { assertNotMultisigSigner } from "../lib/comm/refusal-invariant";
 import { getOwnIdentityHash } from "../lib/comm/own-identity-hash";
 
@@ -24,6 +28,7 @@ interface TreasuryStore {
   setActiveTreasury: (id: string | null) => void;
   findByMultisig: (cfg: MultisigConfig) => Treasury | undefined;
   findByBitcoinWatch: (cfg: BitcoinWatchConfig) => Treasury | undefined;
+  findBySolanaWatch: (cfg: SolanaWatchConfig) => Treasury | undefined;
 }
 
 // Treasury.since (RFC 0017 time-lock) is bigint, which is not native to JSON.
@@ -77,8 +82,14 @@ export const useTreasuryStore = create<TreasuryStore>()(
               bitcoinWatchIdentity(existing.watch) === bitcoinWatchIdentity(t.watch)
             );
           }
+          if (isSolanaWatchTreasury(t)) {
+            return isSolanaWatchTreasury(existing) &&
+              solanaWatchIdentity(existing.watch.chain, existing.watch.address) ===
+                solanaWatchIdentity(t.watch.chain, t.watch.address);
+          }
           return (
             isMultisigTreasury(existing) &&
+            isMultisigTreasury(t) &&
             existing.multisig.chain === t.multisig.chain &&
             existing.multisig.address.toLowerCase() === t.multisig.address.toLowerCase()
           );
@@ -106,6 +117,7 @@ export const useTreasuryStore = create<TreasuryStore>()(
       },
       removeTreasury: (id) => {
         useBitcoinWatchStore.getState().remove(id);
+        useSolanaWatchStore.getState().remove(id);
         set((s) => ({
           treasuries: s.treasuries.filter((t) => t.id !== id),
           activeTreasuryId: s.activeTreasuryId === id ? null : s.activeTreasuryId,
@@ -124,11 +136,17 @@ export const useTreasuryStore = create<TreasuryStore>()(
             isBitcoinWatchTreasury(t) &&
             bitcoinWatchIdentity(t.watch) === bitcoinWatchIdentity(cfg),
         ),
+      findBySolanaWatch: (cfg) =>
+        get().treasuries.find(
+          (t) => isSolanaWatchTreasury(t) &&
+            solanaWatchIdentity(t.watch.chain, t.watch.address) ===
+              solanaWatchIdentity(cfg.chain, cfg.address),
+        ),
     }),
     {
       name: "chain-pay:treasuries",
       storage: jsonStorage,
-      version: 3,
+      version: 4,
       partialize: (state) => ({
         treasuries: state.treasuries,
         activeTreasuryId: state.activeTreasuryId,

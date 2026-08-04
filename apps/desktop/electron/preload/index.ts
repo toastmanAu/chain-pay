@@ -16,6 +16,13 @@ import {
   type BitcoinBroadcastConfirmResponse,
   type BitcoinBroadcastReviewRequest,
   type BitcoinBroadcastReviewResponse,
+  SOLANA_CHANNELS,
+  type SolanaChain,
+  type SolanaProviderStatus,
+  type SolanaScanRequest,
+  type SolanaScanResponse,
+  type SolanaTransactionStatusRequest,
+  type SolanaTransactionStatusResponse,
 } from "../../../../packages/shared/src";
 
 const platformApi = {
@@ -152,6 +159,16 @@ const chainpayApi = {
       ipcRenderer.invoke(BITCOIN_CHANNELS.reviewBroadcast, request),
     confirmBroadcast: (request: BitcoinBroadcastConfirmRequest): Promise<BitcoinBroadcastConfirmResponse> =>
       ipcRenderer.invoke(BITCOIN_CHANNELS.confirmBroadcast, request),
+  },
+  solana: {
+    status: (chain: SolanaChain): Promise<SolanaProviderStatus> =>
+      ipcRenderer.invoke(SOLANA_CHANNELS.status, chain),
+    scan: (request: SolanaScanRequest): Promise<SolanaScanResponse> =>
+      ipcRenderer.invoke(SOLANA_CHANNELS.scan, request),
+    transactionStatus: (
+      request: SolanaTransactionStatusRequest,
+    ): Promise<SolanaTransactionStatusResponse> =>
+      ipcRenderer.invoke(SOLANA_CHANNELS.transactionStatus, request),
   },
   keyvault: {
     /** Check whether a keyvault blob exists on disk. */

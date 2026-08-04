@@ -3,7 +3,7 @@ import type { ChainAdapter } from "./types";
 import { ckbAdapter } from "./ckb/adapter";
 import { evmAdapter } from "./evm/adapter";
 import { bitcoinAdapter } from "./btc/adapter";
-import { solAdapterStub } from "./sol/_stub";
+import { solanaAdapter } from "./sol/adapter";
 
 const adapters = new Map<ChainId, ChainAdapter>([
   ["ckb:mainnet", ckbAdapter("mainnet")],
@@ -16,7 +16,8 @@ const adapters = new Map<ChainId, ChainAdapter>([
   ["evm:137", evmAdapter(137)],
   ["btc:mainnet", bitcoinAdapter("btc:mainnet")],
   ["btc:testnet", bitcoinAdapter("btc:testnet")],
-  ["sol:mainnet", solAdapterStub],
+  ["sol:mainnet", solanaAdapter("sol:mainnet")],
+  ["sol:devnet", solanaAdapter("sol:devnet")],
 ]);
 
 export function getAdapter(chain: ChainId): ChainAdapter {

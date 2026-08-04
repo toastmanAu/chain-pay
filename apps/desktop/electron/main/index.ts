@@ -33,6 +33,7 @@ import { getSafeStorage } from "./safe-storage";
 import { KeyvaultStore } from "./keyvault-store";
 import { registerKeyvaultHost } from "./keyvault-host";
 import { registerBitcoinIpc } from "./bitcoin-host";
+import { registerSolanaIpc } from "./solana-host";
 import type { CkbNetwork } from "@/lib/light-client/network-configs";
 
 const isDev = !app.isPackaged;
@@ -219,6 +220,7 @@ app.whenReady().then(async () => {
   // accounting handlers (Frappe Slice C bridge — credentials stay in main process)
   registerAccountingIpc();
   registerBitcoinIpc();
+  registerSolanaIpc();
 
   // keyvault host — encrypted BIP39 signer (single-sig SMB send path only).
   // The WASM pkg is a synchronous CJS module (wasm-pack --target nodejs).

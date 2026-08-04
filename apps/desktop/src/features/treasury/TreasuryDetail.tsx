@@ -5,11 +5,13 @@ import { formatEther } from "viem";
 import {
   isBitcoinWatchTreasury,
   isMultisigTreasury,
+  isSolanaWatchTreasury,
   type BitcoinWatchTreasury,
   type BitcoinTransactionStatusResponse,
   type CkbMultisig,
   type EvmMultisig,
   type MultisigTreasury,
+  type SolanaWatchTreasury,
 } from "@chain-pay/shared";
 import { useTreasuryStore } from "@/stores/treasury";
 import { useSyncStore } from "@/stores/sync";
@@ -22,6 +24,9 @@ import { useBitcoinBroadcastStore, type BitcoinBroadcastUiState } from "@/stores
 import { bitcoinBridge } from "@/lib/chains/btc/ipc";
 import { syncBitcoinWatch } from "@/lib/chains/btc/sync";
 import { deriveBitcoinReceiveAddress } from "@/lib/chains/btc/watch-source";
+import { useSolanaWatchStore } from "@/stores/solana-watch";
+import { solanaBridge } from "@/lib/chains/sol/ipc";
+import { syncSolanaWatch } from "@/lib/chains/sol/sync";
 
 const SHANNONS_PER_CKB = 100_000_000n;
 
@@ -46,10 +51,112 @@ export function TreasuryDetail() {
   }
 
   if (isBitcoinWatchTreasury(treasury)) return <BitcoinWatchDetail treasury={treasury} />;
+  if (isSolanaWatchTreasury(treasury)) return <SolanaWatchDetail treasury={treasury} />;
   if (!isMultisigTreasury(treasury)) return null;
   if (treasury.multisig.chain.startsWith("evm:")) return <EvmTreasuryDetail treasury={treasury} />;
 
   return <CkbTreasuryDetail treasury={treasury} />;
+}
+
+function SolanaWatchDetail({ treasury }: { treasury: SolanaWatchTreasury }) {
+  const record = useSolanaWatchStore((state) => state.records[treasury.id]);
+  const [statusError, setStatusError] = useState<string | null>(null);
+  useEffect(() => {
+    useSolanaWatchStore.getState().ensure(treasury.id, treasury.watch);
+  }, [treasury.id, treasury.watch]);
+  const providerQuery = useQuery({
+    queryKey: ["solana-provider-status", treasury.watch.chain],
+    queryFn: () => solanaBridge().status(treasury.watch.chain),
+    retry: false,
+  });
+  const syncQuery = useQuery({
+    queryKey: ["solana-watch-sync", treasury.id],
+    queryFn: () => syncSolanaWatch(treasury),
+    enabled: providerQuery.data?.configured === true,
+    retry: false,
+    refetchInterval: 60_000,
+  });
+  const snapshot = record?.snapshot;
+  const providerState = providerQuery.isLoading
+    ? "checking provider…"
+    : providerQuery.data?.configured
+      ? "provider configured"
+      : "provider not configured";
+
+  async function refreshStatus(signature: string): Promise<void> {
+    setStatusError(null);
+    try {
+      const status = await solanaBridge().transactionStatus({ chain: treasury.watch.chain, signature });
+      useSolanaWatchStore.getState().updateTransactionStatus(treasury.id, signature, status.state);
+    } catch {
+      setStatusError("Transaction status is temporarily unavailable; the last snapshot was preserved.");
+    }
+  }
+
+  return (
+    <div className="space-y-6">
+      <header className="flex items-start justify-between gap-4">
+        <div>
+          <Link to="/treasury" className="text-xs text-fg-muted hover:text-fg">← Treasury</Link>
+          <h1 className="mt-1 text-2xl font-semibold">{treasury.label}</h1>
+          <p className="text-sm text-fg-muted">{chainBadge(treasury.watch.chain)} · Solana watch-only</p>
+        </div>
+        <button type="button" onClick={() => void syncQuery.refetch()} disabled={!providerQuery.data?.configured || syncQuery.isFetching} className="rounded-md border border-accent px-3 py-2 text-sm text-accent disabled:cursor-not-allowed disabled:opacity-40">
+          {syncQuery.isFetching ? "Syncing…" : "Refresh"}
+        </button>
+      </header>
+
+      <section className="grid grid-cols-3 gap-4">
+        <Tile label="Balance" value={snapshot ? `${formatSol(snapshot.balanceLamports)} SOL` : "—"} hint={record?.lastSyncedAt ? `synced ${new Date(record.lastSyncedAt).toLocaleString()}` : providerState} tone="accent" />
+        <Tile label="Transactions" value={String(snapshot?.transactions.length ?? 0)} hint={snapshot?.historyTruncated ? "latest 100 · history bounded" : "known signatures"} />
+        <Tile label="Finalized slot" value={snapshot ? formatThousands(BigInt(snapshot.slot)) : "—"} hint={snapshot ? `${snapshot.blockhash.slice(0, 12)}…` : "not synced"} />
+      </section>
+
+      {!providerQuery.isLoading && !providerQuery.data?.configured ? (
+        <p role="alert" className="rounded-md border border-warn/40 bg-warn/5 p-3 text-sm text-warn">
+          Configure {treasury.watch.chain === "sol:mainnet" ? "SOLANA_MAINNET_RPC_URL" : "SOLANA_DEVNET_RPC_URL"} in the desktop main-process environment, then restart ChainPay.
+        </p>
+      ) : null}
+      {record?.error ? <p role="alert" className="rounded-md border border-danger/40 bg-danger/5 p-3 text-sm text-danger">Solana sync failed: {record.error}</p> : null}
+      {statusError ? <p role="alert" className="rounded-md border border-warn/40 bg-warn/5 p-3 text-sm text-warn">{statusError}</p> : null}
+      {record?.rollbackDetected ? (
+        <p role="alert" className="rounded-md border border-warn/40 bg-warn/5 p-3 text-sm text-warn">
+          {record.rollbackSignatures.length > 0
+            ? `Chain rollback detected for ${record.rollbackSignatures.length} transaction${record.rollbackSignatures.length === 1 ? "" : "s"}.`
+            : "Chain rollback detected in the slot or blockhash context."} Current provider state has replaced stale status.
+        </p>
+      ) : null}
+
+      <section className="rounded-lg border border-surface-hi bg-surface p-5">
+        <h2 className="text-sm font-medium text-fg-muted">Receive address</h2>
+        <div className="mt-2 break-all font-mono text-sm text-accent">{treasury.watch.address}</div>
+        <p className="mt-2 text-xs text-fg-muted">Public account only. ChainPay cannot construct, sign, or broadcast Solana transactions.</p>
+      </section>
+
+      <section className="rounded-lg border border-surface-hi bg-surface p-5">
+        <h2 className="text-sm font-medium text-fg-muted">Transaction history</h2>
+        {snapshot?.transactions.length ? (
+          <ul className="mt-3 divide-y divide-surface-hi">
+            {snapshot.transactions.map((transaction) => (
+              <li key={transaction.signature} className="flex items-center justify-between gap-4 py-3 text-xs">
+                <div className="min-w-0 flex-1">
+                  <div className="truncate font-mono">{transaction.signature}</div>
+                  <div className="mt-1 text-fg-muted">Slot {formatThousands(BigInt(transaction.slot))} · {transaction.state}{transaction.blockTime ? ` · ${new Date(transaction.blockTime * 1000).toLocaleString()}` : ""}</div>
+                  <div className="mt-1 text-fg-muted">Fee {transaction.feeLamports === null ? "unavailable" : `${formatLamports(transaction.feeLamports)} lamports`}{transaction.feePaidByWatched === null ? "" : transaction.feePaidByWatched ? " · paid by watched account" : " · paid by another account"}</div>
+                </div>
+                <div className="flex shrink-0 items-center gap-3">
+                  <span className={`font-medium tabular-nums ${transaction.netLamports !== null && BigInt(transaction.netLamports) >= 0n ? "text-accent" : "text-fg"}`}>
+                    {transaction.netLamports === null ? "delta unavailable" : `${formatSignedSol(transaction.netLamports)} SOL`}
+                  </span>
+                  <button type="button" onClick={() => void refreshStatus(transaction.signature)} className="rounded border border-surface-hi px-2 py-1 text-fg-muted hover:text-fg">Check status</button>
+                </div>
+              </li>
+            ))}
+          </ul>
+        ) : <p className="mt-3 text-sm text-fg-muted">No transactions found.</p>}
+      </section>
+    </div>
+  );
 }
 
 function CkbTreasuryDetail({ treasury }: { treasury: MultisigTreasury }) {
@@ -574,6 +681,22 @@ function formatSignedBtc(satoshiText: string): string {
   return `+${formatBtc(sats.toString())}`;
 }
 
+function formatSol(lamportText: string): string {
+  const lamports = BigInt(lamportText);
+  const whole = lamports / 1_000_000_000n;
+  const fractional = (lamports % 1_000_000_000n).toString().padStart(9, "0").replace(/0+$/, "");
+  return fractional ? `${formatThousands(whole)}.${fractional}` : formatThousands(whole);
+}
+
+function formatSignedSol(lamportText: string): string {
+  const lamports = BigInt(lamportText);
+  return lamports < 0n ? `-${formatSol((-lamports).toString())}` : `+${formatSol(lamports.toString())}`;
+}
+
+function formatLamports(lamportText: string): string {
+  return formatThousands(BigInt(lamportText));
+}
+
 function ReviewValue({ label, value }: { label: string; value: string }) {
   return (
     <div className="rounded-md border border-surface-hi p-3">
@@ -671,5 +794,7 @@ function chainBadge(chain: string): string {
   if (chain.startsWith("evm:")) return `EVM ${chain.slice(4)}`;
   if (chain === "btc:mainnet") return "Bitcoin mainnet";
   if (chain === "btc:testnet") return "Bitcoin testnet";
+  if (chain === "sol:mainnet") return "Solana mainnet";
+  if (chain === "sol:devnet") return "Solana devnet";
   return chain;
 }
