@@ -11,11 +11,16 @@ import type {
   BitcoinBroadcastConfirmResponse,
   BitcoinBroadcastReview,
   BitcoinBroadcastReviewRequest,
+  BitcoinFinalizedEvidenceRequest,
+  BitcoinFinalizedEvidenceResponse,
 } from "@chain-pay/shared";
 import {
   BitcoinBroadcastValidationError,
   buildBitcoinBroadcastReview,
   parseFinalBitcoinTransaction,
+  validateBitcoinBroadcastReview,
+  validateFinalizedBitcoinTransaction,
+  validateFinalizedBitcoinPrevouts,
   toHex,
   validateBitcoinAddresses,
   type ResolvedBitcoinPrevout,
@@ -67,6 +72,7 @@ const blockSchema = z.object({
   height: z.number().int().nonnegative().safe(),
   mediantime: z.number().int().nonnegative().safe(),
 }).passthrough();
+const finalizedBlockSchema = blockSchema.extend({ timestamp: z.number().int().nonnegative().safe() });
 
 const utxoSchema = z.object({
   txid: z.string().regex(HASH),
@@ -90,7 +96,7 @@ export interface BitcoinProviderConfig {
 
 export class BitcoinProviderError extends Error {
   constructor(
-    readonly code: "not_configured" | "unavailable" | "invalid_response" | "invalid_request" | "rejected" | "txid_mismatch",
+    readonly code: "not_configured" | "unavailable" | "invalid_response" | "invalid_request" | "rejected" | "txid_mismatch" | "not_finalized" | "evidence_mismatch",
     message: string,
   ) {
     super(message);
@@ -179,6 +185,31 @@ async function prepareBitcoinBroadcast(args: {
   const block = await client.json(`/block/${tipHash}`, blockSchema);
   if (block.id !== tipHash || block.height !== tipHeight) throw invalidResponse();
 
+  const prevouts = await resolveBitcoinPrevouts(client, parsed, request.chain);
+  const review = buildBitcoinBroadcastReview({
+    chain: request.chain,
+    treasuryId: request.treasuryId,
+    watchedAddresses: request.watchedAddresses,
+    parsed,
+    prevouts,
+    tip: { height: tipHeight, hash: tipHash, medianTimePast: block.mediantime },
+    ...(request.accounting === undefined ? {} : { accounting: request.accounting }),
+  });
+  const [finalTipHeight, finalTipHash] = await Promise.all([
+    client.text("/blocks/tip/height"),
+    client.text("/blocks/tip/hash"),
+  ]);
+  if (parseHeight(finalTipHeight) !== tipHeight || parseHash(finalTipHash) !== tipHash) {
+    throw new BitcoinProviderError("unavailable", "Bitcoin chain tip changed during review; retry");
+  }
+  return { review, alreadyKnown: existing !== null, parsed, client };
+}
+
+async function resolveBitcoinPrevouts(
+  client: EsploraClient,
+  parsed: ReturnType<typeof parseFinalBitcoinTransaction>,
+  chain: BitcoinChain,
+): Promise<ResolvedBitcoinPrevout[]> {
   const transactionIds = [...new Set(parsed.raw.inputs.map((input) => toHex(input.txid)))];
   const transactions = new Map<string, z.infer<typeof prevoutTxSchema>>();
   await mapWithConcurrency(transactionIds, 4, async (txid) => {
@@ -192,8 +223,8 @@ async function prepareBitcoinBroadcast(args: {
     if (transaction.txid !== txid) throw invalidResponse();
     transactions.set(txid, transaction);
   });
-  const addressCoder = Address(request.chain === "btc:mainnet" ? NETWORK : TEST_NETWORK);
-  const prevouts: ResolvedBitcoinPrevout[] = parsed.raw.inputs.map((input) => {
+  const addressCoder = Address(chain === "btc:mainnet" ? NETWORK : TEST_NETWORK);
+  return parsed.raw.inputs.map((input) => {
     const txid = toHex(input.txid);
     const output = transactions.get(txid)?.vout[input.index];
     if (!output) throw invalidResponse();
@@ -215,22 +246,65 @@ async function prepareBitcoinBroadcast(args: {
       value: BigInt(output.value),
     };
   });
-  const review = buildBitcoinBroadcastReview({
-    chain: request.chain,
-    treasuryId: request.treasuryId,
-    watchedAddresses: request.watchedAddresses,
-    parsed,
-    prevouts,
-    tip: { height: tipHeight, hash: tipHash, medianTimePast: block.mediantime },
-  });
-  const [finalTipHeight, finalTipHash] = await Promise.all([
-    client.text("/blocks/tip/height"),
-    client.text("/blocks/tip/hash"),
-  ]);
-  if (parseHeight(finalTipHeight) !== tipHeight || parseHash(finalTipHash) !== tipHash) {
-    throw new BitcoinProviderError("unavailable", "Bitcoin chain tip changed during review; retry");
+}
+
+export async function getFinalizedBitcoinPaymentEvidence(args: {
+  request: BitcoinFinalizedEvidenceRequest;
+  config: BitcoinProviderConfig;
+  fetchImpl?: typeof fetch;
+}): Promise<BitcoinFinalizedEvidenceResponse> {
+  const { request } = args;
+  const review = request.review;
+  try { validateBitcoinBroadcastReview(review); } catch { throw new BitcoinProviderError("invalid_request", "Bitcoin finalized-evidence review is invalid"); }
+  if (review.reviewVersion !== 2) throw new BitcoinProviderError("invalid_request", "Legacy Bitcoin reviews have no committed accounting intent");
+  if (request.chain !== review.chain || request.treasuryId !== review.treasuryId || request.receipt.txid !== review.txid || request.receipt.reviewDigest !== review.digest) {
+    throw new BitcoinProviderError("invalid_request", "Bitcoin finalized-evidence request does not match the reviewed payment");
   }
-  return { review, alreadyKnown: existing !== null, parsed, client };
+  const client = new EsploraClient(args.config, args.fetchImpl ?? fetch);
+  const [tipText, status, rawHex] = await Promise.all([
+    client.text("/blocks/tip/height"),
+    client.optionalJson(`/tx/${review.txid}/status`, statusSchema),
+    client.text(`/tx/${review.txid}/hex`),
+  ]);
+  const tipHeight = parseHeight(tipText);
+  if (!status?.confirmed || status.block_height === undefined || status.block_hash === undefined || status.block_time === undefined) {
+    throw new BitcoinProviderError("not_finalized", "Bitcoin payment does not yet have finalized transaction evidence");
+  }
+  const confirmations = tipHeight - status.block_height + 1;
+  if (status.block_height > tipHeight || confirmations < 6) throw new BitcoinProviderError("not_finalized", "Bitcoin payment has fewer than six canonical confirmations");
+  const canonicalHash = parseHash(await client.text(`/block-height/${status.block_height}`));
+  if (canonicalHash !== status.block_hash) throw new BitcoinProviderError("evidence_mismatch", "Bitcoin payment block is no longer canonical");
+  const block = await client.json(`/block/${canonicalHash}`, finalizedBlockSchema);
+  if (block.id !== canonicalHash || block.height !== status.block_height || block.timestamp !== status.block_time) throw new BitcoinProviderError("evidence_mismatch", "Bitcoin block evidence is inconsistent");
+  try {
+    const parsed = validateFinalizedBitcoinTransaction(review, rawHex);
+    const prevouts = await resolveBitcoinPrevouts(client, parsed, review.chain);
+    validateFinalizedBitcoinPrevouts(review, parsed, prevouts);
+  }
+  catch { throw new BitcoinProviderError("evidence_mismatch", "Finalized Bitcoin transaction bytes do not match the reviewed payment"); }
+  const finalCanonicalHash = parseHash(await client.text(`/block-height/${status.block_height}`));
+  const finalTip = parseHeight(await client.text("/blocks/tip/height"));
+  if (finalCanonicalHash !== canonicalHash || finalTip < tipHeight) throw new BitcoinProviderError("unavailable", "Bitcoin chain context changed during finalized evidence retrieval");
+  return { evidence: {
+    version: 1,
+    chain: review.chain,
+    reviewDigest: review.digest,
+    txid: review.txid,
+    wtxid: review.wtxid,
+    rawTransactionHash: review.rawTransactionHash,
+    blockHeight: String(status.block_height),
+    blockHash: canonicalHash,
+    blockTime: new Date(block.timestamp * 1_000).toISOString(),
+    confirmations: finalTip - status.block_height + 1,
+    transactionVersion: review.version,
+    lockTime: review.lockTime,
+    inputValueSats: review.inputValueSats,
+    outputValueSats: review.outputValueSats,
+    feeSats: review.feeSats,
+    feeRateSatsPerVbyte: review.feeRateSatsPerVbyte,
+    feePayerPolicy: "transaction_inputs",
+    outputs: review.outputs,
+  } };
 }
 
 export function providerConfigFromEnvironment(

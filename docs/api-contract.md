@@ -50,6 +50,15 @@ roadmap contracts.
 contain GL account selections. Frappe stores it as a submitted
 `Crypto Payment Batch` and derives the Journal Entry from server-owned mappings.
 
+For `btc:testnet` and `btc:mainnet`, `bitcoin` is required and contains the
+review digest, txid-adjacent wtxid/raw-byte identity, canonical block
+height/hash and depth, exact input/output/fee satoshis, fee rate and
+`transaction_inputs` fee policy, plus the ordered accounting output mapping.
+Every payment line must be BTC with 8 decimals and match its mapped output.
+Depth below six, malformed addresses, mismatched conservation/mappings,
+cross-chain metadata, caller account names, and reused txids or review digests
+with changed data are rejected.
+
 ## Exchange rates
 
 | Method | Endpoint | Body | Returns |
@@ -67,7 +76,8 @@ The endpoint accepts filters only. It selects submitted, confirmed
 `Crypto Payment Batch` records with posted Journal Entries, verifies each
 source→journal identity binding, and assembles rows server-side. Dates are
 inclusive `YYYY-MM-DD` values and `chain`, when supplied, is one of
-`ckb:mainnet`, `ckb:testnet`, or `evm:11155111`. Both Accounts Manager and
+`ckb:mainnet`, `ckb:testnet`, `evm:11155111`, `sol:devnet`, `sol:mainnet`,
+`btc:testnet`, or `btc:mainnet`. Both Accounts Manager and
 Accounts User may export. Empty result sets and malformed/unknown filters are
 errors rather than ambiguous empty files.
 

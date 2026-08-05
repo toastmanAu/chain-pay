@@ -26,6 +26,7 @@ _IDS = [
     "secure-EXPORT-FORMULA", "secure-EXPORT-TAMPER",
     "secure-EXPORT-SOURCE-TAMPER",
     "secure-SOL-A", "secure-SOL-B",
+    "secure-BTC-A", "secure-BTC-B", "secure-EXPORT-BTC",
 ]
 
 
@@ -124,6 +125,37 @@ def _solana_record(batch_id="secure-SOL-A", signature_byte=7, digest_byte="ab"):
             "feeLamports": "5000",
             "feePayerPolicy": "transaction_fee_payer",
             "messageBase64": "bWVzc2FnZQ==",
+        },
+    }
+
+
+def _bitcoin_record(batch_id="secure-BTC-A", tx_byte="31", digest_byte="41"):
+    destination = "mipcBbFg9gMiCh81Kj8tqqdgoZub1ZJRfn"
+    return {
+        "batchId": batch_id,
+        "sourceType": "send",
+        "label": f"Bitcoin payment {batch_id}",
+        "chain": "btc:testnet",
+        "txHash": tx_byte * 32,
+        "confirmedAt": "2026-08-06T02:40:00Z",
+        "lines": [{
+            "payeeId": "vendor-btc",
+            "fiat": {"currency": "USD", "minor": "2599"},
+            "crypto": {"asset": "BTC", "value": "900719925474", "decimals": 8},
+        }],
+        "bitcoin": {
+            "reviewDigest": digest_byte * 32,
+            "wtxid": "51" * 32,
+            "rawTransactionHash": "61" * 32,
+            "blockHeight": "9007199254740995",
+            "blockHash": "71" * 32,
+            "confirmations": "6",
+            "inputValueSats": "900719927474",
+            "outputValueSats": "900719926474",
+            "feeSats": "1000",
+            "feeRateSatsPerVbyte": "8.333",
+            "feePayerPolicy": "transaction_inputs",
+            "outputs": [{"vout": "0", "destination": destination, "valueSats": "900719925474"}],
         },
     }
 
@@ -271,6 +303,60 @@ class TestConfirmedPaymentAccounting(FrappeTestCase):
         with self.assertRaises(frappe.ValidationError):
             persist_confirmed_payment(_solana_record("secure-SOL-B", 8, "ab"))
 
+    def test_persists_posts_and_replays_finalized_bitcoin_exactly(self):
+        first = post_confirmed_payment(_bitcoin_record())
+        second = post_confirmed_payment(_bitcoin_record())
+        self.assertEqual(first["je_name"], second["je_name"])
+        self.assertTrue(second["record_idempotent"])
+        self.assertTrue(second["idempotent"])
+        batch = frappe.get_doc("Crypto Payment Batch", first["record_name"])
+        self.assertEqual(batch.chain, "btc:testnet")
+        self.assertEqual(batch.review_digest, "41" * 32)
+        self.assertEqual(batch.wtxid, "51" * 32)
+        self.assertEqual(batch.bitcoin_block_height, "9007199254740995")
+        self.assertEqual(batch.confirmations, "6")
+        self.assertEqual(batch.input_value_sats, "900719927474")
+        self.assertEqual(batch.fee_sats, "1000")
+        self.assertEqual(batch.payments[0].crypto_value, "900719925474")
+        self.assertIn('"vout":"0"', batch.bitcoin_outputs_json)
+        journal = frappe.get_doc("Journal Entry", first["je_name"])
+        self.assertEqual(float(journal.total_debit), 25.99)
+        self.assertEqual(float(journal.total_credit), 25.99)
+        self.assertIn("Bitcoin review", journal.user_remark)
+
+    def test_bitcoin_txid_and_review_digest_are_both_idempotency_keys(self):
+        post_confirmed_payment(_bitcoin_record())
+        with self.assertRaises(frappe.ValidationError):
+            persist_confirmed_payment(_bitcoin_record("secure-BTC-B", "32", "41"))
+
+    def test_rejects_bitcoin_tampering_depth_ranges_cross_chain_metadata_and_accounts(self):
+        cases = []
+        for field, value in (
+            ("confirmations", "5"), ("feeSats", "1001"),
+            ("reviewDigest", "AA" * 32), ("feeRateSatsPerVbyte", "08.333"),
+        ):
+            bad = _bitcoin_record()
+            bad["bitcoin"][field] = value
+            cases.append(bad)
+        output = _bitcoin_record()
+        output["bitcoin"]["outputs"][0]["valueSats"] = "1"
+        cases.append(output)
+        address = _bitcoin_record()
+        address["bitcoin"]["outputs"][0]["destination"] = "bc1qwrongnetwork"
+        cases.append(address)
+        unsafe = _bitcoin_record()
+        unsafe["lines"][0]["crypto"]["value"] = "2100000000000001"
+        cases.append(unsafe)
+        metadata = _record()
+        metadata["bitcoin"] = _bitcoin_record()["bitcoin"]
+        cases.append(metadata)
+        account = _bitcoin_record()
+        account["accounts"] = ["Crypto Treasury Asset"]
+        cases.append(account)
+        for bad in cases:
+            with self.assertRaises(frappe.ValidationError):
+                persist_confirmed_payment(bad)
+
     def test_rejects_sol_tampering_cross_chain_metadata_and_client_accounts(self):
         cases = []
         amount = _solana_record()
@@ -403,13 +489,14 @@ class TestConfirmedPaymentAccounting(FrappeTestCase):
             frappe.local.flags.in_test = True
             frappe.set_user("Administrator")
 
-    def test_compliance_csv_is_server_derived_stable_and_covers_ckb_and_evm(self):
+    def test_compliance_csv_is_server_derived_stable_and_covers_ckb_evm_and_bitcoin(self):
         ckb = _record("secure-EXPORT-CKB", "71", "12345")
         ckb["confirmedAt"] = "2026-07-30T08:00:00Z"
         evm = _evm_record("secure-EXPORT-EVM", "72", "73")
         evm["confirmedAt"] = "2026-08-01T02:40:00Z"
         ckb_result = post_confirmed_payment(ckb)
         post_confirmed_payment(evm)
+        post_confirmed_payment(_bitcoin_record("secure-EXPORT-BTC", "77", "78"))
         import json
 
         frappe.db.set_value(
@@ -441,7 +528,7 @@ class TestConfirmedPaymentAccounting(FrappeTestCase):
         content = base64.b64decode(first["bytes_base64"])
         parsed = list(csv.DictReader(io.StringIO(content.decode("utf-8-sig"))))
         ours = {row["batch_id"]: row for row in parsed if row["batch_id"].startswith("secure-EXPORT-")}
-        self.assertEqual(set(ours), {"secure-EXPORT-CKB", "secure-EXPORT-EVM"})
+        self.assertEqual(set(ours), {"secure-EXPORT-CKB", "secure-EXPORT-EVM", "secure-EXPORT-BTC"})
         self.assertEqual(ours["secure-EXPORT-CKB"]["native_value"], "6100000000")
         self.assertEqual(ours["secure-EXPORT-CKB"]["native_amount"], "61")
         self.assertEqual(ours["secure-EXPORT-CKB"]["fiat_amount"], "123.45")
@@ -454,6 +541,11 @@ class TestConfirmedPaymentAccounting(FrappeTestCase):
         self.assertEqual(ours["secure-EXPORT-EVM"]["confirmed_block"], "7123456")
         self.assertEqual(ours["secure-EXPORT-EVM"]["network_fee_native_amount"], "0.0002 ETH")
         self.assertEqual(ours["secure-EXPORT-EVM"]["network_fee_payer"], "executor")
+        self.assertEqual(ours["secure-EXPORT-BTC"]["native_amount"], "9007.19925474")
+        self.assertEqual(ours["secure-EXPORT-BTC"]["confirmed_block"], "9007199254740995")
+        self.assertEqual(ours["secure-EXPORT-BTC"]["network_fee_native_value"], "1000")
+        self.assertEqual(ours["secure-EXPORT-BTC"]["network_fee_native_amount"], "0.00001 BTC")
+        self.assertEqual(ours["secure-EXPORT-BTC"]["network_fee_payer"], "transaction_inputs")
         self.assertEqual(ours["secure-EXPORT-EVM"]["fx_rate"], "unavailable")
         self.assertTrue(ours["secure-EXPORT-CKB"]["journal_entry"].startswith("ACC-JV-"))
 

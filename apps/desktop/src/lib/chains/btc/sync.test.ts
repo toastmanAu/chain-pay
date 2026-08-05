@@ -45,6 +45,7 @@ describe("Bitcoin watch synchronization", () => {
       transactionStatus: vi.fn(),
       reviewBroadcast: vi.fn(),
       confirmBroadcast: vi.fn(),
+      finalizedEvidence: vi.fn(),
       scan,
     };
     await syncBitcoinWatch({ treasuryId: "btc-1", config: CONFIG, bridge });
@@ -65,6 +66,7 @@ describe("Bitcoin watch synchronization", () => {
       transactionStatus: vi.fn(),
       reviewBroadcast: vi.fn(),
       confirmBroadcast: vi.fn(),
+      finalizedEvidence: vi.fn(),
       scan: vi.fn(async (request) => response(request.addresses, [4], "a")),
     };
     await syncBitcoinWatch({ treasuryId: "btc-1", config: CONFIG, bridge });
@@ -85,6 +87,7 @@ describe("Bitcoin watch synchronization", () => {
       transactionStatus: vi.fn(),
       reviewBroadcast: vi.fn(),
       confirmBroadcast: vi.fn(),
+      finalizedEvidence: vi.fn(),
       scan: vi.fn(async () => {
         throw new Error("https://private.example Bearer top-secret");
       }),
@@ -104,6 +107,7 @@ describe("Bitcoin watch synchronization", () => {
       transactionStatus: vi.fn(),
       reviewBroadcast: vi.fn(),
       confirmBroadcast: vi.fn(),
+      finalizedEvidence: vi.fn(),
       scan: vi.fn(async (request) => ({
         ...response(request.addresses, []),
         activity: [{ address: "bc1qwrong", used: false }],

@@ -9,6 +9,8 @@ import type {
   BitcoinBroadcastConfirmResponse,
   BitcoinBroadcastReviewRequest,
   BitcoinBroadcastReviewResponse,
+  BitcoinFinalizedEvidenceRequest,
+  BitcoinFinalizedEvidenceResponse,
 } from "@chain-pay/shared";
 
 export interface BitcoinBridge {
@@ -17,6 +19,7 @@ export interface BitcoinBridge {
   transactionStatus(request: BitcoinTransactionStatusRequest): Promise<BitcoinTransactionStatusResponse>;
   reviewBroadcast(request: BitcoinBroadcastReviewRequest): Promise<BitcoinBroadcastReviewResponse>;
   confirmBroadcast(request: BitcoinBroadcastConfirmRequest): Promise<BitcoinBroadcastConfirmResponse>;
+  finalizedEvidence(request: BitcoinFinalizedEvidenceRequest): Promise<BitcoinFinalizedEvidenceResponse>;
 }
 
 export function bitcoinBridge(): BitcoinBridge {

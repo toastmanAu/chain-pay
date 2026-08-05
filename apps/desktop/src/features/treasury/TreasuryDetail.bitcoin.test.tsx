@@ -88,6 +88,7 @@ beforeEach(() => {
         },
       })),
       transactionStatus: transactionStatusMock,
+      finalizedEvidence: vi.fn(),
       reviewBroadcast: reviewMock,
       confirmBroadcast: confirmMock,
     },
@@ -113,7 +114,7 @@ describe("Bitcoin treasury detail", () => {
     expect(screen.getByText(/bc1p5cyxnuxmeuwuv/)).toBeInTheDocument();
     expect(await screen.findByRole("alert")).toHaveTextContent("BITCOIN_MAINNET_ESPLORA_URL");
     expect(screen.getByText(/never constructs or signs Bitcoin transactions/i)).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /review signed transaction/i })).toBeDisabled();
+    expect(screen.getByRole("button", { name: /inspect signed transaction/i })).toBeDisabled();
   });
 
   it("shows immutable review, warning, explicit confirmation, and submitted receipt states", async () => {
@@ -128,16 +129,24 @@ describe("Bitcoin treasury detail", () => {
       outputs: [{ vout: 0, address: "bc1pexternal", valueSats: "9000", scriptType: "p2tr" as const, watched: false, changeCandidate: false }],
       warnings: ["1 input is outside the selected treasury; ownership is unverified"],
     };
-    reviewMock.mockResolvedValue({ ok: true, review });
+    const accounting = [{ vout: 0, destination: "bc1pexternal", valueSats: "9000", payeeId: "vendor-42", fiat: { currency: "USD" as const, minor: "2599" } }];
+    const approvedReview = { ...review, reviewVersion: 2 as const, rawTransactionHash: "4".repeat(64), accounting };
+    reviewMock.mockResolvedValueOnce({ ok: true, review }).mockResolvedValueOnce({ ok: true, review: approvedReview });
     confirmMock.mockResolvedValue({ ok: true, receipt: { txid: review.txid, reviewDigest: review.digest, state: "submitted", submittedAt: "2026-08-03T00:00:00.000Z" } });
     transactionStatusMock.mockResolvedValue({ state: "pending", confirmations: 0, blockHeight: null, blockHash: null });
     renderBitcoinDetail();
 
     const textarea = screen.getByRole("textbox", { name: /fully signed raw transaction/i });
     fireEvent.change(textarea, { target: { value: "02000000" } });
-    await waitFor(() => expect(screen.getByRole("button", { name: /review signed transaction/i })).toBeEnabled());
-    fireEvent.click(screen.getByRole("button", { name: /review signed transaction/i }));
-    expect(await screen.findByText(review.digest)).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByRole("button", { name: /inspect signed transaction/i })).toBeEnabled());
+    fireEvent.click(screen.getByRole("button", { name: /inspect signed transaction/i }));
+    await screen.findByText(/accounting output mapping/i);
+    fireEvent.change(screen.getByRole("textbox", { name: /payee reference for output 0/i }), { target: { value: "vendor-42" } });
+    fireEvent.change(screen.getByRole("textbox", { name: /usd obligation for output 0/i }), { target: { value: "2599" } });
+    const prepare = screen.getByRole("button", { name: /prepare accounting-bound review/i });
+    expect(prepare).toBeEnabled();
+    fireEvent.click(prepare);
+    expect(await screen.findByText(approvedReview.digest)).toBeInTheDocument();
     expect(screen.getByText(/ownership is unverified/i)).toBeInTheDocument();
     const confirmation = screen.getByRole("checkbox");
     const submit = screen.getByRole("button", { name: /confirm and broadcast/i });
@@ -146,7 +155,8 @@ describe("Bitcoin treasury detail", () => {
     expect(submit).toBeEnabled();
     fireEvent.click(submit);
     expect(await screen.findByText("Submitted")).toBeInTheDocument();
-    expect(confirmMock).toHaveBeenCalledWith(expect.objectContaining({ reviewDigest: review.digest, rawTxHex: "02000000" }));
+    expect(confirmMock).toHaveBeenCalledWith(expect.objectContaining({ reviewDigest: approvedReview.digest, rawTxHex: "02000000", accounting }));
+    expect(reviewMock).toHaveBeenLastCalledWith(expect.objectContaining({ accounting }));
   });
 
   it("surfaces provider rejection without exposing provider diagnostics", async () => {
@@ -154,8 +164,8 @@ describe("Bitcoin treasury detail", () => {
     reviewMock.mockResolvedValue({ ok: false, error: { code: "provider_rejected", message: "Bitcoin provider rejected the transaction" } });
     renderBitcoinDetail();
     fireEvent.change(screen.getByRole("textbox", { name: /fully signed raw transaction/i }), { target: { value: "00" } });
-    await waitFor(() => expect(screen.getByRole("button", { name: /review signed transaction/i })).toBeEnabled());
-    fireEvent.click(screen.getByRole("button", { name: /review signed transaction/i }));
+    await waitFor(() => expect(screen.getByRole("button", { name: /inspect signed transaction/i })).toBeEnabled());
+    fireEvent.click(screen.getByRole("button", { name: /inspect signed transaction/i }));
     await waitFor(() => expect(screen.getByText("Bitcoin provider rejected the transaction")).toBeInTheDocument());
     expect(screen.queryByText(/private\.example|top-secret/i)).not.toBeInTheDocument();
   });
@@ -168,8 +178,8 @@ describe("Bitcoin treasury detail", () => {
     reviewMock.mockResolvedValue({ ok: false, error: { code, message } });
     renderBitcoinDetail();
     fireEvent.change(screen.getByRole("textbox", { name: /fully signed raw transaction/i }), { target: { value: "00" } });
-    await waitFor(() => expect(screen.getByRole("button", { name: /review signed transaction/i })).toBeEnabled());
-    fireEvent.click(screen.getByRole("button", { name: /review signed transaction/i }));
+    await waitFor(() => expect(screen.getByRole("button", { name: /inspect signed transaction/i })).toBeEnabled());
+    fireEvent.click(screen.getByRole("button", { name: /inspect signed transaction/i }));
     expect(await screen.findByText(message)).toBeInTheDocument();
     expect(screen.getByText(`State: ${stateLabel}`)).toBeInTheDocument();
   });

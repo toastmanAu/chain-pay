@@ -7,6 +7,8 @@ import {
   isMultisigTreasury,
   isSolanaWatchTreasury,
   type BitcoinWatchTreasury,
+  type BitcoinBroadcastReview,
+  type BitcoinAccountingState,
   type BitcoinTransactionStatusResponse,
   type CkbMultisig,
   type EvmMultisig,
@@ -24,6 +26,7 @@ import { useBitcoinBroadcastStore, type BitcoinBroadcastUiState } from "@/stores
 import { bitcoinBridge } from "@/lib/chains/btc/ipc";
 import { syncBitcoinWatch } from "@/lib/chains/btc/sync";
 import { deriveBitcoinReceiveAddress } from "@/lib/chains/btc/watch-source";
+import { postFinalizedBitcoinPayment } from "@/lib/accounting/bitcoin-accounting";
 import { useSolanaWatchStore } from "@/stores/solana-watch";
 import { solanaBridge } from "@/lib/chains/sol/ipc";
 import { syncSolanaWatch } from "@/lib/chains/sol/sync";
@@ -384,6 +387,9 @@ function BitcoinWatchDetail({ treasury }: { treasury: BitcoinWatchTreasury }) {
   const broadcast = useBitcoinBroadcastStore((state) => state.records[treasury.id]);
   const [rawTxHex, setRawTxHex] = useState(() => broadcast?.rawTxHex ?? "");
   const [confirmedReview, setConfirmedReview] = useState(false);
+  const [inspection, setInspection] = useState<BitcoinBroadcastReview | null>(null);
+  const [inspectionBusy, setInspectionBusy] = useState(false);
+  const [accountingInputs, setAccountingInputs] = useState<Record<number, { payeeId: string; fiatMinor: string }>>({});
   useEffect(() => {
     useBitcoinWatchStore.getState().ensure(treasury.id, treasury.watch);
   }, [treasury.id, treasury.watch]);
@@ -415,20 +421,17 @@ function BitcoinWatchDetail({ treasury }: { treasury: BitcoinWatchTreasury }) {
     () => [...new Set([...(snapshot?.addresses ?? []), receiveAddress].filter((address) => address !== "Unavailable"))],
     [snapshot?.addresses, receiveAddress],
   );
-  const receiptStatusQuery = useQuery({
-    queryKey: ["bitcoin-broadcast-status", treasury.id, broadcast?.receipt?.txid],
-    queryFn: () => bitcoinBridge().transactionStatus({ chain: treasury.watch.chain, txid: broadcast!.receipt!.txid }),
-    enabled: providerQuery.data?.configured === true && Boolean(broadcast?.receipt),
-    retry: false,
-    refetchInterval: 30_000,
+  const accountingOutputs = inspection?.outputs.filter(
+    (output) => !output.watched && output.scriptType !== "op_return" && BigInt(output.valueSats) > 0n,
+  ) ?? [];
+  const accountingMappingComplete = accountingOutputs.length > 0 && accountingOutputs.every((output) => {
+    const value = accountingInputs[output.vout];
+    return Boolean(output.address && value?.payeeId.trim() && /^[1-9]\d*$/.test(value?.fiatMinor.trim() ?? ""));
   });
-  useEffect(() => {
-    if (receiptStatusQuery.data) useBitcoinBroadcastStore.getState().refreshStatus(treasury.id, receiptStatusQuery.data);
-  }, [receiptStatusQuery.data, treasury.id]);
 
-  async function reviewRawTransaction(): Promise<void> {
+  async function inspectRawTransaction(): Promise<void> {
     const raw = rawTxHex.trim();
-    useBitcoinBroadcastStore.getState().beginReview(treasury.id, treasury.watch.chain, raw);
+    setInspectionBusy(true);
     setConfirmedReview(false);
     try {
       const response = await bitcoinBridge().reviewBroadcast({
@@ -437,7 +440,43 @@ function BitcoinWatchDetail({ treasury }: { treasury: BitcoinWatchTreasury }) {
         watchedAddresses,
         rawTxHex: raw,
       });
-      if (response.ok) useBitcoinBroadcastStore.getState().acceptReview(treasury.id, response.review);
+      if (response.ok) {
+        setInspection(response.review);
+        setAccountingInputs(Object.fromEntries(response.review.outputs
+          .filter((output) => !output.watched && output.scriptType !== "op_return" && BigInt(output.valueSats) > 0n)
+          .map((output) => [output.vout, { payeeId: "", fiatMinor: "" }])));
+      } else {
+        useBitcoinBroadcastStore.getState().beginReview(treasury.id, treasury.watch.chain, raw);
+        useBitcoinBroadcastStore.getState().fail(treasury.id, response.error);
+      }
+    } catch {
+      useBitcoinBroadcastStore.getState().beginReview(treasury.id, treasury.watch.chain, raw);
+      useBitcoinBroadcastStore.getState().fail(treasury.id, { code: "provider_unavailable", message: "Bitcoin provider is unavailable" });
+    } finally {
+      setInspectionBusy(false);
+    }
+  }
+
+  async function prepareAccountingReview(): Promise<void> {
+    if (!inspection || accountingOutputs.length === 0) return;
+    const accounting = accountingOutputs.map((output) => ({
+      vout: output.vout,
+      destination: output.address ?? "",
+      valueSats: output.valueSats,
+      payeeId: accountingInputs[output.vout]?.payeeId.trim() ?? "",
+      fiat: { currency: "USD" as const, minor: accountingInputs[output.vout]?.fiatMinor.trim() ?? "" },
+    }));
+    useBitcoinBroadcastStore.getState().beginReview(treasury.id, treasury.watch.chain, rawTxHex.trim());
+    setConfirmedReview(false);
+    try {
+      const response = await bitcoinBridge().reviewBroadcast({
+        chain: treasury.watch.chain, treasuryId: treasury.id, watchedAddresses,
+        rawTxHex: rawTxHex.trim(), accounting,
+      });
+      if (response.ok) {
+        useBitcoinBroadcastStore.getState().acceptReview(treasury.id, response.review);
+        setInspection(null);
+      }
       else useBitcoinBroadcastStore.getState().fail(treasury.id, response.error);
     } catch {
       useBitcoinBroadcastStore.getState().fail(treasury.id, { code: "provider_unavailable", message: "Bitcoin provider is unavailable" });
@@ -454,6 +493,7 @@ function BitcoinWatchDetail({ treasury }: { treasury: BitcoinWatchTreasury }) {
         watchedAddresses,
         rawTxHex: broadcast.rawTxHex,
         reviewDigest: broadcast.review.digest,
+        ...(broadcast.review.reviewVersion === 2 ? { accounting: broadcast.review.accounting } : {}),
       });
       if (response.ok) useBitcoinBroadcastStore.getState().acceptReceipt(treasury.id, response.receipt);
       else {
@@ -539,7 +579,9 @@ function BitcoinWatchDetail({ treasury }: { treasury: BitcoinWatchTreasury }) {
         <textarea
           aria-label="Fully signed raw transaction"
           value={rawTxHex}
-          onChange={(event) => { setRawTxHex(event.target.value); setConfirmedReview(false); }}
+          onChange={(event) => {
+            setRawTxHex(event.target.value); setConfirmedReview(false); setInspection(null); setAccountingInputs({});
+          }}
           rows={5}
           spellCheck={false}
           placeholder="020000000001…"
@@ -548,19 +590,66 @@ function BitcoinWatchDetail({ treasury }: { treasury: BitcoinWatchTreasury }) {
         <div className="mt-3 flex items-center gap-3">
           <button
             type="button"
-            onClick={() => void reviewRawTransaction()}
-            disabled={!providerQuery.data?.configured || !rawTxHex.trim() || broadcast?.state === "reviewing" || broadcast?.state === "submitting"}
+            onClick={() => void inspectRawTransaction()}
+            disabled={!providerQuery.data?.configured || !rawTxHex.trim() || inspectionBusy || broadcast?.state === "submitting"}
             className="rounded-md border border-accent px-3 py-2 text-sm text-accent disabled:cursor-not-allowed disabled:opacity-40"
           >
-            {broadcast?.state === "reviewing" ? "Reviewing…" : "Review signed transaction"}
+            {inspectionBusy ? "Inspecting…" : "Inspect signed transaction"}
           </button>
-          {broadcast ? <span className="text-xs text-fg-muted">State: {broadcastStateLabel(broadcast.state)}</span> : null}
+          {broadcast && !inspection ? <span className="text-xs text-fg-muted">State: {broadcastStateLabel(broadcast.state)}</span> : null}
         </div>
 
-        {broadcast?.error ? (
+        {broadcast?.error && !inspection ? (
           <p role="alert" className={`mt-3 rounded-md border p-3 text-sm ${broadcast.error.code === "provider_unavailable" ? "border-warn/40 bg-warn/5 text-warn" : broadcast.state === "already_broadcast" ? "border-accent/40 bg-accent/5 text-accent" : "border-danger/40 bg-danger/5 text-danger"}`}>
             {broadcast.error.message}
           </p>
+        ) : null}
+
+        {inspection ? (
+          <div className="mt-5 space-y-4 border-t border-surface-hi pt-4">
+            <div>
+              <h3 className="text-sm font-medium">Accounting output mapping</h3>
+              <p className="mt-1 text-xs text-fg-muted">
+                Map every positive external output. This mapping is approved by this operator at broadcast time; it is not cryptographically signed by the external Bitcoin signers.
+              </p>
+            </div>
+            {accountingOutputs.map((output) => (
+              <div key={`accounting:${output.vout}`} className="grid gap-3 rounded-md border border-surface-hi p-3 md:grid-cols-[minmax(0,1fr)_minmax(10rem,0.5fr)_minmax(10rem,0.5fr)]">
+                <div className="text-xs">
+                  <div className="text-fg-muted">Output {output.vout} · immutable destination and amount</div>
+                  <div className="mt-1 break-all font-mono">{output.address ?? "Unsupported destination"}</div>
+                  <div className="mt-1 tabular-nums">{formatBtc(output.valueSats)} BTC</div>
+                </div>
+                <label className="text-xs text-fg-muted">
+                  Payee reference
+                  <input
+                    aria-label={`Payee reference for output ${output.vout}`}
+                    value={accountingInputs[output.vout]?.payeeId ?? ""}
+                    onChange={(event) => setAccountingInputs((values) => ({ ...values, [output.vout]: { ...values[output.vout]!, payeeId: event.target.value } }))}
+                    className="mt-1 w-full rounded-md border border-surface-hi bg-bg px-3 py-2 text-fg"
+                  />
+                </label>
+                <label className="text-xs text-fg-muted">
+                  USD obligation (cents)
+                  <input
+                    aria-label={`USD obligation for output ${output.vout}`}
+                    inputMode="numeric"
+                    value={accountingInputs[output.vout]?.fiatMinor ?? ""}
+                    onChange={(event) => setAccountingInputs((values) => ({ ...values, [output.vout]: { ...values[output.vout]!, fiatMinor: event.target.value } }))}
+                    className="mt-1 w-full rounded-md border border-surface-hi bg-bg px-3 py-2 text-fg"
+                  />
+                </label>
+              </div>
+            ))}
+            <button
+              type="button"
+              onClick={() => void prepareAccountingReview()}
+              disabled={!accountingMappingComplete || broadcast?.state === "reviewing" || broadcast?.state === "submitting"}
+              className="rounded-md border border-accent px-3 py-2 text-sm text-accent disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              {broadcast?.state === "reviewing" ? "Preparing review…" : "Prepare accounting-bound review"}
+            </button>
+          </div>
         ) : null}
 
         {broadcast?.review ? (
@@ -595,6 +684,21 @@ function BitcoinWatchDetail({ treasury }: { treasury: BitcoinWatchTreasury }) {
               </table>
             </div>
             {broadcast.review.warnings.map((warning) => <p key={warning} className="rounded-md border border-warn/40 bg-warn/5 p-3 text-xs text-warn">{warning}</p>)}
+            {broadcast.review.reviewVersion === 2 ? (
+              <div className="rounded-md border border-accent/40 bg-accent/5 p-3 text-xs">
+                <div className="font-medium text-accent">Accounting-bound review v2</div>
+                {broadcast.review.accounting.map((line) => (
+                  <div key={line.vout} className="mt-2">
+                    Output {line.vout} · {line.payeeId} · USD {(BigInt(line.fiat.minor) / 100n).toString()}.{(BigInt(line.fiat.minor) % 100n).toString().padStart(2, "0")} · {line.destination}
+                  </div>
+                ))}
+                <p className="mt-2 text-fg-muted">Operator-approved at broadcast time; not signed by the external Bitcoin signers.</p>
+              </div>
+            ) : (
+              <p role="alert" className="rounded-md border border-warn/40 bg-warn/5 p-3 text-xs text-warn">
+                Legacy A2 review: broadcast and status tracking remain available, but this transaction is permanently excluded from automatic accounting.
+              </p>
+            )}
             {!broadcast.receipt ? (
               <div className="rounded-md border border-danger/40 bg-danger/5 p-3">
                 <label className="flex items-start gap-2 text-xs text-fg">
@@ -619,8 +723,19 @@ function BitcoinWatchDetail({ treasury }: { treasury: BitcoinWatchTreasury }) {
             <div className="font-medium text-accent">{broadcast.receipt.state === "already_broadcast" ? "Already broadcast" : "Submitted"}</div>
             <div className="mt-1 break-all font-mono">{broadcast.receipt.txid}</div>
             <div className="mt-1 text-fg-muted">{broadcast.status ? broadcastStatusLabel(broadcast.status) : "Checking network status…"}</div>
-            {receiptStatusQuery.error ? <div className="mt-2 text-warn">Status refresh is temporarily unavailable.</div> : null}
-            {broadcast.reorged ? <div role="alert" className="mt-2 text-warn">A prior confirmation was reorged; the transaction is being tracked again.</div> : null}
+            {broadcast.accountingError ? <div className="mt-2 text-warn">{broadcast.accountingError}</div> : null}
+            {broadcast.reorged ? <div role="alert" className="mt-2 text-warn">A prior confirmation was reorged; accounting requires manual reconciliation and ChainPay will never auto-reverse or rebroadcast.</div> : null}
+            {broadcast.review?.reviewVersion === 2 ? (
+              <div className="mt-3 border-t border-accent/20 pt-3">
+                <div>Accounting: {bitcoinAccountingStateLabel(broadcast.accountingState)}</div>
+                {broadcast.finalizedEvidence ? <div className="mt-1 text-fg-muted">Finalized in block {broadcast.finalizedEvidence.blockHeight} · {broadcast.finalizedEvidence.confirmations} confirmations</div> : null}
+                {broadcast.accountingRecordName ? <div className="mt-1">Record <span className="font-mono">{broadcast.accountingRecordName}</span></div> : null}
+                {broadcast.journalEntryName ? <div className="mt-1">Journal <span className="font-mono">{broadcast.journalEntryName}</span></div> : null}
+                {broadcast.accountingState === "post_failed" ? (
+                  <button type="button" onClick={() => void postFinalizedBitcoinPayment(treasury.id)} className="mt-2 rounded-md border border-accent px-3 py-1.5 text-accent">Retry accounting post</button>
+                ) : null}
+              </div>
+            ) : null}
           </div>
         ) : null}
       </section>
@@ -727,6 +842,18 @@ function broadcastStatusLabel(status: BitcoinTransactionStatusResponse): string 
   if (status.state === "confirming") return `Confirming · ${status.confirmations} confirmation${status.confirmations === 1 ? "" : "s"}`;
   if (status.state === "pending") return "Pending in mempool or reorged";
   return "Not currently known by provider";
+}
+
+function bitcoinAccountingStateLabel(state: BitcoinAccountingState): string {
+  return ({
+    not_applicable: "Legacy transaction — not applicable",
+    awaiting_finalization: "Waiting for 6 canonical confirmations",
+    ready: "Finalized evidence ready",
+    posting: "Posting to ERPNext…",
+    posted: "Posted",
+    post_failed: "Post failed — safe to retry",
+    reconciliation_required: "Manual reconciliation required",
+  })[state];
 }
 
 function formatEth(wei: bigint): string {

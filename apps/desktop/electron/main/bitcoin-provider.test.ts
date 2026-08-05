@@ -6,6 +6,7 @@ import {
   scanBitcoinAddresses,
   reviewBitcoinBroadcast,
   confirmBitcoinBroadcast,
+  getFinalizedBitcoinPaymentEvidence,
 } from "./bitcoin-provider";
 
 const ADDRESS_A = "bc1qcr8te4kr609gcawutmrza0j4xv80jy8z306fyu";
@@ -303,7 +304,45 @@ describe("Esplora Bitcoin provider", () => {
         : new Response("not found", { status: 404 })),
     })).resolves.toEqual({ state: "unknown", confirmations: 0, blockHeight: null, blockHash: null });
   });
+
+  it("returns exact finalized evidence only at six canonical confirmations", async () => {
+    const baseRequest = { chain: "btc:mainnet" as const, treasuryId: "btc-treasury", watchedAddresses: [BIP143_ADDRESS], rawTxHex: BIP143_SIGNED };
+    const inspected = await reviewBitcoinBroadcast({ request: baseRequest, config: { baseUrl: "https://example.com/api" }, fetchImpl: bitcoinBroadcastFetch({}) });
+    const accounting = inspected.outputs.map((output, index) => ({ vout: output.vout, destination: output.address!, valueSats: output.valueSats, payeeId: `vendor-${index}`, fiat: { currency: "USD" as const, minor: "100" } }));
+    const request = { ...baseRequest, accounting };
+    const review = await reviewBitcoinBroadcast({ request, config: { baseUrl: "https://example.com/api" }, fetchImpl: bitcoinBroadcastFetch({}) });
+    if (review.reviewVersion !== 2) throw new Error("expected v2 review");
+    const receipt = { txid: review.txid, reviewDigest: review.digest, state: "submitted" as const, submittedAt: "2026-08-03T00:00:00.000Z" };
+    const evidenceFetch = finalizedFetch(2_005);
+    const result = await getFinalizedBitcoinPaymentEvidence({ request: { chain: review.chain, treasuryId: review.treasuryId, review, receipt }, config: { baseUrl: "https://example.com/api" }, fetchImpl: evidenceFetch });
+    expect(result.evidence).toMatchObject({ txid: review.txid, wtxid: review.wtxid, blockHeight: "2000", blockHash: BLOCK_HASH, confirmations: 6, feeSats: "3400", outputs: review.outputs });
+    expect(JSON.stringify(result)).not.toContain(BIP143_SIGNED);
+
+    await expect(getFinalizedBitcoinPaymentEvidence({ request: { chain: review.chain, treasuryId: review.treasuryId, review, receipt }, config: { baseUrl: "https://example.com/api" }, fetchImpl: finalizedFetch(2_004) })).rejects.toMatchObject({ code: "not_finalized" });
+    await expect(getFinalizedBitcoinPaymentEvidence({ request: { chain: review.chain, treasuryId: review.treasuryId, review, receipt }, config: { baseUrl: "https://example.com/api" }, fetchImpl: finalizedFetch(2_005, `${BIP143_SIGNED.slice(0, -2)}01`) })).rejects.toMatchObject({ code: "evidence_mismatch" });
+    await expect(getFinalizedBitcoinPaymentEvidence({ request: { chain: review.chain, treasuryId: review.treasuryId, review, receipt }, config: { baseUrl: "https://example.com/api" }, fetchImpl: finalizedFetch(2_005, BIP143_SIGNED, 999_999_999) })).rejects.toMatchObject({ code: "evidence_mismatch" });
+  });
 });
+
+function finalizedFetch(tipHeight: number, rawHex = BIP143_SIGNED, prevoutValue = 1_000_000_000): typeof fetch {
+  return vi.fn<typeof fetch>(async (input) => {
+    const url = String(input);
+    if (url.endsWith("/blocks/tip/height")) return new Response(String(tipHeight));
+    if (url.endsWith(`/tx/${BIP143_TXID}/status`)) return json({ confirmed: true, block_height: 2_000, block_hash: BLOCK_HASH, block_time: 1_700_000_000 });
+    if (url.endsWith(`/tx/${BIP143_TXID}/hex`)) return new Response(rawHex);
+    if (url.endsWith(`/tx/${BIP143_PREV_TXID}`)) return json({
+      txid: BIP143_PREV_TXID,
+      vout: [
+        { scriptpubkey: "6a", value: 0 },
+        { scriptpubkey: "a9144733f37cf4db86fbc2efed2500b4f4e49f31202387", scriptpubkey_address: BIP143_ADDRESS, value: prevoutValue },
+      ],
+      status: { confirmed: true, block_height: 1_000, block_hash: BLOCK_HASH },
+    });
+    if (url.endsWith("/block-height/2000")) return new Response(BLOCK_HASH);
+    if (url.endsWith(`/block/${BLOCK_HASH}`)) return json({ id: BLOCK_HASH, height: 2_000, mediantime: 1_699_999_000, timestamp: 1_700_000_000 });
+    return new Response("not found", { status: 404 });
+  });
+}
 
 function bitcoinBroadcastFetch(options: {
   known?: boolean;

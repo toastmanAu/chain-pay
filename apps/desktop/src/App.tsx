@@ -38,6 +38,7 @@ import { useBatchConfirmationSync } from "./lib/invoices/use-batch-confirmation-
 import { useBatchConfirmationToAccounting } from "./lib/accounting/use-batch-confirmation-to-accounting";
 import { useSafeConfirmationToAccounting } from "./lib/accounting/use-safe-confirmation-to-accounting";
 import { useSolanaFinalizationToAccounting } from "./lib/accounting/use-solana-finalization-to-accounting";
+import { useBitcoinFinalizationToAccounting } from "./lib/accounting/use-bitcoin-finalization-to-accounting";
 import { isExpired } from "./lib/comm/expires-at";
 import type { OutgoingPacket } from "./lib/comm/types";
 import { isMultisigTreasury, type TransferPacket } from "@chain-pay/shared";
@@ -242,6 +243,7 @@ export function App() {
   useSendConfirmationToAccounting();
   useSafeConfirmationToAccounting();
   useSolanaFinalizationToAccounting();
+  useBitcoinFinalizationToAccounting();
 
   return (
     <AppShell>

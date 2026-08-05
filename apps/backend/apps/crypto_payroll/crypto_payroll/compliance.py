@@ -19,7 +19,10 @@ from typing import Iterable
 import frappe
 
 
-ALLOWED_CHAINS = {"ckb:mainnet", "ckb:testnet", "evm:11155111", "sol:devnet", "sol:mainnet"}
+ALLOWED_CHAINS = {
+    "ckb:mainnet", "ckb:testnet", "evm:11155111",
+    "sol:devnet", "sol:mainnet", "btc:testnet", "btc:mainnet",
+}
 MAX_EXPORT_ROWS = 10_000
 UNAVAILABLE = "unavailable"
 
@@ -151,7 +154,12 @@ def build_rows(filters: ComplianceFilters) -> list[ComplianceRow]:
                     fx_taken_at=fx["taken_at"],
                     transaction_hash=batch.tx_hash,
                     safe_tx_hash=batch.safe_tx_hash or UNAVAILABLE,
-                    confirmed_block=batch.finalized_slot or batch.confirmed_block_number or UNAVAILABLE,
+                    confirmed_block=(
+                        batch.bitcoin_block_height
+                        or batch.finalized_slot
+                        or batch.confirmed_block_number
+                        or UNAVAILABLE
+                    ),
                     confirmed_at_utc=confirmed_at,
                     network_fee_native_value=fee_value,
                     network_fee_native_amount=fee_amount,
@@ -231,6 +239,26 @@ def _source_digests(batch) -> set[str]:
             "fee_payer_policy": batch.fee_payer_policy,
             "solana_message_base64": batch.solana_message_base64,
         }
+    bitcoin = None
+    if batch.chain.startswith("btc:"):
+        try:
+            outputs = json.loads(batch.bitcoin_outputs_json)
+        except (TypeError, json.JSONDecodeError):
+            frappe.throw(f"payment record {batch.name} has invalid Bitcoin outputs")
+        bitcoin = {
+            "review_digest": batch.review_digest,
+            "wtxid": batch.wtxid,
+            "raw_transaction_hash": batch.raw_transaction_hash,
+            "bitcoin_block_height": str(batch.bitcoin_block_height),
+            "block_hash": batch.block_hash,
+            "confirmations": str(batch.confirmations),
+            "input_value_sats": str(batch.input_value_sats),
+            "output_value_sats": str(batch.output_value_sats),
+            "fee_sats": str(batch.fee_sats),
+            "fee_rate_sats_per_vbyte": str(batch.fee_rate_sats_per_vbyte),
+            "fee_payer_policy": batch.fee_payer_policy,
+            "bitcoin_outputs_json": json.dumps(outputs, sort_keys=True, separators=(",", ":")),
+        }
     source = {
         "batch_id": batch.external_id,
         "source_type": batch.source_type,
@@ -245,6 +273,7 @@ def _source_digests(batch) -> set[str]:
         "lines": lines,
         "evm": evm,
         "solana": solana,
+        "bitcoin": bitcoin,
     }
 
     def digest(value: dict) -> str:
@@ -252,8 +281,11 @@ def _source_digests(batch) -> set[str]:
         return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
     candidates = {digest(source)}
+    # Records created before Bitcoin support did not include `bitcoin: null`.
+    without_bitcoin = {key: value for key, value in source.items() if key != "bitcoin"}
+    candidates.add(digest(without_bitcoin))
     # Records created before Solana support did not include `solana: null`.
-    without_solana = {key: value for key, value in source.items() if key != "solana"}
+    without_solana = {key: value for key, value in without_bitcoin.items() if key != "solana"}
     candidates.add(digest(without_solana))
     # CKB records created before Sepolia support also omitted `evm: null`.
     if batch.chain.startswith("ckb:"):
@@ -285,6 +317,9 @@ def _network_fee(batch) -> tuple[str, str, str]:
         value = str(batch.fee_lamports)
         payer = f"{batch.fee_payer_policy}:{batch.fee_payer_address}"
         return value, f"{format_units(value, 9)} SOL", payer
+    if batch.chain.startswith("btc:") and batch.fee_sats is not None:
+        value = str(batch.fee_sats)
+        return value, f"{format_units(value, 8)} BTC", batch.fee_payer_policy or "transaction_inputs"
     return UNAVAILABLE, UNAVAILABLE, UNAVAILABLE
 
 

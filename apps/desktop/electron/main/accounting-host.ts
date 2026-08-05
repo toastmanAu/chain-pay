@@ -15,7 +15,7 @@ export type ComplianceFormat = "csv" | "pdf";
 export interface ComplianceFilters {
   fromDate?: string;
   toDate?: string;
-  chain?: "ckb:mainnet" | "ckb:testnet" | "evm:11155111" | "sol:devnet" | "sol:mainnet";
+  chain?: "ckb:mainnet" | "ckb:testnet" | "evm:11155111" | "sol:devnet" | "sol:mainnet" | "btc:testnet" | "btc:mainnet";
 }
 
 export interface ComplianceSaveResult {
@@ -39,7 +39,8 @@ function requireEnv(name: string): string {
   return v;
 }
 
-const canonicalUint = z.union([z.bigint(), z.string().regex(/^(0|[1-9]\d*)$/)]);
+const canonicalUint = z.union([z.bigint().nonnegative(), z.string().regex(/^(0|[1-9]\d*)$/)]);
+const hexDigest = z.string().regex(/^[0-9a-f]{64}$/);
 const paymentLineSchema = z.object({
   payeeId: z.string().min(1).max(140),
   fiat: z.object({ currency: z.literal("USD"), minor: canonicalUint }).strict(),
@@ -56,15 +57,39 @@ const solanaSchema = z.object({
   amountLamports: z.string(), feeLamports: z.string(), feePayerPolicy: z.literal("transaction_fee_payer"),
   messageBase64: z.string().max(4096),
 }).strict();
+const bitcoinSchema = z.object({
+  reviewDigest: hexDigest, wtxid: hexDigest, rawTransactionHash: hexDigest, blockHeight: canonicalUint,
+  blockHash: hexDigest, confirmations: canonicalUint, inputValueSats: canonicalUint, outputValueSats: canonicalUint,
+  feeSats: canonicalUint, feeRateSatsPerVbyte: z.string().regex(/^(?:0|[1-9]\d*)(?:\.\d{1,3})?$/), feePayerPolicy: z.literal("transaction_inputs"),
+  outputs: z.array(z.object({ vout: canonicalUint, destination: z.string().min(1).max(100), valueSats: canonicalUint }).strict()).min(1).max(500),
+}).strict();
 const confirmedRecordSchema = z.object({
   batchId: z.string().min(1).max(140), sourceType: z.enum(["send", "payroll"]), label: z.string().min(1).max(140),
-  chain: z.enum(["ckb:mainnet", "ckb:testnet", "evm:11155111", "sol:devnet", "sol:mainnet"]),
+  chain: z.enum(["ckb:mainnet", "ckb:testnet", "evm:11155111", "sol:devnet", "sol:mainnet", "btc:testnet", "btc:mainnet"]),
   txHash: z.string().min(1).max(128), confirmedAt: z.string().datetime({ offset: true }),
-  lines: z.array(paymentLineSchema).min(1).max(500), evm: evmSchema.optional(), solana: solanaSchema.optional(),
+  lines: z.array(paymentLineSchema).min(1).max(500), evm: evmSchema.optional(), solana: solanaSchema.optional(), bitcoin: bitcoinSchema.optional(),
 }).strict().superRefine((value, context) => {
   const family = value.chain.split(":")[0];
-  if ((family === "evm") !== Boolean(value.evm) || (family === "sol") !== Boolean(value.solana)) {
+  if (
+    (family === "evm") !== Boolean(value.evm) ||
+    (family === "sol") !== Boolean(value.solana) ||
+    (family === "btc") !== Boolean(value.bitcoin)
+  ) {
     context.addIssue({ code: z.ZodIssueCode.custom, message: "cross-chain metadata is not allowed" });
+  }
+  const expected = family === "btc" ? ["BTC", 8] : family === "sol" ? ["SOL", 9] : family === "evm" ? ["ETH", 18] : ["CKB", 8];
+  if (value.lines.some((line) => line.crypto.asset !== expected[0] || line.crypto.decimals !== expected[1])) {
+    context.addIssue({ code: z.ZodIssueCode.custom, message: "chain asset metadata is invalid" });
+  }
+  if (value.bitcoin) {
+    const amount = (input: bigint | string) => BigInt(input);
+    const input = amount(value.bitcoin.inputValueSats), output = amount(value.bitcoin.outputValueSats), fee = amount(value.bitcoin.feeSats);
+    const max = 2_100_000_000_000_000n;
+    const outputsOrdered = value.bitcoin.outputs.every((item, index, items) => index === 0 || amount(items[index - 1]!.vout) < amount(item.vout));
+    const outputsMatch = value.bitcoin.outputs.length === value.lines.length && value.bitcoin.outputs.every((item, index) => amount(item.valueSats) === amount(value.lines[index]!.crypto.value));
+    if (amount(value.bitcoin.confirmations) < 6n || input <= 0n || output <= 0n || fee <= 0n || input > max || output > max || fee > max || input !== output + fee || !outputsOrdered || !outputsMatch) {
+      context.addIssue({ code: z.ZodIssueCode.custom, message: "Bitcoin finalized evidence is inconsistent" });
+    }
   }
 });
 
@@ -225,7 +250,7 @@ function normaliseComplianceRequest(filters: ComplianceFilters, format: Complian
   const from = date(filters.fromDate, "fromDate");
   const to = date(filters.toDate, "toDate");
   if (from && to && from > to) throw new Error("fromDate cannot be after toDate");
-  if (filters.chain && !["ckb:mainnet", "ckb:testnet", "evm:11155111", "sol:devnet", "sol:mainnet"].includes(filters.chain)) {
+  if (filters.chain && !["ckb:mainnet", "ckb:testnet", "evm:11155111", "sol:devnet", "sol:mainnet", "btc:testnet", "btc:mainnet"].includes(filters.chain)) {
     throw new Error("Unsupported compliance chain");
   }
   return {

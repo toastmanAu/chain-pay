@@ -4,6 +4,8 @@ import {
   BitcoinBroadcastValidationError,
   buildBitcoinBroadcastReview,
   parseFinalBitcoinTransaction,
+  validateBitcoinBroadcastReview,
+  validateFinalizedBitcoinTransaction,
   validateBitcoinAddresses,
 } from "./bitcoin-broadcast";
 
@@ -13,11 +15,11 @@ const PREV_TXID = "77541aeb3c4dac9260b68f74f44c973081a9d4cb2ebe8038b2d70faa201b6
 const PREV_SCRIPT = "a9144733f37cf4db86fbc2efed2500b4f4e49f31202387";
 const WATCHED = "38BW8nqpHSWpkf5sXrQd2xYwvnPJwP59ic";
 
-function review(hex = BIP143_SIGNED) {
+function review(hex = BIP143_SIGNED, accounting?: import("@chain-pay/shared").BitcoinPaymentAccountingLine[], watchedAddresses = [WATCHED]) {
   return buildBitcoinBroadcastReview({
     chain: "btc:mainnet",
     treasuryId: "treasury-bip143",
-    watchedAddresses: [WATCHED],
+    watchedAddresses,
     parsed: parseFinalBitcoinTransaction(hex),
     prevouts: [{
       txid: PREV_TXID,
@@ -27,6 +29,7 @@ function review(hex = BIP143_SIGNED) {
       value: 1_000_000_000n,
     }],
     tip: { height: 2_000, hash: "a".repeat(64), medianTimePast: 1_700_000_000 },
+    ...(accounting === undefined ? {} : { accounting }),
   });
 }
 
@@ -127,6 +130,32 @@ describe("manual Bitcoin broadcast validation", () => {
     });
     expect(changedTip.digest).not.toBe(first.digest);
     expect(changedTip.watchSetHash).not.toBe(first.watchSetHash);
+  });
+
+  it("creates a v2 digest bound to canonical external-output accounting and exact raw bytes", () => {
+    const inspected = review();
+    const accounting = inspected.outputs.map((output, index) => ({
+      vout: output.vout, destination: output.address!, valueSats: output.valueSats,
+      payeeId: `vendor-${index}`, fiat: { currency: "USD" as const, minor: String((index + 1) * 100) },
+    }));
+    const result = review(BIP143_SIGNED, accounting);
+    if (result.reviewVersion !== 2) throw new Error("expected a v2 review");
+    expect(result).toMatchObject({ reviewVersion: 2, accounting, rawTransactionHash: expect.stringMatching(/^[0-9a-f]{64}$/) });
+    expect(result.digest).not.toBe(inspected.digest);
+    expect(() => validateBitcoinBroadcastReview({ ...result, accounting: [{ ...result.accounting[0]!, payeeId: "tampered" }, ...result.accounting.slice(1)] })).toThrow(/digest/i);
+    expect(validateFinalizedBitcoinTransaction(result, BIP143_SIGNED).transaction.id).toBe(result.txid);
+    expect(() => validateFinalizedBitcoinTransaction(result, `${BIP143_SIGNED.slice(0, -2)}01`)).toThrow();
+  });
+
+  it("rejects omitted, reordered, duplicate/change, mismatched, and unsafe accounting mappings", () => {
+    const inspected = review();
+    const mappings = inspected.outputs.map((output, index) => ({ vout: output.vout, destination: output.address!, valueSats: output.valueSats, payeeId: `p-${index}`, fiat: { currency: "USD" as const, minor: "100" } }));
+    expect(() => review(BIP143_SIGNED, mappings.slice(0, 1))).toThrow(/every external/i);
+    expect(() => review(BIP143_SIGNED, [...mappings].reverse())).toThrow(/canonical vout/i);
+    expect(() => review(BIP143_SIGNED, [{ ...mappings[0]!, valueSats: "1" }, mappings[1]!])).toThrow(/canonical vout/i);
+    expect(() => review(BIP143_SIGNED, [{ ...mappings[0]!, fiat: { currency: "USD", minor: "18446744073709551616" } }, mappings[1]!])).toThrow(/accounting values/i);
+    const changeAddress = inspected.outputs[0]!.address!;
+    expect(() => review(BIP143_SIGNED, mappings, [WATCHED, changeAddress])).toThrow(/every external|canonical vout/i);
   });
 
   it.each([

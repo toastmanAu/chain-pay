@@ -14,6 +14,7 @@ import type {
   BitcoinBroadcastReviewInput,
   BitcoinBroadcastReviewOutput,
   BitcoinChain,
+  BitcoinPaymentAccountingLine,
 } from "@chain-pay/shared";
 
 const MAX_RAW_TX_BYTES = 100_000;
@@ -112,6 +113,7 @@ export function buildBitcoinBroadcastReview(args: {
   parsed: ParsedFinalBitcoinTransaction;
   prevouts: ResolvedBitcoinPrevout[];
   tip: BitcoinReviewTip;
+  accounting?: BitcoinPaymentAccountingLine[];
 }): BitcoinBroadcastReview {
   const { raw, transaction } = args.parsed;
   if (args.prevouts.length !== raw.inputs.length) throw validation("provider_unavailable", "Every transaction input must have a verified prevout");
@@ -203,11 +205,119 @@ export function buildBitcoinBroadcastReview(args: {
     outputs,
     warnings,
   };
+  if (args.accounting === undefined) {
+    const digest = createHash("sha256")
+      .update("chainpay:bitcoin-broadcast-review:v1\n")
+      .update(JSON.stringify(reviewWithoutDigest))
+      .digest("hex");
+    return { digest, ...reviewWithoutDigest };
+  }
+  const accounting = validateBitcoinAccounting(outputs, args.accounting);
+  const v2WithoutDigest = {
+    ...reviewWithoutDigest,
+    reviewVersion: 2 as const,
+    rawTransactionHash: createHash("sha256").update(args.parsed.rawBytes).digest("hex"),
+    accounting,
+  };
   const digest = createHash("sha256")
-    .update("chainpay:bitcoin-broadcast-review:v1\n")
-    .update(JSON.stringify(reviewWithoutDigest))
+    .update("chainpay:bitcoin-broadcast-review:v2\n")
+    .update(JSON.stringify(v2WithoutDigest))
     .digest("hex");
-  return { digest, ...reviewWithoutDigest };
+  return { digest, ...v2WithoutDigest };
+}
+
+export function computeBitcoinBroadcastReviewDigest(review: Omit<BitcoinBroadcastReview, "digest">): string {
+  const version = review.reviewVersion === 2 ? 2 : 1;
+  return createHash("sha256")
+    .update(`chainpay:bitcoin-broadcast-review:v${version}\n`)
+    .update(JSON.stringify(review))
+    .digest("hex");
+}
+
+export function validateBitcoinBroadcastReview(review: BitcoinBroadcastReview): void {
+  const { digest, ...withoutDigest } = review;
+  if (!/^[0-9a-f]{64}$/.test(digest) || computeBitcoinBroadcastReviewDigest(withoutDigest) !== digest) {
+    throw validation("review_changed", "Bitcoin review digest is invalid");
+  }
+  if (review.reviewVersion === 2) validateBitcoinAccounting(review.outputs, review.accounting);
+}
+
+export function validateFinalizedBitcoinTransaction(review: BitcoinBroadcastReview, rawTxHex: string): ParsedFinalBitcoinTransaction {
+  validateBitcoinBroadcastReview(review);
+  if (review.reviewVersion !== 2) throw validation("unsupported", "Legacy Bitcoin reviews have no committed accounting intent");
+  const parsed = parseFinalBitcoinTransaction(rawTxHex);
+  const hash = createHash("sha256").update(parsed.rawBytes).digest("hex");
+  if (parsed.transaction.id !== review.txid || parsed.transaction.hash !== review.wtxid || hash !== review.rawTransactionHash ||
+      parsed.raw.version !== review.version || parsed.raw.lockTime !== review.lockTime || parsed.rawBytes.length !== review.sizeBytes ||
+      parsed.transaction.weight !== review.weight || parsed.transaction.vsize !== review.vsize ||
+      parsed.raw.inputs.length !== review.inputs.length || parsed.raw.outputs.length !== review.outputs.length) {
+    throw validation("review_changed", "Finalized Bitcoin bytes do not match the immutable review");
+  }
+  for (let index = 0; index < parsed.raw.inputs.length; index++) {
+    const input = parsed.raw.inputs[index]!;
+    const reviewed = review.inputs[index]!;
+    if (toHex(input.txid) !== reviewed.txid || input.index !== reviewed.vout) throw validation("review_changed", "Finalized Bitcoin inputs do not match the immutable review");
+  }
+  for (let index = 0; index < parsed.raw.outputs.length; index++) {
+    const output = parsed.raw.outputs[index]!;
+    const reviewed = review.outputs[index]!;
+    const scriptType = classifyOutputScript(output.script);
+    let address: string | null = null;
+    if (scriptType !== "op_return") {
+      try { address = parsed.transaction.getOutputAddress(index, review.chain === "btc:mainnet" ? NETWORK : TEST_NETWORK) ?? null; }
+      catch { throw validation("review_changed", "Finalized Bitcoin output scripts do not match the immutable review"); }
+    }
+    if (reviewed.vout !== index || output.amount.toString() !== reviewed.valueSats || scriptType !== reviewed.scriptType || address !== reviewed.address) {
+      throw validation("review_changed", "Finalized Bitcoin outputs do not match the immutable review");
+    }
+  }
+  return parsed;
+}
+
+export function validateFinalizedBitcoinPrevouts(
+  review: BitcoinBroadcastReview,
+  parsed: ParsedFinalBitcoinTransaction,
+  prevouts: ResolvedBitcoinPrevout[],
+): void {
+  if (review.reviewVersion !== 2 || prevouts.length !== review.inputs.length || parsed.raw.inputs.length !== prevouts.length) {
+    throw validation("review_changed", "Finalized Bitcoin prevouts do not match the immutable review");
+  }
+  let inputValue = 0n;
+  for (let index = 0; index < prevouts.length; index++) {
+    const prevout = prevouts[index]!;
+    const input = review.inputs[index]!;
+    const scriptType = verifyFinalInput(index, parsed, prevouts);
+    assertMoney(prevout.value, "input");
+    inputValue += prevout.value;
+    if (prevout.txid !== input.txid || prevout.vout !== input.vout || prevout.address !== input.address || prevout.value.toString() !== input.valueSats || scriptType !== input.scriptType) {
+      throw validation("review_changed", "Finalized Bitcoin input evidence does not match the immutable review");
+    }
+  }
+  const outputValue = parsed.raw.outputs.reduce((sum, output) => sum + output.amount, 0n);
+  if (inputValue.toString() !== review.inputValueSats || outputValue.toString() !== review.outputValueSats || (inputValue - outputValue).toString() !== review.feeSats) {
+    throw validation("review_changed", "Finalized Bitcoin totals do not match the immutable review");
+  }
+}
+
+function validateBitcoinAccounting(
+  outputs: BitcoinBroadcastReviewOutput[],
+  supplied: BitcoinPaymentAccountingLine[],
+): BitcoinPaymentAccountingLine[] {
+  if (!Array.isArray(supplied)) throw validation("invalid_request", "Bitcoin accounting mapping must be an array");
+  const expected = outputs.filter((output) => !output.watched && output.scriptType !== "op_return" && BigInt(output.valueSats) > 0n);
+  if (supplied.length !== expected.length) throw validation("policy", "Every external Bitcoin payment output requires one accounting mapping");
+  return supplied.map((line, index) => {
+    const output = expected[index];
+    if (!output || !Number.isSafeInteger(line?.vout) || line.vout !== output.vout || line.destination !== output.address || line.valueSats !== output.valueSats) {
+      throw validation("policy", "Bitcoin accounting mappings must match external outputs in canonical vout order");
+    }
+    if (!/^(0|[1-9]\d*)$/.test(line.fiat?.minor ?? "") || BigInt(line.fiat.minor) <= 0n || BigInt(line.fiat.minor) > 18_446_744_073_709_551_615n || line.fiat.currency !== "USD") {
+      throw validation("policy", "Bitcoin accounting values must be positive canonical USD minor units");
+    }
+    const payeeId = line.payeeId?.trim();
+    if (!payeeId || payeeId !== line.payeeId || payeeId.length > 140) throw validation("policy", "Bitcoin payee references are invalid");
+    return { vout: line.vout, destination: line.destination, valueSats: line.valueSats, payeeId, fiat: { currency: "USD", minor: line.fiat.minor } };
+  });
 }
 
 function verifyFinalInput(

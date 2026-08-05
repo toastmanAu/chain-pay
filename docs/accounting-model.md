@@ -87,6 +87,29 @@ change the journal value until the fee/cost-basis extension is implemented.
 Legacy version-1 Solana reviews have no committed accounting intent and are
 never posted.
 
+## Current native-BTC accounting scope
+
+Bitcoin accounting begins only with a version-2 broadcast review. Before the
+operator can approve broadcast, every positive external output is mapped in
+canonical vout order to its immutable destination, exact satoshis, payee
+reference, and positive USD obligation. Watched outputs are change candidates;
+zero-value OP_RETURN outputs are metadata. The mapping is operator-approved at
+broadcast time and is not cryptographically signed by the external Bitcoin
+signers. Legacy A2 reviews remain broadcast/status compatible but are never
+accounting sources.
+
+After six canonical confirmations, Electron main re-fetches the exact raw
+transaction and verifies txid, wtxid, bytes, version/locktime, all inputs and
+outputs, totals, fee/rate, block height/hash/time, and current depth against the
+immutable review. One deterministic `ConfirmedPaymentRecord` then contains one
+BTC/8-decimal line per committed external output. ERPNext derives the balanced
+zero-FX journal from the committed USD obligations; the transaction-input-paid
+network fee is immutable audit metadata and does not change journal value yet.
+Posting is single-flight and idempotent by batch ID, txid, review digest, and
+record digest. Reorgs block an unposted record; after evidence/posting they
+retain the receipt, evidence, and backend IDs and require manual reconciliation
+without automatic reversal or rebroadcast.
+
 ## What we explicitly do not model yet
 
 - Multi-currency consolidation reports (Phase 5)

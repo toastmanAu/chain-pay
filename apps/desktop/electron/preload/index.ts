@@ -16,6 +16,8 @@ import {
   type BitcoinBroadcastConfirmResponse,
   type BitcoinBroadcastReviewRequest,
   type BitcoinBroadcastReviewResponse,
+  type BitcoinFinalizedEvidenceRequest,
+  type BitcoinFinalizedEvidenceResponse,
   SOLANA_CHANNELS,
   type SolanaChain,
   type SolanaProviderStatus,
@@ -148,7 +150,7 @@ const chainpayApi = {
       filters: {
         fromDate?: string;
         toDate?: string;
-        chain?: "ckb:mainnet" | "ckb:testnet" | "evm:11155111" | "sol:devnet" | "sol:mainnet";
+        chain?: "ckb:mainnet" | "ckb:testnet" | "evm:11155111" | "sol:devnet" | "sol:mainnet" | "btc:testnet" | "btc:mainnet";
       },
       format: "csv" | "pdf",
     ): Promise<{
@@ -171,6 +173,8 @@ const chainpayApi = {
       ipcRenderer.invoke(BITCOIN_CHANNELS.reviewBroadcast, request),
     confirmBroadcast: (request: BitcoinBroadcastConfirmRequest): Promise<BitcoinBroadcastConfirmResponse> =>
       ipcRenderer.invoke(BITCOIN_CHANNELS.confirmBroadcast, request),
+    finalizedEvidence: (request: BitcoinFinalizedEvidenceRequest): Promise<BitcoinFinalizedEvidenceResponse> =>
+      ipcRenderer.invoke(BITCOIN_CHANNELS.finalizedEvidence, request),
   },
   solana: {
     status: (chain: SolanaChain): Promise<SolanaProviderStatus> =>

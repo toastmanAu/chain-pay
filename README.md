@@ -40,8 +40,8 @@ The trust-minimisation half is the differentiator. The CKB light client is **emb
 | 3a | Invoice ingest — manual entry + payee flow, vendor flow, draft autosave, approve-and-queue, batch↔invoice confirmation sync | ✅ done — PR #7 merged `8a3b426` (2026-05-29); shell-level smoke clean on `main` |
 | 3b | Invoice ingest — OCR extraction + multi-invoice bundling | planned (deferred from 3a scope) |
 | 3 (EVM) | EVM (Safe) treasury — external owner signers | 🟡 Slices A–E implemented: Sepolia monitoring, MetaMask + WalletConnect approvals, cross-instance interchange, execution, confirmation, and ERPNext accounting; live two-instance gate remains |
-| 4 | Frappe accounting bridge — persisted confirmed payments → server-derived journal entries | ✅ CKB + Sepolia Safe paths, immutable source records and idempotent JEs |
-| 5+ | BTC watch-only, SOL adapter, fiat ramps, mobile signer companion | planned |
+| 4 | Frappe accounting bridge — persisted confirmed payments → server-derived journal entries | ✅ CKB + Sepolia Safe + finalized SOL + finalized BTC paths, immutable source records and idempotent JEs |
+| 5+ | BTC, SOL, fiat ramps, mobile signer companion | 🟡 BTC A/A2/A3 and SOL B1/B2A/B2B implemented; fiat ramps remain |
 
 Detailed roadmap: [docs/mvp-roadmap.md](docs/mvp-roadmap.md). Phase-specific notes: [PHASE-1.md](PHASE-1.md). Comm-channel design (CEMP-PQ integration): [docs/comm-channel-design.md](docs/comm-channel-design.md).
 
@@ -57,6 +57,7 @@ Detailed roadmap: [docs/mvp-roadmap.md](docs/mvp-roadmap.md). Phase-specific not
 | Mainnet network switch (UX only, no real-fund tx yet) | `src/features/settings/NetworkSection.tsx`, `electron/main/network-state-store.ts` | Manual smoke 2026-05-29: testnet → mainnet → soft-fail UX → testnet round-trip with LC IDB wipe |
 | CKB → ERPNext accounting recovery | `crypto_payroll.api.post_confirmed_payment`, desktop accounting host | Confirmed tx `0xdbafdf…ae2a` recovered at USD 0.50; submitted JE `ACC-JV-2026-00023`; source records and tx hashes now idempotency-bound |
 | Sepolia Safe → ERPNext accounting recovery | `evm-safe-accounting.ts`, `crypto_payroll.api.post_confirmed_payment` | SafeTx + outer hash are independently idempotent; receipt gas is retained as executor-paid audit metadata and excluded from the Safe treasury credit |
+| Bitcoin manual broadcast → ERPNext recovery | `bitcoin-broadcast.ts`, `bitcoin-provider.ts`, `bitcoin-accounting.ts` | Per-output v2 intent, exact raw transaction/block evidence at 6 confirmations, deterministic source record, idempotent journal retry, and reorg reconciliation without rebroadcast |
 | ERPNext compliance export | `crypto_payroll.api.export_compliance`, desktop Reports screen | Server-owned CKB/Sepolia evidence exports as deterministic CSV/PDF; Electron verifies SHA-256 before saving |
 | WalletConnect Safe approvals | `walletconnect-safe-owner.ts`, `safe-approval-interchange.ts` | Sepolia-only restored sessions, live-owner checks, exact EIP-712 signing, and strict signature-only files for two-instance threshold collection |
 

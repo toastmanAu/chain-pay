@@ -10,7 +10,7 @@
 | 2.5 | Payroll batch over CKB multisig | N-to-many payroll tx broadcast from a treasury |
 | 3 | EVM (Safe) treasury | 2-of-3 Safe on Sepolia can pay one address; MetaMask + WalletConnect both work as signers |
 | 4 | Accounting bridge | CKB + EVM submitted records, server-derived JEs, and compliance export complete |
-| 5+ | Adapter expansion | BTC watch-only, SOL adapter, fiat ramp providers, compliance exports |
+| 5+ | Adapter expansion | BTC watch/manual broadcast/accounting and SOL watch/payment/accounting slices complete; fiat ramps remain |
 
 ## Phase 0 — Scaffold (done)
 
@@ -97,9 +97,18 @@ repeat. Follow the compliance-export smoke playbook.
 
 ## Phase 5+ — Adapter expansion
 
-- BTC adapter (watch-only first, then manual broadcast)
-- SOL adapter (RPC + nonce account multisig)
+- ✅ BTC Slice A: watch-only testnet/mainnet treasury monitoring
+- ✅ BTC Slice A2: externally signed finalized-transaction review, manual broadcast, and status/reorg tracking
+- ✅ BTC Slice A3: operator-approved per-output accounting mapping, versioned review, six-confirmation canonical evidence, idempotent ERPNext posting, restart recovery, and reconciliation warnings
+- ✅ SOL Slices B1/B2A/B2B: watch-only monitoring, externally signed durable-nonce payment, finalized evidence, and ERPNext recovery
 - Fiat ramp adapters: Stripe / Coinbase Commerce / Transak / MoonPay / Banxa
 - Hardware wallet signer transport for both CKB and EVM
 - MPC custody provider integration (optional, alternative to multisig for some orgs)
 - Mobile companion app (signer-only) — reuse the SignerTransport interface
+
+**BTC A3 verification gate:** every positive external output is committed to a
+v2 review with its payee and USD obligation; no record posts before six
+canonical confirmations; replay returns the same source record and Journal
+Entry; a later reorg retains all evidence and IDs and requires manual
+reconciliation. Legacy A2 reviews remain broadcast/status compatible and are
+never posted.

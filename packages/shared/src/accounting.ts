@@ -38,6 +38,27 @@ export interface SolanaConfirmedPaymentMetadata {
   messageBase64: string;
 }
 
+export interface BitcoinConfirmedPaymentOutput {
+  vout: string;
+  destination: string;
+  valueSats: string;
+}
+
+export interface BitcoinConfirmedPaymentMetadata {
+  reviewDigest: string;
+  wtxid: string;
+  rawTransactionHash: string;
+  blockHeight: string;
+  blockHash: string;
+  confirmations: string;
+  inputValueSats: string;
+  outputValueSats: string;
+  feeSats: string;
+  feeRateSatsPerVbyte: string;
+  feePayerPolicy: "transaction_inputs";
+  outputs: BitcoinConfirmedPaymentOutput[];
+}
+
 /**
  * Immutable accounting source record sent to Frappe after chain confirmation.
  * Ledger accounts are deliberately absent: account selection belongs to the
@@ -55,6 +76,8 @@ export interface ConfirmedPaymentRecord {
   evm?: EvmConfirmedPaymentMetadata;
   /** Required by the backend for finalized native-SOL records; absent otherwise. */
   solana?: SolanaConfirmedPaymentMetadata;
+  /** Required only for finalized native-BTC records. */
+  bitcoin?: BitcoinConfirmedPaymentMetadata;
 }
 
 export interface PaymentJournalInput {

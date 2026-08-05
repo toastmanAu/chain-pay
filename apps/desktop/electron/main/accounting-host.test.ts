@@ -113,6 +113,21 @@ describe("postJournalToFrappe", () => {
     await expect(postJournalToFrappe(malicious)).rejects.toThrow(/strict validation/);
     expect(fetchMock).not.toHaveBeenCalled();
   });
+
+  it("accepts finalized BTC metadata and rejects cross-chain or nested secret fields", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => success });
+    vi.stubGlobal("fetch", fetchMock);
+    const bitcoin = {
+      batchId: `bitcoin:${"41".repeat(32)}`, sourceType: "send", label: "Bitcoin payment", chain: "btc:testnet",
+      txHash: "31".repeat(32), confirmedAt: "2026-08-06T02:40:00.000Z",
+      lines: [{ payeeId: "vendor-btc", fiat: { currency: "USD", minor: 2599n }, crypto: { asset: "BTC", value: 900719925474n, decimals: 8 } }],
+      bitcoin: { reviewDigest: "41".repeat(32), wtxid: "51".repeat(32), rawTransactionHash: "61".repeat(32), blockHeight: "9007199254740995", blockHash: "71".repeat(32), confirmations: "6", inputValueSats: "900719927474", outputValueSats: "900719926474", feeSats: "1000", feeRateSatsPerVbyte: "8.333", feePayerPolicy: "transaction_inputs", outputs: [{ vout: "0", destination: "mipcBbFg9gMiCh81Kj8tqqdgoZub1ZJRfn", valueSats: "900719925474" }] },
+    } as const;
+    await expect(postJournalToFrappe(bitcoin)).resolves.toMatchObject({ jeName: "ACC-JV-0001" });
+    expect(JSON.parse(fetchMock.mock.calls[0]![1].body).record.bitcoin.confirmations).toBe("6");
+    await expect(postJournalToFrappe({ ...record, bitcoin: bitcoin.bitcoin })).rejects.toThrow(/strict validation/);
+    await expect(postJournalToFrappe({ ...bitcoin, bitcoin: { ...bitcoin.bitcoin, token: "secret" } })).rejects.toThrow(/strict validation/);
+  });
 });
 
 describe("fetchComplianceExport", () => {

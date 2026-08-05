@@ -6,6 +6,7 @@ export const BITCOIN_CHANNELS = {
   transactionStatus: "bitcoin:transaction-status",
   reviewBroadcast: "bitcoin:review-broadcast",
   confirmBroadcast: "bitcoin:confirm-broadcast",
+  finalizedEvidence: "bitcoin:finalized-evidence",
 } as const;
 
 export interface BitcoinProviderStatus {
@@ -69,6 +70,16 @@ export interface BitcoinBroadcastReviewRequest {
   watchedAddresses: string[];
   /** A final raw transaction only. PSBTs and signing material are never accepted. */
   rawTxHex: string;
+  /** Omit only for output inspection or legacy-A2 compatibility. */
+  accounting?: BitcoinPaymentAccountingLine[];
+}
+
+export interface BitcoinPaymentAccountingLine {
+  vout: number;
+  destination: string;
+  valueSats: string;
+  payeeId: string;
+  fiat: { currency: "USD"; minor: string };
 }
 
 export interface BitcoinBroadcastReviewInput {
@@ -90,7 +101,7 @@ export interface BitcoinBroadcastReviewOutput {
   changeCandidate: boolean;
 }
 
-export interface BitcoinBroadcastReview {
+interface BitcoinBroadcastReviewBase {
   digest: string;
   treasuryId: string;
   chain: BitcoinChain;
@@ -113,6 +124,19 @@ export interface BitcoinBroadcastReview {
   warnings: string[];
 }
 
+/** Persisted A2 shape. It remains broadcast/status compatible but is never accounting-postable. */
+export interface BitcoinBroadcastReviewV1 extends BitcoinBroadcastReviewBase {
+  reviewVersion?: undefined;
+}
+
+export interface BitcoinBroadcastReviewV2 extends BitcoinBroadcastReviewBase {
+  reviewVersion: 2;
+  rawTransactionHash: string;
+  accounting: BitcoinPaymentAccountingLine[];
+}
+
+export type BitcoinBroadcastReview = BitcoinBroadcastReviewV1 | BitcoinBroadcastReviewV2;
+
 export type BitcoinBroadcastReviewResponse =
   | { ok: true; review: BitcoinBroadcastReview }
   | { ok: false; error: BitcoinBroadcastError };
@@ -132,3 +156,44 @@ export interface BitcoinBroadcastReceipt {
 export type BitcoinBroadcastConfirmResponse =
   | { ok: true; receipt: BitcoinBroadcastReceipt }
   | { ok: false; error: BitcoinBroadcastError; review?: BitcoinBroadcastReview };
+
+export interface BitcoinFinalizedPaymentEvidence {
+  version: 1;
+  chain: BitcoinChain;
+  reviewDigest: string;
+  txid: string;
+  wtxid: string;
+  rawTransactionHash: string;
+  blockHeight: string;
+  blockHash: string;
+  blockTime: string;
+  confirmations: number;
+  transactionVersion: number;
+  lockTime: number;
+  inputValueSats: string;
+  outputValueSats: string;
+  feeSats: string;
+  feeRateSatsPerVbyte: string;
+  feePayerPolicy: "transaction_inputs";
+  outputs: BitcoinBroadcastReviewOutput[];
+}
+
+export interface BitcoinFinalizedEvidenceRequest {
+  chain: BitcoinChain;
+  treasuryId: string;
+  review: BitcoinBroadcastReview;
+  receipt: BitcoinBroadcastReceipt;
+}
+
+export interface BitcoinFinalizedEvidenceResponse {
+  evidence: BitcoinFinalizedPaymentEvidence;
+}
+
+export type BitcoinAccountingState =
+  | "not_applicable"
+  | "awaiting_finalization"
+  | "ready"
+  | "posting"
+  | "posted"
+  | "post_failed"
+  | "reconciliation_required";

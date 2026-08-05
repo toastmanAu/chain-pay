@@ -26,6 +26,7 @@ _HEX_DIGEST = re.compile(r"^[0-9a-f]{64}$")
 _BASE58_ALPHABET = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
 _BASE58_INDEX = {character: index for index, character in enumerate(_BASE58_ALPHABET)}
 _U64_MAX = 18_446_744_073_709_551_615
+_MAX_BTC_SATS = 2_100_000_000_000_000
 
 
 def _strict_keys(value: dict, allowed: set[str], path: str) -> None:
@@ -67,6 +68,52 @@ def _base58_bytes(value, size: int, path: str) -> str:
     return text
 
 
+def _bitcoin_address(value, chain: str, path: str) -> str:
+    text = str(value or "")
+    if 26 <= len(text) <= 35 and all(character in _BASE58_INDEX for character in text):
+        number = 0
+        for character in text:
+            number = number * 58 + _BASE58_INDEX[character]
+        decoded = b"\0" * (len(text) - len(text.lstrip("1"))) + number.to_bytes((number.bit_length() + 7) // 8, "big")
+        versions = {0, 5} if chain == "btc:mainnet" else {111, 196}
+        if len(decoded) == 25 and decoded[0] in versions and hashlib.sha256(hashlib.sha256(decoded[:-4]).digest()).digest()[:4] == decoded[-4:]:
+            return text
+    lowered = text.lower()
+    if text != lowered or "1" not in lowered:
+        frappe.throw(f"{path} must be a canonical address for {chain}")
+    hrp, data_text = lowered.rsplit("1", 1)
+    if hrp != ("bc" if chain == "btc:mainnet" else "tb") or len(data_text) < 7 or len(lowered) > 90:
+        frappe.throw(f"{path} must be a canonical address for {chain}")
+    alphabet = "qpzry9x8gf2tvdw0s3jn54khce6mua7l"
+    try:
+        data = [alphabet.index(character) for character in data_text]
+    except ValueError:
+        frappe.throw(f"{path} must be a canonical address for {chain}")
+    polymod = 1
+    expanded = [ord(character) >> 5 for character in hrp] + [0] + [ord(character) & 31 for character in hrp] + data
+    for item in expanded:
+        top = polymod >> 25
+        polymod = (polymod & 0x1FFFFFF) << 5 ^ item
+        for index, generator in enumerate((0x3B6A57B2, 0x26508E6D, 0x1EA119FA, 0x3D4233DD, 0x2A1462B3)):
+            if (top >> index) & 1:
+                polymod ^= generator
+    payload = data[:-6]
+    if not payload or payload[0] > 1 or polymod != (1 if payload[0] == 0 else 0x2BC830A3):
+        frappe.throw(f"{path} must be a canonical address for {chain}")
+    accumulator = 0
+    bits = 0
+    program = bytearray()
+    for item in payload[1:]:
+        accumulator = (accumulator << 5) | item
+        bits += 5
+        while bits >= 8:
+            bits -= 8
+            program.append((accumulator >> bits) & 255)
+    if bits >= 5 or ((accumulator << (8 - bits)) & 255) != 0 or len(program) < 2 or len(program) > 40 or (payload[0] == 0 and len(program) not in {20, 32}) or (payload[0] == 1 and len(program) != 32):
+        frappe.throw(f"{path} must be a canonical address for {chain}")
+    return text
+
+
 def _minor_to_major(minor: str) -> Decimal:
     return Decimal(int(minor)) / Decimal(100)
 
@@ -86,7 +133,7 @@ def _normalise_record(record: dict | str) -> dict:
     record = frappe.parse_json(record) if isinstance(record, str) else record
     if not isinstance(record, dict):
         frappe.throw("record must be an object")
-    _strict_keys(record, {"batchId", "sourceType", "label", "chain", "txHash", "confirmedAt", "lines", "evm", "solana"}, "record")
+    _strict_keys(record, {"batchId", "sourceType", "label", "chain", "txHash", "confirmedAt", "lines", "evm", "solana", "bitcoin"}, "record")
 
     batch_id = str(record.get("batchId") or "").strip()
     if not batch_id or len(batch_id) > 140:
@@ -97,11 +144,15 @@ def _normalise_record(record: dict | str) -> dict:
         frappe.throw("record.sourceType must be send or payroll")
 
     chain = str(record.get("chain") or "")
-    if chain not in {"ckb:mainnet", "ckb:testnet", "evm:11155111", "sol:devnet", "sol:mainnet"}:
+    if chain not in {"ckb:mainnet", "ckb:testnet", "evm:11155111", "sol:devnet", "sol:mainnet", "btc:testnet", "btc:mainnet"}:
         frappe.throw("record.chain is unsupported")
 
     if chain.startswith("sol:"):
         tx_hash = _base58_bytes(record.get("txHash"), 64, "record.txHash")
+    elif chain.startswith("btc:"):
+        tx_hash = str(record.get("txHash") or "")
+        if not re.fullmatch(r"[0-9a-f]{64}", tx_hash):
+            frappe.throw("record.txHash must be a lowercase Bitcoin transaction id")
     else:
         tx_hash = str(record.get("txHash") or "").lower()
         if not _TX_HASH.fullmatch(tx_hash):
@@ -152,14 +203,15 @@ def _normalise_record(record: dict | str) -> dict:
         elif currency != line_currency:
             frappe.throw("a confirmed payment record cannot mix fiat currencies")
         fiat_minor = _canonical_uint(fiat.get("minor"), f"record.lines[{index}].fiat.minor", positive=True)
-        crypto_value = _canonical_uint(crypto.get("value"), f"record.lines[{index}].crypto.value", positive=True, maximum=_U64_MAX if chain.startswith("sol:") else None)
+        maximum = _U64_MAX if chain.startswith("sol:") else (_MAX_BTC_SATS if chain.startswith("btc:") else None)
+        crypto_value = _canonical_uint(crypto.get("value"), f"record.lines[{index}].crypto.value", positive=True, maximum=maximum)
         crypto_decimals = _canonical_uint(crypto.get("decimals"), f"record.lines[{index}].crypto.decimals")
         if crypto_decimals < 0 or crypto_decimals > 30:
             frappe.throw(f"record.lines[{index}].crypto.decimals is invalid")
         crypto_asset = str(crypto.get("asset") or "").upper()
         expected_asset, expected_decimals = (
             ("ETH", 18) if chain == "evm:11155111" else
-            (("SOL", 9) if chain.startswith("sol:") else ("CKB", 8))
+            (("SOL", 9) if chain.startswith("sol:") else (("BTC", 8) if chain.startswith("btc:") else ("CKB", 8)))
         )
         if crypto_asset != expected_asset or crypto_decimals != expected_decimals:
             frappe.throw(
@@ -278,6 +330,58 @@ def _normalise_record(record: dict | str) -> dict:
     elif record.get("solana") is not None:
         frappe.throw("record.solana is only valid for Solana payments")
 
+    bitcoin = None
+    if chain.startswith("btc:"):
+        raw_bitcoin = record.get("bitcoin")
+        if not isinstance(raw_bitcoin, dict):
+            frappe.throw("record.bitcoin is required for a Bitcoin payment")
+        _strict_keys(raw_bitcoin, {"reviewDigest", "wtxid", "rawTransactionHash", "blockHeight", "blockHash", "confirmations", "inputValueSats", "outputValueSats", "feeSats", "feeRateSatsPerVbyte", "feePayerPolicy", "outputs"}, "record.bitcoin")
+        hex_values = {}
+        for field in ("reviewDigest", "wtxid", "rawTransactionHash", "blockHash"):
+            value = str(raw_bitcoin.get(field) or "")
+            if not _HEX_DIGEST.fullmatch(value):
+                frappe.throw(f"record.bitcoin.{field} must be lowercase 32-byte hex")
+            hex_values[field] = value
+        block_height = _canonical_uint(raw_bitcoin.get("blockHeight"), "record.bitcoin.blockHeight", positive=True, maximum=_U64_MAX)
+        confirmations = _canonical_uint(raw_bitcoin.get("confirmations"), "record.bitcoin.confirmations", positive=True, maximum=_U64_MAX)
+        input_sats = _canonical_uint(raw_bitcoin.get("inputValueSats"), "record.bitcoin.inputValueSats", positive=True, maximum=_MAX_BTC_SATS)
+        output_sats = _canonical_uint(raw_bitcoin.get("outputValueSats"), "record.bitcoin.outputValueSats", positive=True, maximum=_MAX_BTC_SATS)
+        fee_sats = _canonical_uint(raw_bitcoin.get("feeSats"), "record.bitcoin.feeSats", positive=True, maximum=_MAX_BTC_SATS)
+        if confirmations < 6 or input_sats != output_sats + fee_sats:
+            frappe.throw("record.bitcoin confirmation depth or satoshi conservation is invalid")
+        rate = str(raw_bitcoin.get("feeRateSatsPerVbyte") or "")
+        if not re.fullmatch(r"(?:0|[1-9][0-9]*)(?:\.[0-9]{1,3})?", rate):
+            frappe.throw("record.bitcoin.feeRateSatsPerVbyte is invalid")
+        if raw_bitcoin.get("feePayerPolicy") != "transaction_inputs":
+            frappe.throw("record.bitcoin.feePayerPolicy must be transaction_inputs")
+        raw_outputs = raw_bitcoin.get("outputs")
+        if not isinstance(raw_outputs, list) or len(raw_outputs) != len(lines):
+            frappe.throw("record.bitcoin.outputs must match payment lines")
+        outputs = []
+        previous_vout = -1
+        for index, output in enumerate(raw_outputs):
+            if not isinstance(output, dict):
+                frappe.throw(f"record.bitcoin.outputs[{index}] must be an object")
+            _strict_keys(output, {"vout", "destination", "valueSats"}, f"record.bitcoin.outputs[{index}]")
+            vout = _canonical_uint(output.get("vout"), f"record.bitcoin.outputs[{index}].vout", maximum=4_294_967_295)
+            value_sats = _canonical_uint(output.get("valueSats"), f"record.bitcoin.outputs[{index}].valueSats", positive=True, maximum=_MAX_BTC_SATS)
+            if vout <= previous_vout or value_sats != int(lines[index]["crypto_value"]):
+                frappe.throw("record.bitcoin outputs must be ordered and match payment lines")
+            previous_vout = vout
+            outputs.append({"vout": str(vout), "destination": _bitcoin_address(output.get("destination"), chain, f"record.bitcoin.outputs[{index}].destination"), "value_sats": str(value_sats)})
+        if sum(int(output["value_sats"]) for output in outputs) > output_sats:
+            frappe.throw("record.bitcoin payment outputs exceed transaction outputs")
+        bitcoin = {
+            "review_digest": hex_values["reviewDigest"], "wtxid": hex_values["wtxid"],
+            "raw_transaction_hash": hex_values["rawTransactionHash"], "bitcoin_block_height": str(block_height),
+            "block_hash": hex_values["blockHash"], "confirmations": str(confirmations),
+            "input_value_sats": str(input_sats), "output_value_sats": str(output_sats), "fee_sats": str(fee_sats),
+            "fee_rate_sats_per_vbyte": rate, "fee_payer_policy": "transaction_inputs",
+            "bitcoin_outputs_json": json.dumps(outputs, sort_keys=True, separators=(",", ":")),
+        }
+    elif record.get("bitcoin") is not None:
+        frappe.throw("record.bitcoin is only valid for Bitcoin payments")
+
     return {
         "batch_id": batch_id,
         "source_type": source_type,
@@ -290,6 +394,7 @@ def _normalise_record(record: dict | str) -> dict:
         "lines": lines,
         "evm": evm,
         "solana": solana,
+        "bitcoin": bitcoin,
     }
 
 
@@ -321,6 +426,8 @@ def _existing_batch(normalised: dict, digest: str):
         review_name = frappe.db.get_value(
             "Crypto Payment Batch", {"review_digest": normalised["solana"]["review_digest"]}, "name"
         )
+    if normalised["bitcoin"]:
+        review_name = frappe.db.get_value("Crypto Payment Batch", {"review_digest": normalised["bitcoin"]["review_digest"]}, "name")
     identities = {candidate for candidate in (name, tx_name, safe_name, review_name) if candidate}
     if len(identities) > 1:
         frappe.throw("confirmed payment identifiers belong to different source records")
@@ -367,6 +474,8 @@ def persist_confirmed_payment(record: dict) -> dict:
         )
     if normalised["solana"]:
         values.update(normalised["solana"])
+    if normalised["bitcoin"]:
+        values.update(normalised["bitcoin"])
     batch = frappe.get_doc(values)
     try:
         batch.insert(ignore_permissions=True)
@@ -530,7 +639,12 @@ def post_journal(batch_id: str) -> dict:
                 )
                 + (
                     f" · Solana review {batch.review_digest} · finalized slot {batch.finalized_slot} · fee {batch.fee_lamports} lamports paid by {batch.fee_payer_address}"
-                    if batch.review_digest
+                    if batch.chain.startswith("sol:") and batch.review_digest
+                    else ""
+                )
+                + (
+                    f" · Bitcoin review {batch.review_digest} · block {batch.bitcoin_block_height} · {batch.confirmations} confirmations · fee {batch.fee_sats} sats paid by transaction inputs"
+                    if batch.chain.startswith("btc:") and batch.review_digest
                     else ""
                 )
             ),

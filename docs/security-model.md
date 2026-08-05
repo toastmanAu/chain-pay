@@ -57,6 +57,14 @@
 - [ ] Provider URLs/tokens and upstream response bodies never cross the fixed IPC boundary
 - [ ] Processed/confirmed states never post; regressions preserve evidence and require manual reconciliation
 
+### Bitcoin manual broadcast and accounting (Phase 5)
+- [ ] ChainPay accepts only a finalized signed raw transaction; no construction, coin selection, signing, custody, PSBT, fee bump, or automatic rebroadcast path exists
+- [ ] The v2 review digest commits raw bytes, treasury/network/watch context, parsed transaction/fee facts, and every external-output accounting mapping
+- [ ] Accounting mappings are explicitly described as operator-approved, not signer-authenticated intent; legacy A2 reviews never post
+- [ ] Finalized evidence revalidates txid/wtxid/raw bytes, transaction fields, totals, outputs, fee/rate, canonical block identity/time, and at least six confirmations
+- [ ] Provider configuration, tokens, headers, upstream bodies, and diagnostics remain in Electron main behind fixed strict IPC operations
+- [ ] Status/evidence/posting has one global owner; retries never rebroadcast, and any confirmation regression retains immutable IDs and requires manual reconciliation
+
 ### Frappe backend (Phase 4)
 - [ ] No DocType field ever holds a private key, mnemonic, or signing seed
 - [ ] REST endpoints validate signature payloads structurally; signatures are verified by chain contracts/scripts, not by Frappe
