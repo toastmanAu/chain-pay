@@ -8,6 +8,7 @@ import { TreasuryDetail } from "./features/treasury/TreasuryDetail";
 import { SetupSafe } from "./features/treasury/SetupSafe";
 import { SetupBitcoin } from "./features/treasury/SetupBitcoin";
 import { SetupSolana } from "./features/treasury/SetupSolana";
+import { CreateSolanaPayment } from "./features/treasury/CreateSolanaPayment";
 import { CreateSafePayment } from "./features/evm/CreateSafePayment";
 import { ApprovalQueue } from "./features/evm/ApprovalQueue";
 import { SafeApprovalDetail } from "./features/evm/SafeApprovalDetail";
@@ -251,6 +252,7 @@ export function App() {
         <Route path="/treasury/new/bitcoin" element={<SetupBitcoin />} />
         <Route path="/treasury/new/solana" element={<SetupSolana />} />
         <Route path="/treasury/:treasuryId/payment/new" element={<CreateSafePayment />} />
+        <Route path="/treasury/:treasuryId/solana/payment/new" element={<CreateSolanaPayment />} />
         <Route path="/treasury/:id" element={<TreasuryDetail />} />
         <Route path="/approvals" element={<ApprovalQueue />} />
         <Route path="/approvals/:id" element={<SafeApprovalDetail />} />

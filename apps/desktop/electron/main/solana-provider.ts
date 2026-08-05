@@ -1,13 +1,31 @@
 import bs58 from "bs58";
 import JSONBigFactory from "json-bigint";
 import { z } from "zod";
+import { Buffer } from "node:buffer";
+import {
+  NONCE_ACCOUNT_LENGTH,
+  NonceAccount,
+  PublicKey,
+  SystemProgram,
+} from "@solana/web3.js";
 import type {
   SolanaChain,
   SolanaScanResponse,
   SolanaTransactionState,
   SolanaTransactionStatusResponse,
   SolanaWatchTransaction,
+  SolanaPaymentInspection,
+  SolanaPaymentPrepareRequest,
+  SolanaPaymentPrepareResponse,
+  SolanaPaymentReceipt,
+  SolanaPaymentSubmitRequest,
 } from "@chain-pay/shared";
+import {
+  assembleSignedSolanaTransaction,
+  buildSolanaPaymentTransaction,
+  isOnCurveSolanaAddress,
+  validateSolanaPaymentProposal,
+} from "./solana-payment-transaction";
 
 const REQUEST_TIMEOUT_MS = 20_000;
 const MAX_RESPONSE_BYTES = 16 * 1024 * 1024;
@@ -91,6 +109,24 @@ const statusValueSchema = z.object({
   confirmationStatus: commitmentSchema.optional(),
 }).passthrough().nullable();
 
+const accountValueSchema = z.object({
+  data: z.tuple([z.string().max(4_000), z.literal("base64")]),
+  executable: z.boolean(),
+  lamports: exactUnsignedSchema,
+  owner: publicKeySchema,
+  rentEpoch: exactUnsignedSchema,
+  space: exactUnsignedSchema,
+}).strict().nullable();
+const accountInfoSchema = z.object({ context: contextSchema, value: accountValueSchema }).strict();
+const feeForMessageSchema = z.object({ context: contextSchema, value: exactUnsignedSchema.nullable() }).strict();
+const simulationSchema = z.object({
+  context: contextSchema,
+  value: z.object({
+    err: z.unknown().nullable(),
+    unitsConsumed: z.number().int().nonnegative().safe().optional(),
+  }).passthrough(),
+}).strict();
+
 export interface SolanaProviderConfig {
   rpcUrl: string;
   bearerToken?: string;
@@ -98,12 +134,146 @@ export interface SolanaProviderConfig {
 
 export class SolanaProviderError extends Error {
   constructor(
-    readonly code: "not_configured" | "unavailable" | "invalid_response" | "invalid_request",
+    readonly code: "not_configured" | "unavailable" | "invalid_response" | "invalid_request" | "unsafe_account" | "stale_nonce" | "insufficient_funds" | "simulation_failed" | "rejected" | "txid_mismatch",
     message: string,
   ) {
     super(message);
     this.name = "SolanaProviderError";
   }
+}
+
+export async function inspectSolanaPayment(args: {
+  chain: SolanaChain;
+  source: string;
+  nonceAccount: string;
+  nonceAuthority: string;
+  feePayer: string;
+  destination?: string;
+  config: SolanaProviderConfig;
+  fetchImpl?: typeof fetch;
+}): Promise<SolanaPaymentInspection> {
+  const source = parseSolanaAddress(args.source);
+  const nonceAccountAddress = parseSolanaAddress(args.nonceAccount);
+  const expectedAuthority = parseSolanaAddress(args.nonceAuthority);
+  const feePayer = parseSolanaAddress(args.feePayer);
+  const destination = args.destination === undefined ? undefined : parseSolanaAddress(args.destination);
+  if (!isOnCurveSolanaAddress(source) || !isOnCurveSolanaAddress(feePayer) || !isOnCurveSolanaAddress(expectedAuthority)) {
+    throw new SolanaProviderError("unsafe_account", "Solana source, fee payer, and nonce authority must be on-curve public keys");
+  }
+  if (source === nonceAccountAddress || feePayer === nonceAccountAddress) {
+    throw new SolanaProviderError("unsafe_account", "The nonce account cannot be the payment source or fee payer");
+  }
+  if (destination !== undefined && (destination === source || destination === nonceAccountAddress)) {
+    throw new SolanaProviderError("unsafe_account", "Solana payment destination is not allowed");
+  }
+  const client = new SolanaRpcClient(args.config, args.fetchImpl ?? fetch);
+  const tip = await client.call("getLatestBlockhash", [{ commitment: "finalized" }], latestBlockhashSchema);
+  const minContextSlot = safeRpcInteger(tip.context.slot);
+  const addresses = [...new Set([source, nonceAccountAddress, feePayer, ...(destination ? [destination] : [])])];
+  const accountResults = await Promise.all(addresses.map((address) => getAccount(client, address, minContextSlot)));
+  const accounts = new Map(addresses.map((address, index) => [address, accountResults[index]!]));
+  const sourceAccount = requireWalletAccount(accounts.get(source), "source");
+  const feePayerAccount = requireWalletAccount(accounts.get(feePayer), "fee payer");
+  if (destination) requireDestinationWallet(accounts.get(destination), destination);
+  const nonceResult = accounts.get(nonceAccountAddress);
+  if (!nonceResult?.value || nonceResult.value.owner !== SystemProgram.programId.toBase58() || nonceResult.value.executable) {
+    throw new SolanaProviderError("unsafe_account", "Solana nonce account is not an initialized System Program account");
+  }
+  const nonceBytes = decodeCanonicalBase64(nonceResult.value.data[0]);
+  if (nonceBytes.length !== NONCE_ACCOUNT_LENGTH || nonceResult.value.space !== String(NONCE_ACCOUNT_LENGTH)) {
+    throw new SolanaProviderError("unsafe_account", "Solana nonce account has an invalid data layout");
+  }
+  const nonceData = Buffer.from(nonceBytes);
+  if (nonceData.readUInt32LE(0) !== 0 || nonceData.readUInt32LE(4) !== 1) {
+    throw new SolanaProviderError("unsafe_account", "Solana nonce account is not in the initialized current state");
+  }
+  let nonce: NonceAccount;
+  try {
+    nonce = NonceAccount.fromAccountData(nonceBytes);
+  } catch {
+    throw new SolanaProviderError("unsafe_account", "Solana nonce account is not initialized");
+  }
+  if (nonce.authorizedPubkey.toBase58() !== expectedAuthority) {
+    throw new SolanaProviderError("unsafe_account", "Solana nonce authority does not match the configured public key");
+  }
+  const nonceRent = await client.call("getMinimumBalanceForRentExemption", [NONCE_ACCOUNT_LENGTH, { commitment: "finalized" }], exactUnsignedSchema);
+  if (BigInt(nonceResult.value.lamports) < BigInt(nonceRent)) {
+    throw new SolanaProviderError("unsafe_account", "Solana nonce account is below the rent-safe balance");
+  }
+  const maxSlot = [tip.context.slot, ...accountResults.map((item) => item.context.slot)].reduce((max, slot) => BigInt(slot) > BigInt(max) ? slot : max);
+  return {
+    chain: args.chain,
+    source,
+    nonceAccount: nonceAccountAddress,
+    nonceAuthority: expectedAuthority,
+    feePayer,
+    sourceBalanceLamports: sourceAccount.lamports,
+    nonceBalanceLamports: nonceResult.value.lamports,
+    nonceRentMinimumLamports: nonceRent,
+    feePayerBalanceLamports: feePayerAccount.lamports,
+    durableNonce: nonce.nonce,
+    slot: maxSlot,
+  };
+}
+
+export async function prepareSolanaPayment(args: {
+  request: SolanaPaymentPrepareRequest;
+  config: SolanaProviderConfig;
+  fetchImpl?: typeof fetch;
+}): Promise<SolanaPaymentPrepareResponse> {
+  const amount = canonicalPositiveLamports(args.request.amountLamports);
+  const inspection = await inspectSolanaPayment({ ...args.request, destination: args.request.destination, config: args.config, ...(args.fetchImpl ? { fetchImpl: args.fetchImpl } : {}) });
+  const preliminary = buildSolanaPaymentTransaction({ inspection, treasuryId: args.request.treasuryId, destination: args.request.destination, amountLamports: amount, feeLamports: "0" });
+  const client = new SolanaRpcClient(args.config, args.fetchImpl ?? fetch);
+  const feeResult = await client.call("getFeeForMessage", [preliminary.messageBase64, { commitment: "confirmed", minContextSlot: safeRpcInteger(inspection.slot) }], feeForMessageSchema);
+  if (feeResult.value === null) throw new SolanaProviderError("stale_nonce", "Solana durable nonce is not valid for fee calculation");
+  assertPaymentBalances(inspection, amount, feeResult.value);
+  const proposal = buildSolanaPaymentTransaction({ inspection, treasuryId: args.request.treasuryId, destination: args.request.destination, amountLamports: amount, feeLamports: feeResult.value });
+  await simulatePayment(client, proposal.unsignedTransactionBase64, safeRpcInteger(inspection.slot), false);
+  return { proposal };
+}
+
+export async function submitSolanaPayment(args: {
+  request: SolanaPaymentSubmitRequest;
+  config: SolanaProviderConfig;
+  fetchImpl?: typeof fetch;
+}): Promise<{ receipt: SolanaPaymentReceipt }> {
+  const proposal = validateSolanaPaymentProposal(args.request.proposal);
+  if (args.request.chain !== proposal.chain || args.request.treasuryId !== proposal.treasuryId) throw new SolanaProviderError("invalid_request", "Solana submission does not match the reviewed payment");
+  const assembled = assembleSignedSolanaTransaction(proposal, args.request.signatures);
+  const client = new SolanaRpcClient(args.config, args.fetchImpl ?? fetch);
+  const known = await getStatusWithClient(client, assembled.firstSignature);
+  if (known.state !== "unknown") return { receipt: paymentReceipt(proposal.reviewDigest, assembled.firstSignature, true) };
+  const inspection = await inspectSolanaPayment({
+    chain: proposal.chain,
+    source: proposal.source,
+    nonceAccount: proposal.nonceAccount,
+    nonceAuthority: proposal.nonceAuthority,
+    feePayer: proposal.feePayer,
+    destination: proposal.destination,
+    config: args.config,
+    ...(args.fetchImpl ? { fetchImpl: args.fetchImpl } : {}),
+  });
+  if (inspection.durableNonce !== proposal.durableNonce) throw new SolanaProviderError("stale_nonce", "Solana durable nonce changed after review");
+  assertPaymentBalances(inspection, proposal.amountLamports, proposal.feeLamports);
+  await simulatePayment(client, Buffer.from(assembled.wireBytes).toString("base64"), safeRpcInteger(inspection.slot), true);
+  let returned: string;
+  try {
+    returned = await client.call("sendTransaction", [Buffer.from(assembled.wireBytes).toString("base64"), {
+      encoding: "base64",
+      skipPreflight: false,
+      preflightCommitment: "confirmed",
+      minContextSlot: safeRpcInteger(inspection.slot),
+      maxRetries: 3,
+    }], signatureTextSchema);
+  } catch (error) {
+    const afterFailure = await getStatusWithClient(client, assembled.firstSignature);
+    if (afterFailure.state !== "unknown") return { receipt: paymentReceipt(proposal.reviewDigest, assembled.firstSignature, true) };
+    if (error instanceof SolanaProviderError && error.code === "unavailable") throw error;
+    throw new SolanaProviderError("rejected", "Solana provider rejected the reviewed transaction");
+  }
+  if (returned !== assembled.firstSignature) throw new SolanaProviderError("txid_mismatch", "Solana provider returned a mismatched transaction signature");
+  return { receipt: paymentReceipt(proposal.reviewDigest, returned, false) };
 }
 
 export function solanaProviderConfigFromEnvironment(
@@ -183,6 +353,13 @@ export async function getSolanaTransactionStatus(args: {
 }): Promise<SolanaTransactionStatusResponse> {
   const signature = parseSolanaSignature(args.signature);
   const client = new SolanaRpcClient(args.config, args.fetchImpl ?? fetch);
+  return getStatusWithClient(client, signature);
+}
+
+async function getStatusWithClient(
+  client: SolanaRpcClient,
+  signature: string,
+): Promise<SolanaTransactionStatusResponse> {
   const result = await client.call(
     "getSignatureStatuses",
     [[signature], { searchTransactionHistory: true }],
@@ -195,6 +372,74 @@ export async function getSolanaTransactionStatus(args: {
     slot: status.slot,
     confirmations: status.confirmations,
   };
+}
+
+async function getAccount(client: SolanaRpcClient, address: string, minContextSlot: number): Promise<z.output<typeof accountInfoSchema>> {
+  const result = await client.call("getAccountInfo", [address, { commitment: "finalized", encoding: "base64", minContextSlot }], accountInfoSchema);
+  if (BigInt(result.context.slot) < BigInt(minContextSlot)) throw invalidResponse();
+  return result;
+}
+
+function requireWalletAccount(result: z.output<typeof accountInfoSchema> | undefined, label: string): NonNullable<z.output<typeof accountValueSchema>> {
+  if (!result?.value || result.value.owner !== SystemProgram.programId.toBase58() || result.value.executable || result.value.space !== "0" || result.value.data[0] !== "") {
+    throw new SolanaProviderError("unsafe_account", `Solana ${label} is not a safe System Program wallet`);
+  }
+  return result.value;
+}
+
+function requireDestinationWallet(result: z.output<typeof accountInfoSchema> | undefined, address: string): void {
+  if (!result) throw invalidResponse();
+  if (!isOnCurveSolanaAddress(address)) throw new SolanaProviderError("unsafe_account", "Solana destination must be an on-curve wallet public key");
+  if (result.value === null) {
+    return;
+  }
+  requireWalletAccount(result, "destination");
+}
+
+function decodeCanonicalBase64(value: string): Uint8Array {
+  try {
+    const bytes = Buffer.from(value, "base64");
+    if (bytes.toString("base64") !== value) throw new Error("noncanonical base64");
+    return bytes;
+  } catch {
+    throw invalidResponse();
+  }
+}
+
+function canonicalPositiveLamports(value: string): string {
+  if (!DECIMAL.test(value)) throw new SolanaProviderError("invalid_request", "Solana amount must be canonical lamport integer text");
+  const amount = BigInt(value);
+  if (amount <= 0n || amount > U64_MAX) throw new SolanaProviderError("invalid_request", "Solana amount is outside the supported lamport range");
+  return amount.toString();
+}
+
+function assertPaymentBalances(inspection: SolanaPaymentInspection, amountText: string, feeText: string): void {
+  const amount = BigInt(amountText);
+  const fee = BigInt(feeText);
+  const sourceRequired = amount + (inspection.source === inspection.feePayer ? fee : 0n);
+  if (BigInt(inspection.sourceBalanceLamports) < sourceRequired) throw new SolanaProviderError("insufficient_funds", "Solana source balance does not cover the reviewed payment");
+  if (inspection.source !== inspection.feePayer && BigInt(inspection.feePayerBalanceLamports) < fee) {
+    throw new SolanaProviderError("insufficient_funds", "Solana fee payer balance does not cover the reviewed fee");
+  }
+  if (BigInt(inspection.nonceBalanceLamports) < BigInt(inspection.nonceRentMinimumLamports)) {
+    throw new SolanaProviderError("unsafe_account", "Solana nonce account is below the rent-safe balance");
+  }
+}
+
+async function simulatePayment(client: SolanaRpcClient, transactionBase64: string, minContextSlot: number, sigVerify: boolean): Promise<void> {
+  const result = await client.call("simulateTransaction", [transactionBase64, {
+    encoding: "base64",
+    commitment: "confirmed",
+    sigVerify,
+    replaceRecentBlockhash: false,
+    minContextSlot,
+    innerInstructions: false,
+  }], simulationSchema);
+  if (result.value.err !== null) throw new SolanaProviderError("simulation_failed", "Solana payment simulation failed");
+}
+
+function paymentReceipt(reviewDigest: string, signature: string, alreadySubmitted: boolean): SolanaPaymentReceipt {
+  return { signature, reviewDigest, submittedAt: new Date().toISOString(), alreadySubmitted };
 }
 
 class SolanaRpcClient {

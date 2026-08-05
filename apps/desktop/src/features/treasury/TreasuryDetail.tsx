@@ -101,9 +101,12 @@ function SolanaWatchDetail({ treasury }: { treasury: SolanaWatchTreasury }) {
           <h1 className="mt-1 text-2xl font-semibold">{treasury.label}</h1>
           <p className="text-sm text-fg-muted">{chainBadge(treasury.watch.chain)} · Solana watch-only</p>
         </div>
-        <button type="button" onClick={() => void syncQuery.refetch()} disabled={!providerQuery.data?.configured || syncQuery.isFetching} className="rounded-md border border-accent px-3 py-2 text-sm text-accent disabled:cursor-not-allowed disabled:opacity-40">
-          {syncQuery.isFetching ? "Syncing…" : "Refresh"}
-        </button>
+        <div className="flex gap-2">
+          <Link to={`/treasury/${treasury.id}/solana/payment/new`} className="rounded-md bg-accent px-3 py-2 text-sm font-medium text-accent-fg">New SOL payment</Link>
+          <button type="button" onClick={() => void syncQuery.refetch()} disabled={!providerQuery.data?.configured || syncQuery.isFetching} className="rounded-md border border-accent px-3 py-2 text-sm text-accent disabled:cursor-not-allowed disabled:opacity-40">
+            {syncQuery.isFetching ? "Syncing…" : "Refresh"}
+          </button>
+        </div>
       </header>
 
       <section className="grid grid-cols-3 gap-4">
@@ -130,7 +133,7 @@ function SolanaWatchDetail({ treasury }: { treasury: SolanaWatchTreasury }) {
       <section className="rounded-lg border border-surface-hi bg-surface p-5">
         <h2 className="text-sm font-medium text-fg-muted">Receive address</h2>
         <div className="mt-2 break-all font-mono text-sm text-accent">{treasury.watch.address}</div>
-        <p className="mt-2 text-xs text-fg-muted">Public account only. ChainPay cannot construct, sign, or broadcast Solana transactions.</p>
+        <p className="mt-2 text-xs text-fg-muted">Public account only. ChainPay never holds signer secrets; durable-nonce payments require externally produced signatures.</p>
       </section>
 
       <section className="rounded-lg border border-surface-hi bg-surface p-5">

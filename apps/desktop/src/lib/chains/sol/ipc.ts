@@ -5,12 +5,27 @@ import type {
   SolanaScanResponse,
   SolanaTransactionStatusRequest,
   SolanaTransactionStatusResponse,
+  SolanaPaymentInspectRequest,
+  SolanaPaymentInspectResponse,
+  SolanaPaymentPrepareRequest,
+  SolanaPaymentPrepareResponse,
+  SolanaPaymentValidateProposalRequest,
+  SolanaPaymentValidateProposalResponse,
+  SolanaPaymentSubmitRequest,
+  SolanaPaymentSubmitResponse,
+  SolanaPaymentVerifySignatureRequest,
+  SolanaPaymentVerifySignatureResponse,
 } from "@chain-pay/shared";
 
 export interface SolanaBridge {
   status(chain: SolanaChain): Promise<SolanaProviderStatus>;
   scan(request: SolanaScanRequest): Promise<SolanaScanResponse>;
   transactionStatus(request: SolanaTransactionStatusRequest): Promise<SolanaTransactionStatusResponse>;
+  paymentInspect(request: SolanaPaymentInspectRequest): Promise<SolanaPaymentInspectResponse>;
+  paymentPrepare(request: SolanaPaymentPrepareRequest): Promise<SolanaPaymentPrepareResponse>;
+  paymentValidateProposal(request: SolanaPaymentValidateProposalRequest): Promise<SolanaPaymentValidateProposalResponse>;
+  paymentSubmit(request: SolanaPaymentSubmitRequest): Promise<SolanaPaymentSubmitResponse>;
+  paymentVerifySignature(request: SolanaPaymentVerifySignatureRequest): Promise<SolanaPaymentVerifySignatureResponse>;
 }
 
 export function solanaBridge(): SolanaBridge {

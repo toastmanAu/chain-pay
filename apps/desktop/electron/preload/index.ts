@@ -23,6 +23,16 @@ import {
   type SolanaScanResponse,
   type SolanaTransactionStatusRequest,
   type SolanaTransactionStatusResponse,
+  type SolanaPaymentInspectRequest,
+  type SolanaPaymentInspectResponse,
+  type SolanaPaymentPrepareRequest,
+  type SolanaPaymentPrepareResponse,
+  type SolanaPaymentValidateProposalRequest,
+  type SolanaPaymentValidateProposalResponse,
+  type SolanaPaymentSubmitRequest,
+  type SolanaPaymentSubmitResponse,
+  type SolanaPaymentVerifySignatureRequest,
+  type SolanaPaymentVerifySignatureResponse,
 } from "../../../../packages/shared/src";
 
 const platformApi = {
@@ -169,6 +179,16 @@ const chainpayApi = {
       request: SolanaTransactionStatusRequest,
     ): Promise<SolanaTransactionStatusResponse> =>
       ipcRenderer.invoke(SOLANA_CHANNELS.transactionStatus, request),
+    paymentInspect: (request: SolanaPaymentInspectRequest): Promise<SolanaPaymentInspectResponse> =>
+      ipcRenderer.invoke(SOLANA_CHANNELS.paymentInspect, request),
+    paymentPrepare: (request: SolanaPaymentPrepareRequest): Promise<SolanaPaymentPrepareResponse> =>
+      ipcRenderer.invoke(SOLANA_CHANNELS.paymentPrepare, request),
+    paymentValidateProposal: (request: SolanaPaymentValidateProposalRequest): Promise<SolanaPaymentValidateProposalResponse> =>
+      ipcRenderer.invoke(SOLANA_CHANNELS.paymentValidateProposal, request),
+    paymentSubmit: (request: SolanaPaymentSubmitRequest): Promise<SolanaPaymentSubmitResponse> =>
+      ipcRenderer.invoke(SOLANA_CHANNELS.paymentSubmit, request),
+    paymentVerifySignature: (request: SolanaPaymentVerifySignatureRequest): Promise<SolanaPaymentVerifySignatureResponse> =>
+      ipcRenderer.invoke(SOLANA_CHANNELS.paymentVerifySignature, request),
   },
   keyvault: {
     /** Check whether a keyvault blob exists on disk. */

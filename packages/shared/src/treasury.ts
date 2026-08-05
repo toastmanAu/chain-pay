@@ -122,6 +122,15 @@ export interface SolanaWatchConfig {
   address: string;
 }
 
+export interface SolanaPaymentConfig {
+  /** Existing initialized System Program nonce account. */
+  nonceAccount: string;
+  /** Single authority decoded from the nonce account; this is not an M-of-N policy. */
+  nonceAuthority: string;
+  /** External public key that pays the transaction fee. */
+  feePayer: string;
+}
+
 export type SolanaTransactionState = "processed" | "confirmed" | "finalized" | "failed" | "unknown";
 
 export interface SolanaWatchTransaction {
@@ -180,6 +189,7 @@ export interface BitcoinWatchTreasury extends TreasuryBase {
 export interface SolanaWatchTreasury extends TreasuryBase {
   kind: "solana-watch";
   watch: SolanaWatchConfig;
+  payment?: SolanaPaymentConfig;
 }
 
 export type Treasury = MultisigTreasury | BitcoinWatchTreasury | SolanaWatchTreasury;

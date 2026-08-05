@@ -7,12 +7,14 @@ import {
   type BitcoinWatchConfig,
   type MultisigConfig,
   type SolanaWatchConfig,
+  type SolanaPaymentConfig,
   type Treasury,
 } from "@chain-pay/shared";
 import { bitcoinWatchIdentity } from "../lib/chains/btc/watch-source";
 import { useBitcoinWatchStore } from "./bitcoin-watch";
-import { solanaWatchIdentity } from "../lib/chains/sol/address";
+import { parseSolanaAddress, solanaWatchIdentity } from "../lib/chains/sol/address";
 import { useSolanaWatchStore } from "./solana-watch";
+import { useSolanaPaymentsStore } from "./solana-payments";
 import { assertNotMultisigSigner } from "../lib/comm/refusal-invariant";
 import { getOwnIdentityHash } from "../lib/comm/own-identity-hash";
 
@@ -29,6 +31,7 @@ interface TreasuryStore {
   findByMultisig: (cfg: MultisigConfig) => Treasury | undefined;
   findByBitcoinWatch: (cfg: BitcoinWatchConfig) => Treasury | undefined;
   findBySolanaWatch: (cfg: SolanaWatchConfig) => Treasury | undefined;
+  configureSolanaPayment: (id: string, config: SolanaPaymentConfig) => void;
 }
 
 // Treasury.since (RFC 0017 time-lock) is bigint, which is not native to JSON.
@@ -118,6 +121,7 @@ export const useTreasuryStore = create<TreasuryStore>()(
       removeTreasury: (id) => {
         useBitcoinWatchStore.getState().remove(id);
         useSolanaWatchStore.getState().remove(id);
+        useSolanaPaymentsStore.getState().clear(id);
         set((s) => ({
           treasuries: s.treasuries.filter((t) => t.id !== id),
           activeTreasuryId: s.activeTreasuryId === id ? null : s.activeTreasuryId,
@@ -142,6 +146,17 @@ export const useTreasuryStore = create<TreasuryStore>()(
             solanaWatchIdentity(t.watch.chain, t.watch.address) ===
               solanaWatchIdentity(cfg.chain, cfg.address),
         ),
+      configureSolanaPayment: (id, config) => {
+        const treasury = get().treasuries.find((item) => item.id === id);
+        if (!treasury || !isSolanaWatchTreasury(treasury)) throw new Error("Solana treasury was not found");
+        const nonceAccount = parseSolanaAddress(config.nonceAccount, treasury.watch.chain);
+        const nonceAuthority = parseSolanaAddress(config.nonceAuthority, treasury.watch.chain);
+        const feePayer = parseSolanaAddress(config.feePayer, treasury.watch.chain);
+        useSolanaPaymentsStore.getState().clear(id);
+        set((state) => ({ treasuries: state.treasuries.map((item) => item.id === id && isSolanaWatchTreasury(item)
+          ? { ...item, payment: { nonceAccount, nonceAuthority, feePayer }, updatedAt: new Date().toISOString() }
+          : item) }));
+      },
     }),
     {
       name: "chain-pay:treasuries",
