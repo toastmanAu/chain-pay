@@ -103,6 +103,8 @@ export function ComplianceExport({
               <option value="ckb:mainnet">CKB mainnet</option>
               <option value="ckb:testnet">CKB testnet</option>
               <option value="evm:11155111">Ethereum Sepolia</option>
+              <option value="sol:devnet">Solana devnet</option>
+              <option value="sol:mainnet">Solana mainnet</option>
             </select>
           </label>
         </div>

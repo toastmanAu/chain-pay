@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { writeFile } from "node:fs/promises";
 import { dialog, ipcMain } from "electron";
+import { z } from "zod";
 
 export interface PostJournalResult {
   jeName: string;
@@ -14,7 +15,7 @@ export type ComplianceFormat = "csv" | "pdf";
 export interface ComplianceFilters {
   fromDate?: string;
   toDate?: string;
-  chain?: "ckb:mainnet" | "ckb:testnet" | "evm:11155111";
+  chain?: "ckb:mainnet" | "ckb:testnet" | "evm:11155111" | "sol:devnet" | "sol:mainnet";
 }
 
 export interface ComplianceSaveResult {
@@ -38,6 +39,46 @@ function requireEnv(name: string): string {
   return v;
 }
 
+const canonicalUint = z.union([z.bigint(), z.string().regex(/^(0|[1-9]\d*)$/)]);
+const paymentLineSchema = z.object({
+  payeeId: z.string().min(1).max(140),
+  fiat: z.object({ currency: z.literal("USD"), minor: canonicalUint }).strict(),
+  crypto: z.object({ asset: z.string().min(1).max(12), value: canonicalUint, decimals: z.number().int().min(0).max(30) }).strict(),
+}).strict();
+const evmSchema = z.object({
+  safeAddress: z.string(), safeTxHash: z.string(), outerTxHash: z.string(), executorAddress: z.string(),
+  recipientAddress: z.string(), confirmedBlockNumber: z.string(), gasUsed: z.string(),
+  effectiveGasPriceWei: z.string(), gasFeeWei: z.string(), gasPayer: z.literal("executor"),
+}).strict();
+const solanaSchema = z.object({
+  reviewDigest: z.string(), sourceAddress: z.string(), recipientAddress: z.string(), feePayerAddress: z.string(),
+  nonceAccount: z.string(), nonceAuthority: z.string(), durableNonce: z.string(), finalizedSlot: z.string(),
+  amountLamports: z.string(), feeLamports: z.string(), feePayerPolicy: z.literal("transaction_fee_payer"),
+  messageBase64: z.string().max(4096),
+}).strict();
+const confirmedRecordSchema = z.object({
+  batchId: z.string().min(1).max(140), sourceType: z.enum(["send", "payroll"]), label: z.string().min(1).max(140),
+  chain: z.enum(["ckb:mainnet", "ckb:testnet", "evm:11155111", "sol:devnet", "sol:mainnet"]),
+  txHash: z.string().min(1).max(128), confirmedAt: z.string().datetime({ offset: true }),
+  lines: z.array(paymentLineSchema).min(1).max(500), evm: evmSchema.optional(), solana: solanaSchema.optional(),
+}).strict().superRefine((value, context) => {
+  const family = value.chain.split(":")[0];
+  if ((family === "evm") !== Boolean(value.evm) || (family === "sol") !== Boolean(value.solana)) {
+    context.addIssue({ code: z.ZodIssueCode.custom, message: "cross-chain metadata is not allowed" });
+  }
+});
+
+function accountingBaseUrl(): string {
+  const raw = requireEnv("FRAPPE_URL").replace(/\/$/, "");
+  let url: URL;
+  try { url = new URL(raw); } catch { throw new Error("FRAPPE_URL must be a valid URL"); }
+  const loopback = url.hostname === "localhost" || url.hostname.endsWith(".localhost") || url.hostname === "127.0.0.1" || url.hostname === "[::1]";
+  if ((url.protocol !== "https:" && !(url.protocol === "http:" && loopback)) || url.username || url.password || url.search || url.hash) {
+    throw new Error("FRAPPE_URL must use HTTPS (HTTP is allowed only for loopback development)");
+  }
+  return raw;
+}
+
 /**
  * POST a confirmed domain payment record to the whitelisted Frappe endpoint.
  * Credentials live only here in the main process. Throws on any failure so the
@@ -47,32 +88,39 @@ function requireEnv(name: string): string {
 export async function postJournalToFrappe(
   record: unknown,
 ): Promise<PostJournalResult> {
-  const base = requireEnv("FRAPPE_URL").replace(/\/$/, "");
+  const parsedRecord = confirmedRecordSchema.safeParse(record);
+  if (!parsedRecord.success) throw new Error("Confirmed payment record failed strict validation");
+  const base = accountingBaseUrl();
   const key = requireEnv("FRAPPE_API_KEY");
   const secret = requireEnv("FRAPPE_API_SECRET");
-  const res = await fetch(`${base}/api/method/crypto_payroll.api.post_confirmed_payment`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `token ${key}:${secret}`,
-    },
+  const bodyText = JSON.stringify(
+    { record: parsedRecord.data },
+    (_key, value) => (typeof value === "bigint" ? value.toString() : value),
+  );
+  if (Buffer.byteLength(bodyText) > 1024 * 1024) throw new Error("Confirmed payment record is too large");
+  let res: Response;
+  try {
+    res = await fetch(`${base}/api/method/crypto_payroll.api.post_confirmed_payment`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `token ${key}:${secret}`,
+      },
+      signal: AbortSignal.timeout(20_000),
     // Slice B gotcha #1: Frappe routes by Host header. We do NOT set Host
     // manually (fetch/undici treats it as a forbidden header). Instead FRAPPE_URL
     // MUST be the site host (http://chainpay.localhost:PORT), so fetch derives the
     // correct Host automatically. chainpay.localhost resolves to 127.0.0.1 on the
     // host where Electron main runs.
-    body: JSON.stringify(
-      { record },
-      (_key, value) => (typeof value === "bigint" ? value.toString() : value),
-    ),
-  });
-  if (!res.ok) {
-    const detail = await res.text();
-    throw new Error(
-      `Frappe post_confirmed_payment failed (${res.status}): ${detail.slice(0, 300)}`,
-    );
+      body: bodyText,
+    });
+  } catch {
+    throw new Error("Frappe accounting request failed");
   }
-  const body = (await res.json()) as {
+  if (!res.ok) {
+    throw new Error(`Frappe accounting service rejected the request (${res.status})`);
+  }
+  const body = await boundedJson(res) as {
     message?: {
       je_name?: unknown;
       idempotent?: unknown;
@@ -104,22 +152,27 @@ export async function fetchComplianceExport(
   format: ComplianceFormat,
 ): Promise<CompliancePayload> {
   const normalised = normaliseComplianceRequest(filters, format);
-  const base = requireEnv("FRAPPE_URL").replace(/\/$/, "");
+  const base = accountingBaseUrl();
   const key = requireEnv("FRAPPE_API_KEY");
   const secret = requireEnv("FRAPPE_API_SECRET");
-  const res = await fetch(`${base}/api/method/crypto_payroll.api.export_compliance`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `token ${key}:${secret}`,
-    },
-    body: JSON.stringify(normalised),
-  });
-  if (!res.ok) {
-    const detail = await res.text();
-    throw new Error(`Frappe compliance export failed (${res.status}): ${detail.slice(0, 300)}`);
+  let res: Response;
+  try {
+    res = await fetch(`${base}/api/method/crypto_payroll.api.export_compliance`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `token ${key}:${secret}`,
+      },
+      signal: AbortSignal.timeout(20_000),
+      body: JSON.stringify(normalised),
+    });
+  } catch {
+    throw new Error("Frappe compliance request failed");
   }
-  const body = (await res.json()) as { message?: Record<string, unknown> };
+  if (!res.ok) {
+    throw new Error(`Frappe compliance service rejected the request (${res.status})`);
+  }
+  const body = await boundedJson(res, 25 * 1024 * 1024 + 1024 * 1024) as { message?: Record<string, unknown> };
   return parseCompliancePayload(body.message, format);
 }
 
@@ -172,7 +225,7 @@ function normaliseComplianceRequest(filters: ComplianceFilters, format: Complian
   const from = date(filters.fromDate, "fromDate");
   const to = date(filters.toDate, "toDate");
   if (from && to && from > to) throw new Error("fromDate cannot be after toDate");
-  if (filters.chain && !["ckb:mainnet", "ckb:testnet", "evm:11155111"].includes(filters.chain)) {
+  if (filters.chain && !["ckb:mainnet", "ckb:testnet", "evm:11155111", "sol:devnet", "sol:mainnet"].includes(filters.chain)) {
     throw new Error("Unsupported compliance chain");
   }
   return {
@@ -183,6 +236,27 @@ function normaliseComplianceRequest(filters: ComplianceFilters, format: Complian
     },
     format,
   };
+}
+
+async function boundedJson(response: Response, maximum = 1024 * 1024): Promise<unknown> {
+  const declared = Number(response.headers?.get?.("content-length") ?? 0);
+  if (Number.isFinite(declared) && declared > maximum) throw new Error("Frappe response is too large");
+  if (!response.body?.getReader) return response.json();
+  const reader = response.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    size += value.byteLength;
+    if (size > maximum) {
+      await reader.cancel();
+      throw new Error("Frappe response is too large");
+    }
+    chunks.push(value);
+  }
+  try { return JSON.parse(Buffer.concat(chunks).toString("utf8")); }
+  catch { throw new Error("Frappe returned invalid JSON"); }
 }
 
 function parseCompliancePayload(raw: Record<string, unknown> | undefined, format: ComplianceFormat): CompliancePayload {

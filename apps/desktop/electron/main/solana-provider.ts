@@ -19,12 +19,15 @@ import type {
   SolanaPaymentPrepareResponse,
   SolanaPaymentReceipt,
   SolanaPaymentSubmitRequest,
+  SolanaPaymentFinalizedEvidenceRequest,
+  SolanaFinalizedPaymentEvidence,
 } from "@chain-pay/shared";
 import {
   assembleSignedSolanaTransaction,
   buildSolanaPaymentTransaction,
   isOnCurveSolanaAddress,
   validateSolanaPaymentProposal,
+  validateFinalizedSolanaTransaction,
 } from "./solana-payment-transaction";
 
 const REQUEST_TIMEOUT_MS = 20_000;
@@ -126,6 +129,13 @@ const simulationSchema = z.object({
     unitsConsumed: z.number().int().nonnegative().safe().optional(),
   }).passthrough(),
 }).strict();
+const finalizedPaymentTransactionSchema = z.object({
+  slot: exactUnsignedSchema,
+  blockTime: z.number().int().safe(),
+  version: z.literal("legacy"),
+  meta: z.object({ err: z.null(), fee: exactUnsignedSchema }).passthrough(),
+  transaction: z.tuple([z.string().min(1).max(4_000), z.literal("base64")]),
+}).strict().nullable();
 
 export interface SolanaProviderConfig {
   rpcUrl: string;
@@ -134,7 +144,7 @@ export interface SolanaProviderConfig {
 
 export class SolanaProviderError extends Error {
   constructor(
-    readonly code: "not_configured" | "unavailable" | "invalid_response" | "invalid_request" | "unsafe_account" | "stale_nonce" | "insufficient_funds" | "simulation_failed" | "rejected" | "txid_mismatch",
+    readonly code: "not_configured" | "unavailable" | "invalid_response" | "invalid_request" | "unsafe_account" | "stale_nonce" | "insufficient_funds" | "simulation_failed" | "rejected" | "txid_mismatch" | "not_finalized" | "evidence_mismatch",
     message: string,
   ) {
     super(message);
@@ -228,7 +238,14 @@ export async function prepareSolanaPayment(args: {
   const feeResult = await client.call("getFeeForMessage", [preliminary.messageBase64, { commitment: "confirmed", minContextSlot: safeRpcInteger(inspection.slot) }], feeForMessageSchema);
   if (feeResult.value === null) throw new SolanaProviderError("stale_nonce", "Solana durable nonce is not valid for fee calculation");
   assertPaymentBalances(inspection, amount, feeResult.value);
-  const proposal = buildSolanaPaymentTransaction({ inspection, treasuryId: args.request.treasuryId, destination: args.request.destination, amountLamports: amount, feeLamports: feeResult.value });
+  const proposal = buildSolanaPaymentTransaction({
+    inspection,
+    treasuryId: args.request.treasuryId,
+    destination: args.request.destination,
+    amountLamports: amount,
+    feeLamports: feeResult.value,
+    ...(args.request.accounting ? { accounting: args.request.accounting } : {}),
+  });
   await simulatePayment(client, proposal.unsignedTransactionBase64, safeRpcInteger(inspection.slot), false);
   return { proposal };
 }
@@ -274,6 +291,69 @@ export async function submitSolanaPayment(args: {
   }
   if (returned !== assembled.firstSignature) throw new SolanaProviderError("txid_mismatch", "Solana provider returned a mismatched transaction signature");
   return { receipt: paymentReceipt(proposal.reviewDigest, returned, false) };
+}
+
+export async function getFinalizedSolanaPaymentEvidence(args: {
+  request: SolanaPaymentFinalizedEvidenceRequest;
+  config: SolanaProviderConfig;
+  fetchImpl?: typeof fetch;
+}): Promise<{ evidence: SolanaFinalizedPaymentEvidence }> {
+  const proposal = validateSolanaPaymentProposal(args.request.proposal);
+  if (proposal.version !== 2) throw new SolanaProviderError("invalid_request", "Legacy Solana payments do not contain committed accounting intent");
+  if (args.request.chain !== proposal.chain || args.request.treasuryId !== proposal.treasuryId) {
+    throw new SolanaProviderError("invalid_request", "Solana finalized-evidence request does not match the reviewed payment");
+  }
+  const signature = parseSolanaSignature(args.request.receipt.signature);
+  if (args.request.receipt.reviewDigest !== proposal.reviewDigest) {
+    throw new SolanaProviderError("invalid_request", "Solana receipt does not match the reviewed payment");
+  }
+  let assembledSignature: string;
+  try {
+    assembledSignature = assembleSignedSolanaTransaction(proposal, args.request.signatures).firstSignature;
+  } catch {
+    throw new SolanaProviderError("invalid_request", "Solana finalized-evidence signatures are invalid for the reviewed payment");
+  }
+  if (assembledSignature !== signature) {
+    throw new SolanaProviderError("evidence_mismatch", "Solana receipt signature does not match the reviewed signed transaction");
+  }
+  const client = new SolanaRpcClient(args.config, args.fetchImpl ?? fetch);
+  const finalized = await client.call("getTransaction", [signature, {
+    commitment: "finalized",
+    encoding: "base64",
+    maxSupportedTransactionVersion: 0,
+  }], finalizedPaymentTransactionSchema);
+  if (!finalized) throw new SolanaProviderError("not_finalized", "Solana payment does not yet have finalized transaction evidence");
+  if (BigInt(finalized.slot) < BigInt(proposal.slot)) throw new SolanaProviderError("evidence_mismatch", "Finalized Solana slot predates the reviewed provider context");
+  try {
+    validateFinalizedSolanaTransaction(proposal, args.request.receipt, finalized.transaction[0]);
+  } catch {
+    throw new SolanaProviderError("evidence_mismatch", "Finalized Solana transaction does not match the reviewed payment");
+  }
+  if (finalized.meta.fee !== proposal.feeLamports) {
+    throw new SolanaProviderError("evidence_mismatch", "Finalized Solana fee does not match the reviewed fee");
+  }
+  const finalizedAt = new Date(finalized.blockTime * 1_000);
+  if (Number.isNaN(finalizedAt.valueOf())) throw invalidResponse();
+  return { evidence: {
+    version: 1,
+    chain: proposal.chain,
+    reviewDigest: proposal.reviewDigest,
+    signature,
+    slot: finalized.slot,
+    finalizedAt: finalizedAt.toISOString(),
+    transactionVersion: "legacy",
+    messageBase64: proposal.messageBase64,
+    signedTransactionBase64: finalized.transaction[0],
+    source: proposal.source,
+    destination: proposal.destination,
+    amountLamports: proposal.amountLamports,
+    feePayer: proposal.feePayer,
+    feeLamports: finalized.meta.fee,
+    feePayerPolicy: "transaction_fee_payer",
+    nonceAccount: proposal.nonceAccount,
+    nonceAuthority: proposal.nonceAuthority,
+    durableNonce: proposal.durableNonce,
+  } };
 }
 
 export function solanaProviderConfigFromEnvironment(

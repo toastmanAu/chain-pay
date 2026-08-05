@@ -8,6 +8,8 @@ import {
   buildSolanaPaymentTransaction,
   computeSolanaReviewDigest,
   validateSolanaPaymentProposal,
+  validateFinalizedSolanaTransaction,
+  solanaReviewApprovalBytes,
   verifySolanaSignatureEnvelope,
 } from "./solana-payment-transaction";
 
@@ -51,6 +53,33 @@ describe("canonical durable-nonce native SOL transaction", () => {
     expect(parsed.recentBlockhash).toBe(durableNonce);
   });
 
+  it("digest-binds version-2 accounting intent without changing the Solana message bytes", () => {
+    const common = { inspection, treasuryId: "sol-1", destination: destination.address, amountLamports: "42", feeLamports: "15000", createdAt: "2026-08-05T00:00:00.000Z" };
+    const legacy = buildSolanaPaymentTransaction(common);
+    const accounting = { payeeId: "vendor-17", fiat: { currency: "USD" as const, minor: "2500" } };
+    const current = buildSolanaPaymentTransaction({ ...common, accounting });
+    expect(legacy.version).toBe(1);
+    expect(current).toMatchObject({ version: 2, accounting });
+    expect(current.messageBase64).toBe(legacy.messageBase64);
+    expect(current.unsignedTransactionBase64).toBe(legacy.unsignedTransactionBase64);
+    expect(current.reviewDigest).not.toBe(legacy.reviewDigest);
+    expect(validateSolanaPaymentProposal(current)).toEqual(current);
+    expect(() => validateSolanaPaymentProposal({ ...current, accounting: { ...accounting, payeeId: "attacker" } })).toThrow(/digest/i);
+    const currentEnvelope = {
+      format: "chainpay-solana-signature-v2" as const,
+      chain: current.chain,
+      treasuryId: current.treasuryId,
+      reviewDigest: current.reviewDigest,
+      signer: feePayer.address,
+      signature: bs58.encode(ed25519.sign(Buffer.from(current.messageBase64, "base64"), feePayer.secret)),
+      reviewSignature: bs58.encode(ed25519.sign(solanaReviewApprovalBytes(current.reviewDigest), feePayer.secret)),
+    };
+    expect(verifySolanaSignatureEnvelope(current, currentEnvelope)).toEqual(currentEnvelope);
+    expect(() => verifySolanaSignatureEnvelope(current, { ...currentEnvelope, reviewSignature: bs58.encode(new Uint8Array(64).fill(8)) })).toThrow(/accounting-bound/i);
+    const { reviewSignature: _reviewSignature, ...transactionOnly } = currentEnvelope;
+    expect(() => verifySolanaSignatureEnvelope(current, { ...transactionOnly, format: "chainpay-solana-signature-v1" })).toThrow(/version/i);
+  });
+
   it("verifies signature-only envelopes and assembles the exact reviewed wire transaction", () => {
     const proposal = buildSolanaPaymentTransaction({ inspection, treasuryId: "sol-1", destination: destination.address, amountLamports: "42", feeLamports: "15000" });
     const signers = new Map([source, nonceAuthority, feePayer].map((item) => [item.address, item]));
@@ -59,6 +88,9 @@ describe("canonical durable-nonce native SOL transaction", () => {
     const assembled = assembleSignedSolanaTransaction(proposal, envelopes);
     expect(assembled.firstSignature).toBe(envelopes[0]?.signature);
     expect(Transaction.from(assembled.wireBytes).verifySignatures()).toBe(true);
+    const receipt = { signature: assembled.firstSignature, reviewDigest: proposal.reviewDigest, submittedAt: "2026-08-05T00:01:00.000Z", alreadySubmitted: false };
+    expect(validateFinalizedSolanaTransaction(proposal, receipt, Buffer.from(assembled.wireBytes).toString("base64"))).toMatchObject({ signature: assembled.firstSignature });
+    expect(() => validateFinalizedSolanaTransaction(proposal, { ...receipt, signature: bs58.encode(new Uint8Array(64).fill(8)) }, Buffer.from(assembled.wireBytes).toString("base64"))).toThrow(/receipt/i);
   });
 
   it("rejects digest, message, signer, signature, duplicate, and signer-order tampering", () => {

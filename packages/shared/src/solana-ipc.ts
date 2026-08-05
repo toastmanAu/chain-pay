@@ -6,6 +6,8 @@ import type {
 } from "./treasury";
 import type {
   SolanaPaymentInspection,
+  SolanaPaymentAccountingIntent,
+  SolanaFinalizedPaymentEvidence,
   SolanaPaymentProposal,
   SolanaPaymentReceipt,
   SolanaSignatureEnvelope,
@@ -18,6 +20,7 @@ export const SOLANA_CHANNELS = {
   paymentInspect: "solana:payment-inspect",
   paymentPrepare: "solana:payment-prepare",
   paymentValidateProposal: "solana:payment-validate-proposal",
+  paymentFinalizedEvidence: "solana:payment-finalized-evidence",
   paymentSubmit: "solana:payment-submit",
   paymentVerifySignature: "solana:payment-verify-signature",
 } as const;
@@ -42,6 +45,7 @@ export interface SolanaPaymentPrepareRequest extends SolanaPaymentInspectRequest
   treasuryId: string;
   destination: string;
   amountLamports: string;
+  accounting?: SolanaPaymentAccountingIntent;
 }
 
 export interface SolanaPaymentPrepareResponse {
@@ -54,6 +58,18 @@ export interface SolanaPaymentValidateProposalRequest {
 
 export interface SolanaPaymentValidateProposalResponse {
   proposal: SolanaPaymentProposal;
+}
+
+export interface SolanaPaymentFinalizedEvidenceRequest {
+  chain: SolanaChain;
+  treasuryId: string;
+  proposal: SolanaPaymentProposal;
+  receipt: SolanaPaymentReceipt;
+  signatures: SolanaSignatureEnvelope[];
+}
+
+export interface SolanaPaymentFinalizedEvidenceResponse {
+  evidence: SolanaFinalizedPaymentEvidence;
 }
 
 export interface SolanaPaymentSubmitRequest {

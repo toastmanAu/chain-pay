@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import bs58 from "bs58";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import "@testing-library/jest-dom/vitest";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
@@ -28,7 +28,7 @@ const baseTreasury: SolanaWatchTreasury = {
   updatedAt: "2026-08-05T00:00:00.000Z",
 };
 const proposal: SolanaPaymentProposal = {
-  version: 1,
+  version: 2,
   chain: "sol:devnet",
   treasuryId: "sol-1",
   source,
@@ -47,6 +47,7 @@ const proposal: SolanaPaymentProposal = {
   requiredSigners: signers,
   reviewDigest: "a".repeat(64),
   createdAt: "2026-08-05T00:01:00.000Z",
+  accounting: { payeeId: "vendor-sol", fiat: { currency: "USD", minor: "2550" } },
 };
 
 const paymentInspect = vi.fn();
@@ -88,15 +89,18 @@ describe("CreateSolanaPayment", () => {
     renderScreen();
     fireEvent.change(screen.getByLabelText("Destination wallet"), { target: { value: destination } });
     fireEvent.change(screen.getByLabelText("Amount (SOL)"), { target: { value: "0.01" } });
+    fireEvent.change(screen.getByLabelText("Payee / accounting reference"), { target: { value: "vendor-sol" } });
+    fireEvent.change(screen.getByLabelText("Accounting value"), { target: { value: "25.50" } });
     fireEvent.click(screen.getByRole("button", { name: /prepare immutable review/i }));
     expect(await screen.findByText("Immutable payment review")).toBeInTheDocument();
     expect(screen.getByText(/not a program-enforced M-of-N/i)).toBeInTheDocument();
     expect(screen.getByText("sol-1")).toBeInTheDocument();
     expect(screen.getByText(/AdvanceNonceAccount.*SystemProgram\.transfer/i)).toBeInTheDocument();
-    expect(paymentPrepare).toHaveBeenCalledWith({ chain: "sol:devnet", treasuryId: "sol-1", source, destination, amountLamports: "10000000", ...payment });
+    expect(screen.getByText("USD 25.50")).toBeInTheDocument();
+    expect(paymentPrepare).toHaveBeenCalledWith({ chain: "sol:devnet", treasuryId: "sol-1", source, destination, amountLamports: "10000000", accounting: proposal.accounting, ...payment });
 
     for (const signer of signers) {
-      const envelope: SolanaSignatureEnvelope = { format: "chainpay-solana-signature-v1", chain: "sol:devnet", treasuryId: "sol-1", reviewDigest: proposal.reviewDigest, signer, signature: `signature-${signer}` };
+      const envelope: SolanaSignatureEnvelope = { format: "chainpay-solana-signature-v2", chain: "sol:devnet", treasuryId: "sol-1", reviewDigest: proposal.reviewDigest, signer, signature: `signature-${signer}`, reviewSignature: `review-${signer}` };
       fireEvent.change(screen.getByLabelText("Signature envelope JSON"), { target: { value: JSON.stringify(envelope) } });
       fireEvent.click(screen.getByRole("button", { name: /verify and import/i }));
       await waitFor(() => expect(useSolanaPaymentsStore.getState().records["sol-1"]?.signatures).toHaveLength(signers.indexOf(signer) + 1));
@@ -106,7 +110,44 @@ describe("CreateSolanaPayment", () => {
     fireEvent.click(screen.getByRole("button", { name: /confirm and broadcast/i }));
     expect(await screen.findByText("Submitted")).toBeInTheDocument();
     expect(paymentSubmit).toHaveBeenCalledWith(expect.objectContaining({ chain: "sol:devnet", treasuryId: "sol-1", proposal, signatures: expect.any(Array) }));
-    await waitFor(() => expect(transactionStatus).toHaveBeenCalledWith({ chain: "sol:devnet", signature: "transaction-signature" }));
+  });
+
+  it("keeps a persisted legacy B2A review signable but explicitly excludes accounting", async () => {
+    useTreasuryStore.setState({ treasuries: [{ ...baseTreasury, payment }], activeTreasuryId: "sol-1" });
+    const { accounting: _accounting, ...legacy } = proposal;
+    useSolanaPaymentsStore.getState().acceptProposal("sol-1", { ...legacy, version: 1 });
+    renderScreen();
+    expect(await screen.findByText(/legacy B2A review has no digest-bound accounting intent/i)).toBeInTheDocument();
+    expect(useSolanaPaymentsStore.getState().records["sol-1"]?.accountingState).toBe("not_applicable");
+  });
+
+  it("shows finalized accounting identities, retry, and a prominent regression warning", async () => {
+    useTreasuryStore.setState({ treasuries: [{ ...baseTreasury, payment }], activeTreasuryId: "sol-1" });
+    const receipt = { signature: "transaction-signature", reviewDigest: proposal.reviewDigest, submittedAt: "2026-08-05T00:02:00.000Z", alreadySubmitted: false };
+    const evidence = { version: 1 as const, chain: proposal.chain, reviewDigest: proposal.reviewDigest, signature: receipt.signature,
+      slot: "102", finalizedAt: "2026-08-05T00:03:00.000Z", transactionVersion: "legacy" as const,
+      messageBase64: proposal.messageBase64, signedTransactionBase64: "c2lnbmVk", source: proposal.source,
+      destination: proposal.destination, amountLamports: proposal.amountLamports, feePayer: proposal.feePayer,
+      feeLamports: proposal.feeLamports, feePayerPolicy: "transaction_fee_payer" as const,
+      nonceAccount: proposal.nonceAccount, nonceAuthority: proposal.nonceAuthority, durableNonce: proposal.durableNonce };
+    useSolanaPaymentsStore.setState({ records: { "sol-1": {
+      treasuryId: "sol-1", state: "submitted", proposal, signatures: [], receipt, transactionState: "finalized",
+      rollbackDetected: false, accountingState: "posted", finalizedEvidence: evidence,
+      accountingRecordName: "BATCH-SOL-1", journalEntryName: "JE-SOL-1", accountingError: null,
+      reconciliationRequired: false, error: null, updatedAt: evidence.finalizedAt,
+    } } });
+    transactionStatus.mockResolvedValue({ state: "finalized", slot: "102", confirmations: null });
+    renderScreen();
+    expect(await screen.findByText("Accounting posted")).toBeInTheDocument();
+    expect(screen.getByText(/Source record: BATCH-SOL-1/)).toBeInTheDocument();
+    expect(screen.getByText(/Journal Entry: JE-SOL-1/)).toBeInTheDocument();
+
+    act(() => useSolanaPaymentsStore.getState().updateTransactionState("sol-1", "unknown"));
+    expect(await screen.findByText("Accounting reconciliation required")).toBeInTheDocument();
+    expect(screen.getByText(/will not reverse, rebroadcast, or post automatically/i)).toBeInTheDocument();
+
+    useSolanaPaymentsStore.setState({ records: { "sol-1": { ...useSolanaPaymentsStore.getState().records["sol-1"]!, transactionState: "finalized", rollbackDetected: false, reconciliationRequired: false, accountingState: "post_failed", accountingError: "backend unavailable" } } });
+    expect(await screen.findByRole("button", { name: "Retry accounting post" })).toBeInTheDocument();
   });
 });
 

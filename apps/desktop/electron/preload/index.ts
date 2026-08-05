@@ -29,6 +29,8 @@ import {
   type SolanaPaymentPrepareResponse,
   type SolanaPaymentValidateProposalRequest,
   type SolanaPaymentValidateProposalResponse,
+  type SolanaPaymentFinalizedEvidenceRequest,
+  type SolanaPaymentFinalizedEvidenceResponse,
   type SolanaPaymentSubmitRequest,
   type SolanaPaymentSubmitResponse,
   type SolanaPaymentVerifySignatureRequest,
@@ -146,7 +148,7 @@ const chainpayApi = {
       filters: {
         fromDate?: string;
         toDate?: string;
-        chain?: "ckb:mainnet" | "ckb:testnet" | "evm:11155111";
+        chain?: "ckb:mainnet" | "ckb:testnet" | "evm:11155111" | "sol:devnet" | "sol:mainnet";
       },
       format: "csv" | "pdf",
     ): Promise<{
@@ -185,6 +187,8 @@ const chainpayApi = {
       ipcRenderer.invoke(SOLANA_CHANNELS.paymentPrepare, request),
     paymentValidateProposal: (request: SolanaPaymentValidateProposalRequest): Promise<SolanaPaymentValidateProposalResponse> =>
       ipcRenderer.invoke(SOLANA_CHANNELS.paymentValidateProposal, request),
+    paymentFinalizedEvidence: (request: SolanaPaymentFinalizedEvidenceRequest): Promise<SolanaPaymentFinalizedEvidenceResponse> =>
+      ipcRenderer.invoke(SOLANA_CHANNELS.paymentFinalizedEvidence, request),
     paymentSubmit: (request: SolanaPaymentSubmitRequest): Promise<SolanaPaymentSubmitResponse> =>
       ipcRenderer.invoke(SOLANA_CHANNELS.paymentSubmit, request),
     paymentVerifySignature: (request: SolanaPaymentVerifySignatureRequest): Promise<SolanaPaymentVerifySignatureResponse> =>

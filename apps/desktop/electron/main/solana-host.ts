@@ -10,6 +10,7 @@ import {
   type SolanaPaymentInspectResponse,
   type SolanaPaymentPrepareResponse,
   type SolanaPaymentValidateProposalResponse,
+  type SolanaPaymentFinalizedEvidenceResponse,
   type SolanaPaymentSubmitResponse,
   type SolanaPaymentVerifySignatureResponse,
 } from "@chain-pay/shared";
@@ -21,6 +22,7 @@ import {
   inspectSolanaPayment,
   prepareSolanaPayment,
   submitSolanaPayment,
+  getFinalizedSolanaPaymentEvidence,
 } from "./solana-provider";
 import { validateSolanaPaymentProposal, verifySolanaSignatureEnvelope } from "./solana-payment-transaction";
 
@@ -76,11 +78,14 @@ export function registerSolanaIpc(): void {
   ipcMain.handle(
     SOLANA_CHANNELS.paymentPrepare,
     async (_event, request: unknown): Promise<SolanaPaymentPrepareResponse> => {
-      const keys = ["chain", "treasuryId", "source", "destination", "amountLamports", "nonceAccount", "nonceAuthority", "feePayer"];
-      if (!validExactRequest(request, keys) || !validChain(request.chain) || !keys.slice(1).every((key) => typeof request[key] === "string")) {
+      const requiredKeys = ["chain", "treasuryId", "source", "destination", "amountLamports", "nonceAccount", "nonceAuthority", "feePayer"];
+      const keys = Object.keys(request && typeof request === "object" && !Array.isArray(request) ? request : {});
+      const exactKeys = keys.length === requiredKeys.length || (keys.length === requiredKeys.length + 1 && keys.includes("accounting"));
+      if (!exactKeys || !requiredKeys.every((key) => keys.includes(key)) || !validChain((request as Record<string, unknown>).chain) || !requiredKeys.slice(1).every((key) => typeof (request as Record<string, unknown>)[key] === "string") || (keys.includes("accounting") && !validAccountingIntent((request as Record<string, unknown>).accounting))) {
         throw invalidRequest("Solana payment preparation request is invalid");
       }
-      return prepareSolanaPayment({ request: request as unknown as import("@chain-pay/shared").SolanaPaymentPrepareRequest, config: requiredConfig(request.chain) });
+      const typed = request as unknown as import("@chain-pay/shared").SolanaPaymentPrepareRequest;
+      return prepareSolanaPayment({ request: typed, config: requiredConfig(typed.chain) });
     },
   );
   ipcMain.handle(
@@ -88,6 +93,15 @@ export function registerSolanaIpc(): void {
     (_event, request: unknown): SolanaPaymentValidateProposalResponse => {
       if (!validExactRequest(request, ["proposal"])) throw invalidRequest("Solana payment proposal validation request is invalid");
       return { proposal: validateSolanaPaymentProposal(request.proposal) };
+    },
+  );
+  ipcMain.handle(
+    SOLANA_CHANNELS.paymentFinalizedEvidence,
+    async (_event, request: unknown): Promise<SolanaPaymentFinalizedEvidenceResponse> => {
+      if (!validExactRequest(request, ["chain", "treasuryId", "proposal", "receipt", "signatures"]) || !validChain(request.chain) || typeof request.treasuryId !== "string" || !Array.isArray(request.signatures)) {
+        throw invalidRequest("Solana finalized payment evidence request is invalid");
+      }
+      return getFinalizedSolanaPaymentEvidence({ request: request as unknown as import("@chain-pay/shared").SolanaPaymentFinalizedEvidenceRequest, config: requiredConfig(request.chain) });
     },
   );
   ipcMain.handle(
@@ -120,6 +134,11 @@ function validExactRequest(value: unknown, keys: string[]): value is Record<stri
 
 function invalidRequest(message: string): SolanaProviderError {
   return new SolanaProviderError("invalid_request", message);
+}
+
+function validAccountingIntent(value: unknown): boolean {
+  if (!validExactRequest(value, ["payeeId", "fiat"]) || typeof value.payeeId !== "string") return false;
+  return validExactRequest(value.fiat, ["currency", "minor"]) && value.fiat.currency === "USD" && typeof value.fiat.minor === "string";
 }
 
 function requiredConfig(chain: SolanaChain) {

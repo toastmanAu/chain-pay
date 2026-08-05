@@ -50,6 +50,13 @@
 - [ ] Safe nonce fetched from chain at propose-time, not cached
 - [ ] When using SafeTxService, verify the returned tx hash matches locally-computed hash before showing to signer
 
+### Solana durable-nonce payments (Phase 5)
+- [ ] Transaction signatures are verified over the exact legacy message bytes in Electron main
+- [ ] Version-2 signers separately approve the domain-separated review digest containing payee and fiat intent
+- [ ] Finalized evidence must reproduce the reviewed message, signature, nonce advance + transfer order, fee, and cluster
+- [ ] Provider URLs/tokens and upstream response bodies never cross the fixed IPC boundary
+- [ ] Processed/confirmed states never post; regressions preserve evidence and require manual reconciliation
+
 ### Frappe backend (Phase 4)
 - [ ] No DocType field ever holds a private key, mnemonic, or signing seed
 - [ ] REST endpoints validate signature payloads structurally; signatures are verified by chain contracts/scripts, not by Frappe

@@ -19,7 +19,7 @@ from typing import Iterable
 import frappe
 
 
-ALLOWED_CHAINS = {"ckb:mainnet", "ckb:testnet", "evm:11155111"}
+ALLOWED_CHAINS = {"ckb:mainnet", "ckb:testnet", "evm:11155111", "sol:devnet", "sol:mainnet"}
 MAX_EXPORT_ROWS = 10_000
 UNAVAILABLE = "unavailable"
 
@@ -151,7 +151,7 @@ def build_rows(filters: ComplianceFilters) -> list[ComplianceRow]:
                     fx_taken_at=fx["taken_at"],
                     transaction_hash=batch.tx_hash,
                     safe_tx_hash=batch.safe_tx_hash or UNAVAILABLE,
-                    confirmed_block=batch.confirmed_block_number or UNAVAILABLE,
+                    confirmed_block=batch.finalized_slot or batch.confirmed_block_number or UNAVAILABLE,
                     confirmed_at_utc=confirmed_at,
                     network_fee_native_value=fee_value,
                     network_fee_native_amount=fee_amount,
@@ -215,6 +215,22 @@ def _source_digests(batch) -> set[str]:
             "gas_fee_wei": str(batch.gas_fee_wei),
             "gas_payer": batch.gas_payer,
         }
+    solana = None
+    if batch.chain.startswith("sol:"):
+        solana = {
+            "review_digest": batch.review_digest,
+            "source_address": batch.source_address,
+            "recipient_address": batch.recipient_address,
+            "fee_payer_address": batch.fee_payer_address,
+            "nonce_account": batch.nonce_account,
+            "nonce_authority": batch.nonce_authority,
+            "durable_nonce": batch.durable_nonce,
+            "finalized_slot": str(batch.finalized_slot),
+            "amount_lamports": str(batch.amount_lamports),
+            "fee_lamports": str(batch.fee_lamports),
+            "fee_payer_policy": batch.fee_payer_policy,
+            "solana_message_base64": batch.solana_message_base64,
+        }
     source = {
         "batch_id": batch.external_id,
         "source_type": batch.source_type,
@@ -228,6 +244,7 @@ def _source_digests(batch) -> set[str]:
         "fiat_total_minor": str(batch.fiat_total_minor),
         "lines": lines,
         "evm": evm,
+        "solana": solana,
     }
 
     def digest(value: dict) -> str:
@@ -235,11 +252,12 @@ def _source_digests(batch) -> set[str]:
         return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
     candidates = {digest(source)}
-    # CKB records created before Sepolia support used the same canonical source
-    # schema without the trailing `evm: null` member. Verify that exact legacy
-    # schema too; this is compatibility, not a bypass of field integrity.
+    # Records created before Solana support did not include `solana: null`.
+    without_solana = {key: value for key, value in source.items() if key != "solana"}
+    candidates.add(digest(without_solana))
+    # CKB records created before Sepolia support also omitted `evm: null`.
     if batch.chain.startswith("ckb:"):
-        candidates.add(digest({key: value for key, value in source.items() if key != "evm"}))
+        candidates.add(digest({key: value for key, value in without_solana.items() if key != "evm"}))
     return candidates
 
 
@@ -263,6 +281,10 @@ def _network_fee(batch) -> tuple[str, str, str]:
     if batch.chain == "evm:11155111" and batch.gas_fee_wei:
         value = str(batch.gas_fee_wei)
         return value, f"{format_units(value, 18)} ETH", batch.gas_payer or "executor"
+    if batch.chain.startswith("sol:") and batch.fee_lamports is not None:
+        value = str(batch.fee_lamports)
+        payer = f"{batch.fee_payer_policy}:{batch.fee_payer_address}"
+        return value, f"{format_units(value, 9)} SOL", payer
     return UNAVAILABLE, UNAVAILABLE, UNAVAILABLE
 
 

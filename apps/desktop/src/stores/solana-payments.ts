@@ -4,6 +4,7 @@ import type {
   SolanaPaymentProposal,
   SolanaPaymentReceipt,
   SolanaPaymentRecord,
+  SolanaFinalizedPaymentEvidence,
   SolanaSignatureEnvelope,
   SolanaTransactionState,
 } from "@chain-pay/shared";
@@ -15,6 +16,11 @@ interface SolanaPaymentsStore {
   beginSubmit(treasuryId: string): void;
   submissionFailed(treasuryId: string, message: string): void;
   acceptReceipt(treasuryId: string, receipt: SolanaPaymentReceipt): void;
+  acceptFinalizedEvidence(treasuryId: string, evidence: SolanaFinalizedPaymentEvidence): void;
+  finalizationFailed(treasuryId: string, message: string): void;
+  beginAccountingPost(treasuryId: string): void;
+  markAccountingPosted(treasuryId: string, journalEntryName: string, accountingRecordName: string): void;
+  markAccountingPostFailed(treasuryId: string, message: string): void;
   updateTransactionState(treasuryId: string, state: SolanaTransactionState): void;
   fail(treasuryId: string, message: string): void;
   clear(treasuryId: string): void;
@@ -41,6 +47,12 @@ export const useSolanaPaymentsStore = create<SolanaPaymentsStore>()(
           receipt: null,
           transactionState: null,
           rollbackDetected: false,
+          accountingState: proposal.version === 2 ? "awaiting_finalization" : "not_applicable",
+          finalizedEvidence: null,
+          accountingRecordName: null,
+          journalEntryName: null,
+          accountingError: null,
+          reconciliationRequired: false,
           error: null,
           updatedAt: now,
         } } }));
@@ -85,13 +97,77 @@ export const useSolanaPaymentsStore = create<SolanaPaymentsStore>()(
       acceptReceipt: (treasuryId, receipt) => {
         const record = get().records[treasuryId];
         if (!record || receipt.reviewDigest !== record.proposal.reviewDigest) throw new Error("Solana payment receipt does not match the active review");
-        set((state) => ({ records: { ...state.records, [treasuryId]: { ...record, state: "submitted", receipt, transactionState: "processed", error: null, updatedAt: new Date().toISOString() } } }));
+        set((state) => ({ records: { ...state.records, [treasuryId]: {
+          ...record,
+          state: "submitted",
+          receipt,
+          transactionState: "processed",
+          accountingState: record.proposal.version === 2 ? "awaiting_finalization" : "not_applicable",
+          accountingError: null,
+          error: null,
+          updatedAt: new Date().toISOString(),
+        } } }));
+      },
+      acceptFinalizedEvidence: (treasuryId, evidence) => {
+        const record = get().records[treasuryId];
+        if (!record?.receipt || record.proposal.version !== 2 || record.transactionState !== "finalized") {
+          throw new Error("Solana payment is not eligible for finalized accounting evidence");
+        }
+        assertEvidenceMatches(record, evidence);
+        set((state) => ({ records: { ...state.records, [treasuryId]: {
+          ...record,
+          finalizedEvidence: evidence,
+          accountingState: "ready",
+          accountingError: null,
+          updatedAt: new Date().toISOString(),
+        } } }));
+      },
+      finalizationFailed: (treasuryId, message) => {
+        const record = get().records[treasuryId];
+        if (!record || record.accountingState !== "awaiting_finalization") return;
+        set((state) => ({ records: { ...state.records, [treasuryId]: { ...record, accountingError: message, updatedAt: new Date().toISOString() } } }));
+      },
+      beginAccountingPost: (treasuryId) => {
+        const record = get().records[treasuryId];
+        if (!record || (record.accountingState !== "ready" && record.accountingState !== "post_failed") || record.transactionState !== "finalized" || record.reconciliationRequired) {
+          throw new Error("Solana payment accounting is not ready to post");
+        }
+        set((state) => ({ records: { ...state.records, [treasuryId]: { ...record, accountingState: "posting", accountingError: null, updatedAt: new Date().toISOString() } } }));
+      },
+      markAccountingPosted: (treasuryId, journalEntryName, accountingRecordName) => {
+        const record = get().records[treasuryId];
+        if (!record || (record.accountingState !== "posting" && record.accountingState !== "reconciliation_required") || !journalEntryName || !accountingRecordName) throw new Error("Solana payment accounting is not posting");
+        const reconciling = record.accountingState === "reconciliation_required" || record.reconciliationRequired;
+        set((state) => ({ records: { ...state.records, [treasuryId]: {
+          ...record,
+          accountingState: reconciling ? "reconciliation_required" : "posted",
+          journalEntryName,
+          accountingRecordName,
+          accountingError: reconciling ? (record.accountingError ?? null) : null,
+          updatedAt: new Date().toISOString(),
+        } } }));
+      },
+      markAccountingPostFailed: (treasuryId, message) => {
+        const record = get().records[treasuryId];
+        if (!record || record.accountingState !== "posting") return;
+        set((state) => ({ records: { ...state.records, [treasuryId]: { ...record, accountingState: "post_failed", accountingError: message, updatedAt: new Date().toISOString() } } }));
       },
       updateTransactionState: (treasuryId, transactionState) => {
         const record = get().records[treasuryId];
         if (!record?.receipt) return;
         const rollbackDetected = isRegression(record.transactionState, transactionState) || record.rollbackDetected;
-        set((state) => ({ records: { ...state.records, [treasuryId]: { ...record, transactionState, rollbackDetected, updatedAt: new Date().toISOString() } } }));
+        const currentAccountingState = record.accountingState ?? (record.proposal.version === 1 ? "not_applicable" : "awaiting_finalization");
+        const reconciliationRequired = rollbackDetected && (record.transactionState === "finalized" || Boolean(record.finalizedEvidence) || currentAccountingState === "posted" || record.reconciliationRequired === true);
+        set((state) => ({ records: { ...state.records, [treasuryId]: {
+          ...record,
+          transactionState,
+          rollbackDetected,
+          reconciliationRequired,
+          accountingState: reconciliationRequired ? "reconciliation_required" : currentAccountingState,
+          accountingError: reconciliationRequired ? "Finalized Solana status regressed; accounting reconciliation is required" : (record.accountingError ?? null),
+          error: null,
+          updatedAt: new Date().toISOString(),
+        } } }));
       },
       fail: (treasuryId, message) => {
         const record = get().records[treasuryId];
@@ -108,17 +184,29 @@ export const useSolanaPaymentsStore = create<SolanaPaymentsStore>()(
     {
       name: "chain-pay:solana-payments",
       storage: createJSONStorage(() => storage),
-      version: 1,
+      version: 2,
       partialize: (state) => ({ records: state.records }),
       merge: (persisted, current) => {
         const records = (persisted as Partial<SolanaPaymentsStore> | undefined)?.records ?? {};
         return {
           ...current,
-          records: Object.fromEntries(Object.entries(records).map(([id, record]) => [id, {
-            ...record,
-            state: record.state === "submitting" ? "ready" : record.state,
-            error: record.state === "submitting" ? "The previous submission was interrupted; revalidation is required" : record.error,
-          }])),
+          records: Object.fromEntries(Object.entries(records).map(([id, record]) => {
+            const interruptedSubmission = record.state === "submitting";
+            const legacy = record.proposal.version === 1;
+            const accountingState = record.accountingState ?? (legacy ? "not_applicable" : record.receipt ? "awaiting_finalization" : "awaiting_finalization");
+            const interruptedPosting = accountingState === "posting";
+            return [id, {
+              ...record,
+              state: interruptedSubmission ? "ready" : record.state,
+              error: interruptedSubmission ? "The previous submission was interrupted; revalidation is required" : record.error,
+              accountingState: interruptedPosting ? "post_failed" : accountingState,
+              finalizedEvidence: record.finalizedEvidence ?? null,
+              accountingRecordName: record.accountingRecordName ?? null,
+              journalEntryName: record.journalEntryName ?? null,
+              accountingError: interruptedPosting ? "The previous accounting post was interrupted; retry is safe" : (record.accountingError ?? null),
+              reconciliationRequired: record.reconciliationRequired ?? false,
+            }];
+          })),
         };
       },
     },
@@ -129,4 +217,18 @@ function isRegression(previous: SolanaTransactionState | null, next: SolanaTrans
   if (previous === null) return false;
   const rank: Record<SolanaTransactionState, number> = { unknown: 0, failed: 0, processed: 1, confirmed: 2, finalized: 3 };
   return (previous === "confirmed" || previous === "finalized") && rank[next] < rank[previous];
+}
+
+function assertEvidenceMatches(record: SolanaPaymentRecord, evidence: SolanaFinalizedPaymentEvidence): void {
+  const proposal = record.proposal;
+  const receipt = record.receipt!;
+  const pairs: Array<[unknown, unknown]> = [
+    [evidence.chain, proposal.chain], [evidence.reviewDigest, proposal.reviewDigest], [evidence.signature, receipt.signature],
+    [evidence.messageBase64, proposal.messageBase64], [evidence.source, proposal.source], [evidence.destination, proposal.destination],
+    [evidence.amountLamports, proposal.amountLamports], [evidence.feePayer, proposal.feePayer], [evidence.feeLamports, proposal.feeLamports],
+    [evidence.nonceAccount, proposal.nonceAccount], [evidence.nonceAuthority, proposal.nonceAuthority], [evidence.durableNonce, proposal.durableNonce],
+  ];
+  if (evidence.version !== 1 || evidence.transactionVersion !== "legacy" || evidence.feePayerPolicy !== "transaction_fee_payer" || pairs.some(([actual, expected]) => actual !== expected)) {
+    throw new Error("Finalized Solana evidence does not match the immutable payment review");
+  }
 }

@@ -23,6 +23,21 @@ export interface EvmConfirmedPaymentMetadata {
   gasPayer: "executor";
 }
 
+export interface SolanaConfirmedPaymentMetadata {
+  reviewDigest: string;
+  sourceAddress: string;
+  recipientAddress: string;
+  feePayerAddress: string;
+  nonceAccount: string;
+  nonceAuthority: string;
+  durableNonce: string;
+  finalizedSlot: string;
+  amountLamports: string;
+  feeLamports: string;
+  feePayerPolicy: "transaction_fee_payer";
+  messageBase64: string;
+}
+
 /**
  * Immutable accounting source record sent to Frappe after chain confirmation.
  * Ledger accounts are deliberately absent: account selection belongs to the
@@ -33,11 +48,13 @@ export interface ConfirmedPaymentRecord {
   sourceType: "send" | "payroll";
   label: string;
   chain: ChainId;
-  txHash: TransactionHash;
+  txHash: TransactionHash | string;
   confirmedAt: string;
   lines: ConfirmedPaymentLine[];
-  /** Required by the backend when chain is evm:11155111; absent for CKB records. */
+  /** Required only when chain is evm:11155111. */
   evm?: EvmConfirmedPaymentMetadata;
+  /** Required by the backend for finalized native-SOL records; absent otherwise. */
+  solana?: SolanaConfirmedPaymentMetadata;
 }
 
 export interface PaymentJournalInput {

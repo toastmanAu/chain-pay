@@ -25,7 +25,19 @@ _IDS = [
     "secure-EVM-A", "secure-EVM-B", "secure-EXPORT-CKB", "secure-EXPORT-EVM",
     "secure-EXPORT-FORMULA", "secure-EXPORT-TAMPER",
     "secure-EXPORT-SOURCE-TAMPER",
+    "secure-SOL-A", "secure-SOL-B",
 ]
+
+
+def _b58(data: bytes) -> str:
+    alphabet = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
+    leading = len(data) - len(data.lstrip(b"\0"))
+    number = int.from_bytes(data, "big")
+    suffix = ""
+    while number:
+        number, digit = divmod(number, 58)
+        suffix = alphabet[digit] + suffix
+    return "1" * leading + suffix
 
 
 def _record(batch_id="secure-A", tx_byte="aa", minor="50"):
@@ -76,6 +88,42 @@ def _evm_record(batch_id="secure-EVM-A", outer_byte="11", safe_byte="22"):
             "effectiveGasPriceWei": "2000000000",
             "gasFeeWei": "200000000000000",
             "gasPayer": "executor",
+        },
+    }
+
+
+def _solana_record(batch_id="secure-SOL-A", signature_byte=7, digest_byte="ab"):
+    source = _b58(bytes([1]) * 32)
+    recipient = _b58(bytes([2]) * 32)
+    fee_payer = _b58(bytes([3]) * 32)
+    nonce_account = _b58(bytes([4]) * 32)
+    nonce_authority = _b58(bytes([5]) * 32)
+    durable_nonce = _b58(bytes([6]) * 32)
+    return {
+        "batchId": batch_id,
+        "sourceType": "send",
+        "label": f"Solana payment {batch_id}",
+        "chain": "sol:devnet",
+        "txHash": _b58(bytes([signature_byte]) * 64),
+        "confirmedAt": "2026-08-05T02:40:00Z",
+        "lines": [{
+            "payeeId": "vendor-sol",
+            "fiat": {"currency": "USD", "minor": "2599"},
+            "crypto": {"asset": "SOL", "value": "9007199254740993", "decimals": 9},
+        }],
+        "solana": {
+            "reviewDigest": digest_byte * 32,
+            "sourceAddress": source,
+            "recipientAddress": recipient,
+            "feePayerAddress": fee_payer,
+            "nonceAccount": nonce_account,
+            "nonceAuthority": nonce_authority,
+            "durableNonce": durable_nonce,
+            "finalizedSlot": "9007199254740995",
+            "amountLamports": "9007199254740993",
+            "feeLamports": "5000",
+            "feePayerPolicy": "transaction_fee_payer",
+            "messageBase64": "bWVzc2FnZQ==",
         },
     }
 
@@ -200,6 +248,49 @@ class TestConfirmedPaymentAccounting(FrappeTestCase):
         bad["evm"]["gasFeeWei"] = "1"
         with self.assertRaises(frappe.ValidationError):
             persist_confirmed_payment(bad)
+
+    def test_persists_and_posts_finalized_sol_with_exact_metadata(self):
+        result = post_confirmed_payment(_solana_record())
+        batch = frappe.get_doc("Crypto Payment Batch", result["record_name"])
+        self.assertEqual(batch.chain, "sol:devnet")
+        self.assertEqual(batch.review_digest, "ab" * 32)
+        self.assertEqual(batch.amount_lamports, "9007199254740993")
+        self.assertEqual(batch.finalized_slot, "9007199254740995")
+        self.assertEqual(batch.fee_lamports, "5000")
+        self.assertEqual(batch.payments[0].crypto_value, "9007199254740993")
+        je = frappe.get_doc("Journal Entry", result["je_name"])
+        self.assertEqual(float(je.total_debit), 25.99)
+        self.assertEqual(float(je.total_credit), 25.99)
+        self.assertIn("Solana review", je.user_remark)
+
+    def test_sol_signature_and_review_digest_are_idempotency_keys(self):
+        first = post_confirmed_payment(_solana_record())
+        second = post_confirmed_payment(_solana_record())
+        self.assertEqual(first["je_name"], second["je_name"])
+        self.assertTrue(second["record_idempotent"])
+        with self.assertRaises(frappe.ValidationError):
+            persist_confirmed_payment(_solana_record("secure-SOL-B", 8, "ab"))
+
+    def test_rejects_sol_tampering_cross_chain_metadata_and_client_accounts(self):
+        cases = []
+        amount = _solana_record()
+        amount["solana"]["amountLamports"] = "1"
+        cases.append(amount)
+        signature = _solana_record()
+        signature["txHash"] = signature["solana"]["sourceAddress"]
+        cases.append(signature)
+        metadata = _record()
+        metadata["solana"] = _solana_record()["solana"]
+        cases.append(metadata)
+        account = _solana_record()
+        account["accounts"] = ["Crypto Treasury Asset"]
+        cases.append(account)
+        noncanonical = _solana_record()
+        noncanonical["solana"]["feeLamports"] = "05000"
+        cases.append(noncanonical)
+        for bad in cases:
+            with self.assertRaises(frappe.ValidationError):
+                persist_confirmed_payment(bad)
 
     def test_replay_with_changed_amount_is_rejected(self):
         persist_confirmed_payment(_record("secure-C", "cc", "50"))

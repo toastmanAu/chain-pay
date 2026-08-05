@@ -64,9 +64,16 @@ describe("postJournalToFrappe", () => {
 
   it("throws on a non-2xx response", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
-      ok: false, status: 417, text: async () => "ValidationError: unbalanced",
+      ok: false, status: 417, text: async () => "ValidationError: secret-upstream-body",
     }));
-    await expect(postJournalToFrappe(record)).rejects.toThrow(/417|unbalanced/);
+    try {
+      await postJournalToFrappe(record);
+      expect.fail("request should have failed");
+    } catch (caught) {
+      const error = caught as Error;
+      expect(error.message).toContain("417");
+      expect(error.message).not.toContain("secret-upstream-body");
+    }
   });
 
   it("throws fast when credentials are missing", async () => {
@@ -96,6 +103,15 @@ describe("postJournalToFrappe", () => {
       json: async () => ({ message: { idempotent: false } }),
     }));
     await expect(postJournalToFrappe(record)).rejects.toThrow(/invalid response/);
+  });
+
+  it("rejects unknown nested fields before they can cross IPC to Frappe", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    const malicious = structuredClone(record) as typeof record & { token?: string };
+    malicious.token = "renderer-secret";
+    await expect(postJournalToFrappe(malicious)).rejects.toThrow(/strict validation/);
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 });
 

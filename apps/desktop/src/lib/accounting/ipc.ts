@@ -10,7 +10,7 @@ export interface PostJournalResult {
 export interface ComplianceFilters {
   fromDate?: string;
   toDate?: string;
-  chain?: "ckb:mainnet" | "ckb:testnet" | "evm:11155111";
+  chain?: "ckb:mainnet" | "ckb:testnet" | "evm:11155111" | "sol:devnet" | "sol:mainnet";
 }
 
 export interface ComplianceSaveResult {

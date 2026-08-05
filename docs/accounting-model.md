@@ -72,6 +72,21 @@ The shipped CKB send path uses the entered fiat obligation as carrying cost
 credit. The richer fee, FX, and cost-basis rows below remain the next accounting
 extension.
 
+## Current native-SOL accounting scope
+
+A Solana payment commits one payee reference and positive USD obligation in a
+version-2 review digest before any signature is accepted. ERPNext receives a
+source record only after main-process validation of finalized legacy-transaction
+bytes, the submitted signature, durable-nonce instruction order, actual fee,
+slot, and block time. SOL is stored as exact lamport text with 9 decimals.
+
+The current zero-FX policy books the committed USD obligation as a balanced
+Salary/Wage Expense debit and Crypto Treasury Asset credit. The actual network
+fee and its transaction fee payer remain immutable audit metadata; they do not
+change the journal value until the fee/cost-basis extension is implemented.
+Legacy version-1 Solana reviews have no committed accounting intent and are
+never posted.
+
 ## What we explicitly do not model yet
 
 - Multi-currency consolidation reports (Phase 5)

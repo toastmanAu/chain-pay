@@ -10,6 +10,7 @@ const mocks = vi.hoisted(() => ({
   submit: vi.fn(),
   verify: vi.fn(),
   validate: vi.fn(),
+  finalizedEvidence: vi.fn(),
 }));
 
 vi.mock("electron", () => ({ ipcMain: { handle: vi.fn((channel: string, handler: (...args: unknown[]) => unknown) => mocks.handlers.set(channel, handler)) } }));
@@ -21,6 +22,7 @@ vi.mock("./solana-provider", () => ({
   inspectSolanaPayment: mocks.inspect,
   prepareSolanaPayment: mocks.prepare,
   submitSolanaPayment: mocks.submit,
+  getFinalizedSolanaPaymentEvidence: mocks.finalizedEvidence,
 }));
 vi.mock("./solana-payment-transaction", () => ({ verifySolanaSignatureEnvelope: mocks.verify, validateSolanaPaymentProposal: mocks.validate }));
 
@@ -29,7 +31,7 @@ import { registerSolanaIpc } from "./solana-host";
 describe("Solana IPC boundary", () => {
   beforeEach(() => {
     mocks.handlers.clear();
-    for (const mock of [mocks.scan, mocks.status, mocks.inspect, mocks.prepare, mocks.submit, mocks.verify, mocks.validate]) mock.mockReset();
+    for (const mock of [mocks.scan, mocks.status, mocks.inspect, mocks.prepare, mocks.submit, mocks.verify, mocks.validate, mocks.finalizedEvidence]) mock.mockReset();
     registerSolanaIpc();
   });
 
@@ -59,6 +61,7 @@ describe("Solana IPC boundary", () => {
     [SOLANA_CHANNELS.paymentInspect, { chain: "sol:devnet", source: "source", nonceAccount: "nonce", nonceAuthority: "authority", feePayer: "fee" }],
     [SOLANA_CHANNELS.paymentPrepare, { chain: "sol:devnet", treasuryId: "sol-1", source: "source", destination: "destination", amountLamports: "1", nonceAccount: "nonce", nonceAuthority: "authority", feePayer: "fee" }],
     [SOLANA_CHANNELS.paymentValidateProposal, { proposal: {} }],
+    [SOLANA_CHANNELS.paymentFinalizedEvidence, { chain: "sol:devnet", treasuryId: "sol-1", proposal: {}, receipt: {}, signatures: [] }],
     [SOLANA_CHANNELS.paymentSubmit, { chain: "sol:devnet", treasuryId: "sol-1", proposal: {}, signatures: [] }],
     [SOLANA_CHANNELS.paymentVerifySignature, { proposal: {}, envelope: {} }],
   ])("rejects secret and endpoint fields on %s", async (channel, request) => {
@@ -72,6 +75,7 @@ describe("Solana IPC boundary", () => {
     expect(mocks.submit).not.toHaveBeenCalled();
     expect(mocks.verify).not.toHaveBeenCalled();
     expect(mocks.validate).not.toHaveBeenCalled();
+    expect(mocks.finalizedEvidence).not.toHaveBeenCalled();
   });
 
   it("passes only fixed public payment contracts to provider operations", async () => {
@@ -86,6 +90,12 @@ describe("Solana IPC boundary", () => {
     await mocks.handlers.get(SOLANA_CHANNELS.paymentPrepare)!({}, prepare);
     expect(mocks.prepare).toHaveBeenCalledWith({ request: prepare, config: { rpcUrl: "https://private.example", bearerToken: "top-secret" } });
 
+    const accountingPrepare = { ...prepare, accounting: { payeeId: "vendor-17", fiat: { currency: "USD", minor: "2500" } } };
+    await mocks.handlers.get(SOLANA_CHANNELS.paymentPrepare)!({}, accountingPrepare);
+    expect(mocks.prepare).toHaveBeenLastCalledWith({ request: accountingPrepare, config: { rpcUrl: "https://private.example", bearerToken: "top-secret" } });
+    await expect(mocks.handlers.get(SOLANA_CHANNELS.paymentPrepare)!({}, { ...accountingPrepare, accounting: { ...accountingPrepare.accounting, privateKey: "no" } }))
+      .rejects.toMatchObject({ code: "invalid_request" });
+
     const submit = { chain: "sol:devnet", treasuryId: "sol-1", proposal: {}, signatures: [] } as const;
     await mocks.handlers.get(SOLANA_CHANNELS.paymentSubmit)!({}, submit);
     expect(mocks.submit).toHaveBeenCalledWith({ request: submit, config: { rpcUrl: "https://private.example", bearerToken: "top-secret" } });
@@ -94,5 +104,10 @@ describe("Solana IPC boundary", () => {
     expect(mocks.handlers.get(SOLANA_CHANNELS.paymentValidateProposal)!({}, { proposal: { version: 1 } }))
       .toEqual({ proposal: { version: 1 } });
     expect(mocks.validate).toHaveBeenCalledWith({ version: 1 });
+
+    mocks.finalizedEvidence.mockResolvedValue({ evidence: {} });
+    const finalized = { chain: "sol:devnet", treasuryId: "sol-1", proposal: {}, receipt: {}, signatures: [] } as const;
+    await mocks.handlers.get(SOLANA_CHANNELS.paymentFinalizedEvidence)!({}, finalized);
+    expect(mocks.finalizedEvidence).toHaveBeenCalledWith({ request: finalized, config: { rpcUrl: "https://private.example", bearerToken: "top-secret" } });
   });
 });

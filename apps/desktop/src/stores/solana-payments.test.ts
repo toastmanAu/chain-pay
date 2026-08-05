@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { SolanaPaymentProposal, SolanaSignatureEnvelope } from "@chain-pay/shared";
+import type { SolanaFinalizedPaymentEvidence, SolanaPaymentProposal, SolanaSignatureEnvelope } from "@chain-pay/shared";
 import { MemoryStorage } from "./test-utils/memory-storage";
 
 const signers = ["signer-fee", "signer-source", "signer-nonce"];
@@ -27,6 +27,34 @@ function proposal(): SolanaPaymentProposal {
     requiredSigners: signers,
     reviewDigest: "a".repeat(64),
     createdAt: "2026-08-05T00:00:00.000Z",
+  };
+}
+
+function accountingProposal(): SolanaPaymentProposal {
+  return { ...proposal(), version: 2, accounting: { payeeId: "vendor-17", fiat: { currency: "USD", minor: "2500" } }, reviewDigest: "b".repeat(64) };
+}
+
+function finalizedEvidence(): SolanaFinalizedPaymentEvidence {
+  const current = accountingProposal();
+  return {
+    version: 1,
+    chain: current.chain,
+    reviewDigest: current.reviewDigest,
+    signature: "tx-signature",
+    slot: "9007199254740995",
+    finalizedAt: "2026-08-05T01:00:00.000Z",
+    transactionVersion: "legacy",
+    messageBase64: current.messageBase64,
+    signedTransactionBase64: "c2lnbmVk",
+    source: current.source,
+    destination: current.destination,
+    amountLamports: current.amountLamports,
+    feePayer: current.feePayer,
+    feeLamports: current.feeLamports,
+    feePayerPolicy: "transaction_fee_payer",
+    nonceAccount: current.nonceAccount,
+    nonceAuthority: current.nonceAuthority,
+    durableNonce: current.durableNonce,
   };
 }
 
@@ -103,6 +131,57 @@ describe("Solana payment persistence", () => {
       error: "Provider unavailable",
       signatures: [{ signer: signers[0] }, { signer: signers[1] }, { signer: signers[2] }],
       receipt: null,
+    });
+  });
+
+  it("posts only exact finalized version-2 evidence and turns later regression into reconciliation", async () => {
+    const { useSolanaPaymentsStore } = await import("./solana-payments");
+    useSolanaPaymentsStore.getState().acceptProposal("sol-1", accountingProposal());
+    useSolanaPaymentsStore.getState().acceptReceipt("sol-1", { signature: "tx-signature", reviewDigest: "b".repeat(64), submittedAt: "2026-08-05T00:10:00.000Z", alreadySubmitted: false });
+    expect(() => useSolanaPaymentsStore.getState().acceptFinalizedEvidence("sol-1", finalizedEvidence())).toThrow(/not eligible/i);
+    useSolanaPaymentsStore.getState().updateTransactionState("sol-1", "finalized");
+    expect(() => useSolanaPaymentsStore.getState().acceptFinalizedEvidence("sol-1", { ...finalizedEvidence(), feeLamports: "5001" })).toThrow(/does not match/i);
+    useSolanaPaymentsStore.getState().acceptFinalizedEvidence("sol-1", finalizedEvidence());
+    useSolanaPaymentsStore.getState().beginAccountingPost("sol-1");
+    useSolanaPaymentsStore.getState().markAccountingPosted("sol-1", "ACC-JV-1", "BATCH-1");
+    useSolanaPaymentsStore.getState().updateTransactionState("sol-1", "unknown");
+    expect(useSolanaPaymentsStore.getState().records["sol-1"]).toMatchObject({
+      accountingState: "reconciliation_required",
+      reconciliationRequired: true,
+      journalEntryName: "ACC-JV-1",
+      accountingRecordName: "BATCH-1",
+      receipt: { signature: "tx-signature" },
+    });
+  });
+
+  it("recovers interrupted accounting posting for an idempotent retry", async () => {
+    const first = await import("./solana-payments");
+    first.useSolanaPaymentsStore.getState().acceptProposal("sol-1", accountingProposal());
+    first.useSolanaPaymentsStore.getState().acceptReceipt("sol-1", { signature: "tx-signature", reviewDigest: "b".repeat(64), submittedAt: "2026-08-05T00:10:00.000Z", alreadySubmitted: false });
+    first.useSolanaPaymentsStore.getState().updateTransactionState("sol-1", "finalized");
+    first.useSolanaPaymentsStore.getState().acceptFinalizedEvidence("sol-1", finalizedEvidence());
+    first.useSolanaPaymentsStore.getState().beginAccountingPost("sol-1");
+    vi.resetModules();
+    const restarted = await import("./solana-payments");
+    expect(restarted.useSolanaPaymentsStore.getState().records["sol-1"]).toMatchObject({ accountingState: "post_failed", accountingError: expect.stringMatching(/interrupted/i) });
+    restarted.useSolanaPaymentsStore.getState().beginAccountingPost("sol-1");
+    expect(restarted.useSolanaPaymentsStore.getState().records["sol-1"]?.accountingState).toBe("posting");
+  });
+
+  it("retains backend identities when a posting response races a finalized regression", async () => {
+    const { useSolanaPaymentsStore } = await import("./solana-payments");
+    useSolanaPaymentsStore.getState().acceptProposal("sol-1", accountingProposal());
+    useSolanaPaymentsStore.getState().acceptReceipt("sol-1", { signature: "tx-signature", reviewDigest: "b".repeat(64), submittedAt: "2026-08-05T00:10:00.000Z", alreadySubmitted: false });
+    useSolanaPaymentsStore.getState().updateTransactionState("sol-1", "finalized");
+    useSolanaPaymentsStore.getState().acceptFinalizedEvidence("sol-1", finalizedEvidence());
+    useSolanaPaymentsStore.getState().beginAccountingPost("sol-1");
+    useSolanaPaymentsStore.getState().updateTransactionState("sol-1", "unknown");
+    useSolanaPaymentsStore.getState().markAccountingPosted("sol-1", "JE-RACE", "BATCH-RACE");
+    expect(useSolanaPaymentsStore.getState().records["sol-1"]).toMatchObject({
+      accountingState: "reconciliation_required",
+      reconciliationRequired: true,
+      journalEntryName: "JE-RACE",
+      accountingRecordName: "BATCH-RACE",
     });
   });
 });

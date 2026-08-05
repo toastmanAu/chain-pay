@@ -11,6 +11,8 @@ import type {
   SolanaPaymentPrepareResponse,
   SolanaPaymentValidateProposalRequest,
   SolanaPaymentValidateProposalResponse,
+  SolanaPaymentFinalizedEvidenceRequest,
+  SolanaPaymentFinalizedEvidenceResponse,
   SolanaPaymentSubmitRequest,
   SolanaPaymentSubmitResponse,
   SolanaPaymentVerifySignatureRequest,
@@ -24,6 +26,7 @@ export interface SolanaBridge {
   paymentInspect(request: SolanaPaymentInspectRequest): Promise<SolanaPaymentInspectResponse>;
   paymentPrepare(request: SolanaPaymentPrepareRequest): Promise<SolanaPaymentPrepareResponse>;
   paymentValidateProposal(request: SolanaPaymentValidateProposalRequest): Promise<SolanaPaymentValidateProposalResponse>;
+  paymentFinalizedEvidence(request: SolanaPaymentFinalizedEvidenceRequest): Promise<SolanaPaymentFinalizedEvidenceResponse>;
   paymentSubmit(request: SolanaPaymentSubmitRequest): Promise<SolanaPaymentSubmitResponse>;
   paymentVerifySignature(request: SolanaPaymentVerifySignatureRequest): Promise<SolanaPaymentVerifySignatureResponse>;
 }

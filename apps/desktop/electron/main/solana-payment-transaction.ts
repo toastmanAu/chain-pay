@@ -12,7 +12,11 @@ import { z } from "zod";
 import type {
   SolanaChain,
   SolanaPaymentInspection,
+  SolanaPaymentAccountingIntent,
   SolanaPaymentProposal,
+  SolanaPaymentProposalV1,
+  SolanaPaymentProposalV2,
+  SolanaPaymentReceipt,
   SolanaSignatureEnvelope,
 } from "@chain-pay/shared";
 
@@ -25,8 +29,7 @@ const BASE64 = z.string().min(1).max(4_000).refine(canonicalBase64);
 const chainSchema = z.enum(["sol:mainnet", "sol:devnet"]);
 const decimalSchema = z.string().regex(DECIMAL).refine((value) => BigInt(value) <= U64_MAX);
 
-export const solanaPaymentProposalSchema = z.object({
-  version: z.literal(1),
+const proposalFields = {
   chain: chainSchema,
   treasuryId: z.string().min(1).max(200),
   source: BASE58_ADDRESS,
@@ -47,16 +50,30 @@ export const solanaPaymentProposalSchema = z.object({
   requiredSigners: z.array(BASE58_ADDRESS).min(1).max(3).refine((values) => new Set(values).size === values.length),
   reviewDigest: z.string().regex(/^[0-9a-f]{64}$/),
   createdAt: z.string().datetime(),
+};
+const accountingIntentSchema = z.object({
+  payeeId: z.string().trim().min(1).max(140),
+  fiat: z.object({
+    currency: z.literal("USD"),
+    minor: decimalSchema.refine((value) => BigInt(value) > 0n),
+  }).strict(),
 }).strict();
+export const solanaPaymentProposalSchema = z.discriminatedUnion("version", [
+  z.object({ version: z.literal(1), ...proposalFields }).strict(),
+  z.object({ version: z.literal(2), ...proposalFields, accounting: accountingIntentSchema }).strict(),
+]);
 
-export const solanaSignatureEnvelopeSchema = z.object({
-  format: z.literal("chainpay-solana-signature-v1"),
+const envelopeFields = {
   chain: chainSchema,
   treasuryId: z.string().min(1).max(200),
   reviewDigest: z.string().regex(/^[0-9a-f]{64}$/),
   signer: BASE58_ADDRESS,
   signature: BASE58_SIGNATURE,
-}).strict();
+};
+export const solanaSignatureEnvelopeSchema = z.discriminatedUnion("format", [
+  z.object({ format: z.literal("chainpay-solana-signature-v1"), ...envelopeFields }).strict(),
+  z.object({ format: z.literal("chainpay-solana-signature-v2"), ...envelopeFields, reviewSignature: BASE58_SIGNATURE }).strict(),
+]);
 
 export function buildSolanaPaymentTransaction(args: {
   inspection: SolanaPaymentInspection;
@@ -64,6 +81,7 @@ export function buildSolanaPaymentTransaction(args: {
   destination: string;
   amountLamports: string;
   feeLamports: string;
+  accounting?: SolanaPaymentAccountingIntent;
   createdAt?: string;
 }): SolanaPaymentProposal {
   const source = new PublicKey(args.inspection.source);
@@ -82,8 +100,7 @@ export function buildSolanaPaymentTransaction(args: {
   const requiredSigners = deriveRequiredSigners(transaction);
   const unsigned = transaction.serialize({ requireAllSignatures: false, verifySignatures: false });
   if (unsigned.length > MAX_SOLANA_TRANSACTION_BYTES) throw new Error("Solana transaction exceeds the wire-size limit");
-  const withoutDigest = {
-    version: 1 as const,
+  const common = {
     ...args.inspection,
     treasuryId: args.treasuryId,
     destination: destination.toBase58(),
@@ -94,10 +111,17 @@ export function buildSolanaPaymentTransaction(args: {
     requiredSigners,
     createdAt: args.createdAt ?? new Date().toISOString(),
   };
-  return { ...withoutDigest, reviewDigest: computeSolanaReviewDigest(withoutDigest) };
+  const withoutDigest: SolanaPaymentProposalWithoutDigest = args.accounting
+    ? { version: 2, ...common, accounting: accountingIntentSchema.parse(args.accounting) }
+    : { version: 1, ...common };
+  return { ...withoutDigest, reviewDigest: computeSolanaReviewDigest(withoutDigest) } as SolanaPaymentProposal;
 }
 
-export function computeSolanaReviewDigest(proposal: Omit<SolanaPaymentProposal, "reviewDigest">): string {
+type SolanaPaymentProposalWithoutDigest =
+  | Omit<SolanaPaymentProposalV1, "reviewDigest">
+  | Omit<SolanaPaymentProposalV2, "reviewDigest">;
+
+export function computeSolanaReviewDigest(proposal: SolanaPaymentProposalWithoutDigest): string {
   const committed = [
     proposal.version,
     proposal.chain,
@@ -119,9 +143,10 @@ export function computeSolanaReviewDigest(proposal: Omit<SolanaPaymentProposal, 
     proposal.unsignedTransactionBase64,
     proposal.requiredSigners,
     proposal.createdAt,
+    ...(proposal.version === 2 ? [proposal.accounting] : []),
   ];
   return createHash("sha256")
-    .update("chainpay:solana-payment-review:v1\n")
+    .update(`chainpay:solana-payment-review:v${proposal.version}\n`)
     .update(JSON.stringify(committed))
     .digest("hex");
 }
@@ -143,6 +168,9 @@ export function verifySolanaSignatureEnvelope(
   if (envelope.chain !== proposal.chain || envelope.treasuryId !== proposal.treasuryId || envelope.reviewDigest !== proposal.reviewDigest) {
     throw new Error("Solana signature envelope does not match this reviewed payment");
   }
+  if ((proposal.version === 1) !== (envelope.format === "chainpay-solana-signature-v1")) {
+    throw new Error("Solana signature envelope version does not match the reviewed payment");
+  }
   if (!proposal.requiredSigners.includes(envelope.signer)) throw new Error("Solana signature is from an unknown signer");
   const valid = ed25519.verify(
     bs58.decode(envelope.signature),
@@ -151,7 +179,21 @@ export function verifySolanaSignatureEnvelope(
     { zip215: false },
   );
   if (!valid) throw new Error("Solana signature is invalid for the reviewed message");
+  if (proposal.version === 2 && envelope.format === "chainpay-solana-signature-v2") {
+    const reviewValid = ed25519.verify(
+      bs58.decode(envelope.reviewSignature),
+      solanaReviewApprovalBytes(proposal.reviewDigest),
+      bs58.decode(envelope.signer),
+      { zip215: false },
+    );
+    if (!reviewValid) throw new Error("Solana signature is invalid for the accounting-bound review digest");
+  }
   return envelope;
+}
+
+export function solanaReviewApprovalBytes(reviewDigest: string): Uint8Array {
+  if (!/^[0-9a-f]{64}$/.test(reviewDigest)) throw new Error("Solana review digest is invalid");
+  return Buffer.from(`chainpay:solana-review-approval:v2\n${reviewDigest}`, "utf8");
 }
 
 export function assembleSignedSolanaTransaction(
@@ -175,6 +217,36 @@ export function assembleSignedSolanaTransaction(
   const first = transaction.signature;
   if (!first) throw new Error("Solana fee-payer signature is missing");
   return { proposal, wireBytes, firstSignature: bs58.encode(first) };
+}
+
+export function validateFinalizedSolanaTransaction(
+  proposalValue: unknown,
+  receiptValue: unknown,
+  signedTransactionBase64: string,
+): { proposal: SolanaPaymentProposal; receipt: SolanaPaymentReceipt; signature: string } {
+  const proposal = validateSolanaPaymentProposal(proposalValue);
+  const receipt = z.object({
+    signature: BASE58_SIGNATURE,
+    reviewDigest: z.string().regex(/^[0-9a-f]{64}$/),
+    submittedAt: z.string().datetime(),
+    alreadySubmitted: z.boolean(),
+  }).strict().parse(receiptValue);
+  if (receipt.reviewDigest !== proposal.reviewDigest) throw new Error("Solana finalized receipt does not match the reviewed payment");
+  if (!canonicalBase64(signedTransactionBase64)) throw new Error("Finalized Solana transaction is not canonical base64");
+  const wireBytes = Buffer.from(signedTransactionBase64, "base64");
+  if (wireBytes.length > MAX_SOLANA_TRANSACTION_BYTES) throw new Error("Finalized Solana transaction exceeds the wire-size limit");
+  const transaction = Transaction.from(wireBytes);
+  if (Buffer.compare(transaction.serializeMessage(), Buffer.from(proposal.messageBase64, "base64")) !== 0) {
+    throw new Error("Finalized Solana message bytes do not match the review");
+  }
+  if (!transaction.verifySignatures(true)) throw new Error("Finalized Solana transaction signatures are invalid");
+  const canonicalWire = transaction.serialize({ requireAllSignatures: true, verifySignatures: true });
+  if (Buffer.compare(canonicalWire, wireBytes) !== 0) throw new Error("Finalized Solana transaction bytes are not canonical");
+  const first = transaction.signature;
+  if (!first) throw new Error("Finalized Solana transaction has no fee-payer signature");
+  const signature = bs58.encode(first);
+  if (signature !== receipt.signature) throw new Error("Finalized Solana transaction signature does not match the receipt");
+  return { proposal, receipt, signature };
 }
 
 function validateTransactionShape(proposal: SolanaPaymentProposal): void {

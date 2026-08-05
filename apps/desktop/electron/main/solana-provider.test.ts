@@ -11,8 +11,9 @@ import {
   solanaProviderConfigFromEnvironment,
   prepareSolanaPayment,
   submitSolanaPayment,
+  getFinalizedSolanaPaymentEvidence,
 } from "./solana-provider";
-import { buildSolanaPaymentTransaction } from "./solana-payment-transaction";
+import { assembleSignedSolanaTransaction, buildSolanaPaymentTransaction, solanaReviewApprovalBytes } from "./solana-payment-transaction";
 
 const address = bs58.encode(new Uint8Array(32));
 const otherAddress = bs58.encode(new Uint8Array(32).fill(2));
@@ -316,6 +317,61 @@ describe("Solana provider", () => {
     expect(mismatchSends.count).toBe(1);
   });
 
+  it("accepts only exact finalized legacy transaction evidence for a version-2 review", async () => {
+    const proposal = accountingPaymentProposal();
+    const signatures = paymentEnvelopes(proposal);
+    const assembled = assembleSignedSolanaTransaction(proposal, signatures);
+    const receipt = { signature: assembled.firstSignature, reviewDigest: proposal.reviewDigest, submittedAt: "2026-08-05T00:02:00.000Z", alreadySubmitted: false };
+    const fetchImpl = rpcFetch((method, params, id) => {
+      expect(method).toBe("getTransaction");
+      expect(params).toEqual([receipt.signature, { commitment: "finalized", encoding: "base64", maxSupportedTransactionVersion: 0 }]);
+      return result(id, {
+        slot: 102,
+        blockTime: 1_786_000_000,
+        version: "legacy",
+        meta: { err: null, fee: 5000 },
+        transaction: [Buffer.from(assembled.wireBytes).toString("base64"), "base64"],
+      });
+    });
+    const response = await getFinalizedSolanaPaymentEvidence({ request: { chain: proposal.chain, treasuryId: proposal.treasuryId, proposal, receipt, signatures }, config, fetchImpl });
+    expect(response.evidence).toMatchObject({
+      chain: "sol:devnet",
+      signature: receipt.signature,
+      reviewDigest: proposal.reviewDigest,
+      slot: "102",
+      transactionVersion: "legacy",
+      amountLamports: "42",
+      feeLamports: "5000",
+      feePayerPolicy: "transaction_fee_payer",
+    });
+    expect(response.evidence.finalizedAt).toBe("2026-08-06T07:06:40.000Z");
+  });
+
+  it("rejects legacy, unavailable, fee-mismatched, and wrong-message finalized evidence", async () => {
+    const legacy = paymentProposal();
+    const legacyReceipt = { signature, reviewDigest: legacy.reviewDigest, submittedAt: "2026-08-05T00:02:00.000Z", alreadySubmitted: false };
+    await expect(getFinalizedSolanaPaymentEvidence({ request: { chain: legacy.chain, treasuryId: legacy.treasuryId, proposal: legacy, receipt: legacyReceipt, signatures: [] }, config, fetchImpl: vi.fn() as unknown as typeof fetch }))
+      .rejects.toMatchObject({ code: "invalid_request" });
+
+    const proposal = accountingPaymentProposal();
+    const signatures = paymentEnvelopes(proposal);
+    const assembled = assembleSignedSolanaTransaction(proposal, signatures);
+    const receipt = { signature: assembled.firstSignature, reviewDigest: proposal.reviewDigest, submittedAt: "2026-08-05T00:02:00.000Z", alreadySubmitted: false };
+    const request = { chain: proposal.chain, treasuryId: proposal.treasuryId, proposal, receipt, signatures };
+    await expect(getFinalizedSolanaPaymentEvidence({ request, config, fetchImpl: rpcFetch((_method, _params, id) => result(id, null)) }))
+      .rejects.toMatchObject({ code: "not_finalized" });
+
+    const responseFor = (fee: number, wire: Uint8Array) => rpcFetch((_method, _params, id) => result(id, {
+      slot: 102, blockTime: 1_786_000_000, version: "legacy", meta: { err: null, fee }, transaction: [Buffer.from(wire).toString("base64"), "base64"],
+    }));
+    await expect(getFinalizedSolanaPaymentEvidence({ request, config, fetchImpl: responseFor(5001, assembled.wireBytes) }))
+      .rejects.toMatchObject({ code: "evidence_mismatch" });
+    const other = accountingPaymentProposal("other-payee", "43");
+    const otherWire = assembleSignedSolanaTransaction(other, paymentEnvelopes(other)).wireBytes;
+    await expect(getFinalizedSolanaPaymentEvidence({ request, config, fetchImpl: responseFor(5000, otherWire) }))
+      .rejects.toMatchObject({ code: "evidence_mismatch" });
+  });
+
   it("paginates newest-first with before cursors and deduplicates overlapping pages", async () => {
     const signatures = Array.from({ length: 26 }, (_, index) => bs58.encode(new Uint8Array(64).fill(index + 10)));
     const historyParams: unknown[][] = [];
@@ -456,18 +512,44 @@ function paymentProposal(): SolanaPaymentProposal {
   });
 }
 
+function accountingPaymentProposal(payeeId = "vendor-17", amountLamports = "42"): SolanaPaymentProposal {
+  return buildSolanaPaymentTransaction({
+    inspection: {
+      chain: "sol:devnet",
+      source: paymentSource.address,
+      nonceAccount: paymentNonceAccount.address,
+      nonceAuthority: paymentAuthority.address,
+      feePayer: paymentFeePayer.address,
+      sourceBalanceLamports: "100000",
+      nonceBalanceLamports: "1500000",
+      nonceRentMinimumLamports: "1447680",
+      feePayerBalanceLamports: "100000",
+      durableNonce: paymentNonce.address,
+      slot: "100",
+    },
+    treasuryId: "sol-1",
+    destination: paymentDestination.address,
+    amountLamports,
+    feeLamports: "5000",
+    accounting: { payeeId, fiat: { currency: "USD", minor: "2500" } },
+    createdAt: "2026-08-05T00:00:00.000Z",
+  });
+}
+
 function paymentEnvelopes(proposal: SolanaPaymentProposal): SolanaSignatureEnvelope[] {
   const keys = new Map([paymentSource, paymentAuthority, paymentFeePayer].map((item) => [item.address, item]));
   return proposal.requiredSigners.map((signer) => {
     const key = keys.get(signer)!;
-    return {
-      format: "chainpay-solana-signature-v1",
+    const base = {
       chain: proposal.chain,
       treasuryId: proposal.treasuryId,
       reviewDigest: proposal.reviewDigest,
       signer,
       signature: bs58.encode(ed25519.sign(Buffer.from(proposal.messageBase64, "base64"), key.secret)),
     };
+    return proposal.version === 2
+      ? { ...base, format: "chainpay-solana-signature-v2", reviewSignature: bs58.encode(ed25519.sign(solanaReviewApprovalBytes(proposal.reviewDigest), key.secret)) }
+      : { ...base, format: "chainpay-solana-signature-v1" };
   });
 }
 
