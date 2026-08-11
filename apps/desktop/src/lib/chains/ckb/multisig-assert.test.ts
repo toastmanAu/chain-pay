@@ -5,8 +5,9 @@ import {
   assertMultisigBytesMatchTreasury,
   dumpInputsForInspection,
 } from "./multisig-assert";
-import { encodeMultisigScript, type CkbMultisigConfig } from "./multisig";
+import { encodeMultisigScript, lockArgsFromConfig, type CkbMultisigConfig } from "./multisig";
 import { deriveTreasuryAddress } from "./address";
+import { bytesHex } from "./bytes";
 
 const hash = (byte: string): Hex20 => ("0x" + byte.repeat(20)) as Hex20;
 
@@ -78,6 +79,48 @@ describe("assertMultisigBytesMatchTreasury", () => {
     ).toThrow(/witness\[0\]\.lock too short/);
   });
 
+  // The threshold is `4 + 20 * n` (S|R|M|N header + one 20-byte hash per
+  // signer). The cases below sit either side of it so the test can tell that
+  // formula apart from `20 * n` (60) and `4 + 20 * m` (44) — a lock of 8 bytes
+  // is below all three and proves nothing about which one is implemented.
+  it("rejects a lock one byte below the 4 + 20n threshold and reports the exact requirement", () => {
+    const justUnder = new Uint8Array(4 + 20 * CFG.n - 1); // 63
+    expect(() =>
+      assertMultisigBytesMatchTreasury(txWithWitnessLock(justUnder), CFG, multisigFor(CFG)),
+    ).toThrow("witness[0].lock too short: 63 bytes, need at least 64");
+  });
+
+  it("accepts the 4 + 20n length and falls through to the script-content check", () => {
+    const exact = new Uint8Array(4 + 20 * CFG.n); // 64 — long enough, wrong bytes
+    expect(() =>
+      assertMultisigBytesMatchTreasury(txWithWitnessLock(exact), CFG, multisigFor(CFG)),
+    ).toThrow(/multisig_script doesn't match/);
+  });
+
+  it("sizes the prefix from n, not m, for a config where n is not 3", () => {
+    // 2-of-5: 4 + 20*5 = 104. A lock sized for `4 + 20*m` (44) must still fail.
+    const wide: CkbMultisigConfig = {
+      s: 0,
+      r: 0,
+      m: 2,
+      n: 5,
+      pubkeyHashes: [hash("11"), hash("22"), hash("33"), hash("44"), hash("55")],
+    };
+    expect(() =>
+      assertMultisigBytesMatchTreasury(
+        txWithWitnessLock(new Uint8Array(4 + 20 * wide.m)),
+        wide,
+        multisigFor(wide),
+      ),
+    ).toThrow("witness[0].lock too short: 44 bytes, need at least 104");
+
+    // And the same 2-of-5 passes end-to-end with a correctly sized lock.
+    const lock = placeholderLock(encodeMultisigScript(wide).multisigScript, wide.m);
+    expect(() =>
+      assertMultisigBytesMatchTreasury(txWithWitnessLock(lock), wide, multisigFor(wide)),
+    ).not.toThrow();
+  });
+
   it("throws when witness[0] carries a different multisig script", () => {
     // Same N (so same prefix length — the length guard must not fire first),
     // different pubkey hashes.
@@ -116,7 +159,10 @@ describe("dumpInputsForInspection", () => {
     const debug = (globalThis as any).__chainpay_debug;
     expect(debug).toBeDefined();
     expect(debug.treasuryAddress).toBe(multisig.address);
-    expect(debug.expectedLockArgs).toMatch(/^0x[0-9a-f]{40}$/);
+    // Assert the VALUE, not the shape. A shape-only regex passes even if the
+    // payload slice drifts (e.g. slice(0, 20) instead of slice(33, 53)), which
+    // would publish the code_hash prefix as if it were the lock args.
+    expect(debug.expectedLockArgs).toBe("0x" + bytesHex(lockArgsFromConfig(CFG)));
     expect(debug.inputs).toEqual([
       { slot: 0, txHash: "0x" + "ab".repeat(32), index: 3 },
       { slot: 1, txHash: "0x" + "cd".repeat(32), index: 0 },
