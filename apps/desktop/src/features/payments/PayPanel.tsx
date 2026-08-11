@@ -34,13 +34,14 @@ import { CopyButton } from "@/components/clipboard/CopyButton";
 import { PasteButton } from "@/components/clipboard/PasteButton";
 import { AutoBroadcastCountdown } from "./AutoBroadcastCountdown";
 import { PayeePicker } from "./PayeePicker";
-import type {
-  FxQuote,
-  PartialSigEntry,
-  PayeeProfile,
-  PayrollBatch,
-  PayrollBatchLine,
-} from "@chain-pay/shared";
+import type { FxQuote, PartialSigEntry, PayeeProfile, PayrollBatch } from "@chain-pay/shared";
+import {
+  autoLabel,
+  buildBatchLinesFromRecipients,
+  monthEnd,
+  monthStart,
+  type RecipientRow,
+} from "./payment-draft";
 import { usePayeesStore } from "@/stores/payees";
 import { usePayrollBatchesStore } from "@/stores/payroll-batches";
 import { useNetworkConfigStore } from "@/stores/network-config";
@@ -57,15 +58,6 @@ import { formatCkb } from "@/lib/format/ckb";
 import { Section } from "@/components/ui/Section";
 
 const DEFAULT_FEE_RATE = 1000n;
-
-interface RecipientRow {
-  address: string;
-  amountCkb: string;
-  /** Set when the row came from PayeePicker; lets FX recomputation re-fill amountCkb. */
-  payeeId?: string;
-  /** FX rate used to compute amountCkb, captured per-row so PayrollBatchLine has lineage. */
-  fxRate?: string;
-}
 
 interface SignatureRow {
   slotIndex: number;
@@ -897,47 +889,6 @@ function FxSnapshotPanel({
       </button>
     </div>
   );
-}
-
-function buildBatchLinesFromRecipients(
-  rows: RecipientRow[],
-  findPayee: (id: string) => PayeeProfile | undefined,
-): PayrollBatchLine[] {
-  const lines: PayrollBatchLine[] = [];
-  for (const row of rows) {
-    if (!row.payeeId || !row.fxRate) continue;
-    const payee = findPayee(row.payeeId);
-    if (!payee) continue;
-    const shannons = ckbToShannons(row.amountCkb);
-    if (shannons === null) continue;
-    lines.push({
-      payeeId: row.payeeId,
-      fiat: payee.salaryFiat,
-      crypto: { asset: "CKB", value: shannons, decimals: 8 },
-      fxRate: row.fxRate,
-      // Per-line fee allocation is a polish concern; tx-level fee is on the
-      // skeleton already. Start at 0; a follow-up can pro-rate the actual
-      // skeleton.fee across lines.
-      feeAllocated: { asset: "CKB", value: 0n, decimals: 8 },
-    });
-  }
-  return lines;
-}
-
-function autoLabel(): string {
-  const d = new Date();
-  return `Batch ${d.toISOString().slice(0, 10)}`;
-}
-
-function monthStart(): string {
-  const d = new Date();
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-01`;
-}
-
-function monthEnd(): string {
-  const d = new Date();
-  const next = new Date(d.getFullYear(), d.getMonth() + 1, 0);
-  return `${next.getFullYear()}-${String(next.getMonth() + 1).padStart(2, "0")}-${String(next.getDate()).padStart(2, "0")}`;
 }
 
 function SignaturePanel({
