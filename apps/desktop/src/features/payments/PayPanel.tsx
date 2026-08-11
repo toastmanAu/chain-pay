@@ -54,6 +54,8 @@ import {
   fiatToCkbShannons,
   formatFxQuote,
 } from "@/lib/fx/coingecko";
+import { formatCkb } from "@/lib/format/ckb";
+import { Section } from "@/components/ui/Section";
 
 const SHANNONS_PER_CKB = 100_000_000n;
 const DEFAULT_FEE_RATE = 1000n;
@@ -447,7 +449,7 @@ export function PayPanel() {
       if (!quote) return row;
       try {
         const shannons = fiatToCkbShannons(payee.salaryFiat, quote);
-        const ckb = shannonsToCkbDisplay(shannons);
+        const ckb = formatCkb(shannons);
         return { ...row, amountCkb: ckb, fxRate: quote.rate };
       } catch {
         return row;
@@ -974,12 +976,6 @@ function bytesHex(b: Uint8Array): string {
   return Array.from(b, (x) => x.toString(16).padStart(2, "0")).join("");
 }
 
-function shannonsToCkbDisplay(shannons: bigint): string {
-  const whole = shannons / 100_000_000n;
-  const frac = (shannons % 100_000_000n).toString().padStart(8, "0").replace(/0+$/, "");
-  return frac ? `${whole.toString()}.${frac}` : whole.toString();
-}
-
 function buildBatchLinesFromRecipients(
   rows: RecipientRow[],
   findPayee: (id: string) => PayeeProfile | undefined,
@@ -1134,15 +1130,6 @@ function BroadcastResult({
   );
 }
 
-function Section({ title, children }: { title: string; children: React.ReactNode }) {
-  return (
-    <section className="space-y-2">
-      <h2 className="text-sm font-medium">{title}</h2>
-      {children}
-    </section>
-  );
-}
-
 const inputCls =
   "w-full rounded-md border border-surface-hi bg-bg px-3 py-2 text-sm text-fg placeholder:text-fg-muted focus:border-accent focus:outline-none";
 
@@ -1171,11 +1158,3 @@ function ckbToShannons(amountCkb: string): bigint | null {
   return total;
 }
 
-function formatCkb(shannons: bigint): string {
-  const whole = shannons / SHANNONS_PER_CKB;
-  const fractional = shannons % SHANNONS_PER_CKB;
-  const wholeFmt = whole.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ",");
-  if (fractional === 0n) return wholeFmt;
-  const fracStr = fractional.toString().padStart(8, "0").replace(/0+$/, "");
-  return `${wholeFmt}.${fracStr}`;
-}

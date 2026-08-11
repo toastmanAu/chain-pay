@@ -67,6 +67,14 @@ describe("formatEth", () => {
   it("formats wei as ether", () => {
     expect(formatEth(1_000_000_000_000_000_000n)).toBe("1");
   });
+
+  it("trims the fractional part to 6 digits", () => {
+    expect(formatEth(1_234_567_890_123_456_789n)).toBe("1.234567");
+  });
+
+  it("re-strips trailing zeros produced by the 6-digit truncation", () => {
+    expect(formatEth(1_150_000_234_000_000_000n)).toBe("1.15");
+  });
 });
 
 describe("chainBadge", () => {
@@ -77,5 +85,13 @@ describe("chainBadge", () => {
     expect(chainBadge("btc:testnet")).toBe("Bitcoin testnet");
     expect(chainBadge("sol:mainnet")).toBe("Solana mainnet");
     expect(chainBadge("sol:devnet")).toBe("Solana devnet");
+  });
+
+  it("labels evm chains by chain id suffix", () => {
+    expect(chainBadge("evm:11155111")).toBe("EVM 11155111");
+  });
+
+  it("falls back to the raw chain string for unrecognised chains", () => {
+    expect(chainBadge("unknown:foo")).toBe("unknown:foo");
   });
 });
