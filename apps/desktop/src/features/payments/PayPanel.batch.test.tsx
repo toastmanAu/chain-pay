@@ -168,6 +168,25 @@ describe("PayPanel — batch lifecycle", () => {
     expect(after.partialSigs).toEqual([]);
   });
 
+  it("mounts the real CommSendSection with one row per signer once a batch exists", async () => {
+    // PayPanel.comm.test.tsx stubs CommSendSection to assert the props PayPanel
+    // computes; this one renders the genuine component so a crash or a broken
+    // prop contract in the real child is caught too.
+    usePayeesStore.setState({ payees: [payee()] });
+    vi.mocked(fetchCkbPrices).mockResolvedValue(new Map([["USD", USD_QUOTE]]));
+    renderPanel();
+    await draftFromPayee("500");
+    fireEvent.click(buildButton());
+    await waitFor(() => expect(screen.getByDisplayValue(PACKET_JSON)).toBeInTheDocument());
+
+    expect(
+      screen.getByRole("region", { name: "Send to signers via comm" }),
+    ).toBeInTheDocument();
+    // One row per pubkey hash in the treasury (N = 3), each currently unmapped.
+    expect(screen.getAllByLabelText(/^slot-\d$/)).toHaveLength(3);
+    expect(screen.getByText(/sighash: 0xdededede/)).toBeInTheDocument();
+  });
+
   it("persists each pasted signature onto the active batch as it is typed", async () => {
     usePayeesStore.setState({ payees: [payee()] });
     vi.mocked(fetchCkbPrices).mockResolvedValue(new Map([["USD", USD_QUOTE]]));
