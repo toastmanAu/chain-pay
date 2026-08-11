@@ -3,6 +3,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from frappe.model.document import Document
+
 from crypto_payroll.chains.base import hex_tx_hash
 
 
@@ -22,11 +24,11 @@ class CkbRules:
     ) -> dict | None:
         return None
 
-    def rebuild_evidence(self, batch) -> dict | None:
+    def rebuild_evidence(self, batch: Document) -> dict | None:
         return None
 
-    def journal_remark(self, batch) -> str:
+    def journal_remark(self, batch: Document) -> str:
         return ""
 
-    def network_fee(self, batch) -> tuple[str, str, str] | None:
+    def network_fee(self, batch: Document) -> tuple[str, str, str] | None:
         return None
