@@ -88,12 +88,23 @@ this refactor touches — do not run unless the module is named explicitly.
 - **Any new feature, chain, or endpoint.**
 - **Refactoring modules not named in this spec**, even if they are also large.
 
-## Declared behaviour change
+## Declared behaviour changes
 
-Deleting `shannonsToCkbDisplay` and pointing its call sites at `formatCkb` adds thousands
-separators at those sites. This is accepted deliberately: it removes an
-internal inconsistency in how PayPanel renders CKB amounts. It is the **only** intended
-user-visible change in this refactor. Any other observable difference is a defect.
+**1. CKB amounts gain thousands separators (planned).** Deleting `shannonsToCkbDisplay` and
+pointing its call sites at `formatCkb` adds thousands separators at those sites. This is
+accepted deliberately: it removes an internal inconsistency in how PayPanel renders CKB
+amounts.
+
+**2. SafeApprovalDetail tiles grow (discovered during Task 7, ruled 2026-08-11).** The three
+`Tile` copies were not identical, as the plan assumed. Dashboard and TreasuryDetail already
+use `p-5` / `text-2xl`; SafeApprovalDetail's private copy used `p-4` / `text-lg` with no
+explicit colour. Rewiring it to the shared component enlarges its tiles and adds `text-fg`.
+Accepted rather than preserved behind a size variant: one consistent `Tile` is the better
+end state, and a variant prop existing solely to freeze one screen's styling would outlive
+its reason. Verified exhaustive by review — Dashboard and TreasuryDetail are unaffected.
+
+These two are the **only** intended user-visible changes. Any other observable difference is
+a defect.
 
 ## Workstream 1 — Backend chain registry
 
