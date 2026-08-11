@@ -27,6 +27,7 @@ _IDS = [
     "secure-EXPORT-SOURCE-TAMPER",
     "secure-SOL-A", "secure-SOL-B",
     "secure-BTC-A", "secure-BTC-B", "secure-EXPORT-BTC",
+    "secure-EVM-ROUNDTRIP",
 ]
 
 
@@ -667,3 +668,43 @@ class TestConfirmedPaymentAccounting(FrappeTestCase):
         finally:
             frappe.local.flags.in_test = True
             frappe.set_user("Administrator")
+
+    def test_every_registered_chain_implements_the_protocol(self):
+        from crypto_payroll.chains import CHAIN_RULES
+
+        for chain, rules in CHAIN_RULES.items():
+            with self.subTest(chain=chain):
+                self.assertEqual(rules.chain, chain)
+                self.assertTrue(rules.asset)
+                self.assertIsInstance(rules.decimals, int)
+                self.assertIn(rules.evidence_key, {None, "evm", "solana", "bitcoin"})
+                for method in (
+                    "validate_tx_hash", "normalise_evidence",
+                    "rebuild_evidence", "journal_remark", "network_fee",
+                ):
+                    self.assertTrue(
+                        callable(getattr(rules, method, None)),
+                        f"{chain} is missing {method}",
+                    )
+
+    def test_evidence_round_trips_through_the_registry(self):
+        """normalise_evidence and rebuild_evidence must agree on key sets.
+
+        A drift between them silently breaks _source_digests, so pin it here.
+        """
+        from crypto_payroll.chains import rules_for
+
+        ensure_custom_fields()
+        record = _evm_record(batch_id="secure-EVM-ROUNDTRIP", outer_byte="33", safe_byte="44")
+        persist_confirmed_payment(record)
+        batch = frappe.get_doc(
+            "Crypto Payment Batch",
+            frappe.db.get_value(
+                "Crypto Payment Batch", {"external_id": "secure-EVM-ROUNDTRIP"}, "name"
+            ),
+        )
+        rules = rules_for("evm:11155111")
+        inbound = rules.normalise_evidence(record, [], "0x" + "33" * 32)
+        outbound = rules.rebuild_evidence(batch)
+        self.assertEqual(set(inbound), set(outbound))
+        self.assertEqual(inbound, outbound)

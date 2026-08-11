@@ -20,8 +20,7 @@ COMPANY_CURRENCY = "USD"
 EXPENSE_ACCOUNT = "Salary or Wage Expense"
 TREASURY_ACCOUNT = "Crypto Treasury Asset"
 # Chain-specific evidence sub-objects, and the label each one reports itself as
-# when it appears on the wrong chain. The keys drive both the dispatch below
-# and the strict-key allowlist on the record itself.
+# when it appears on the wrong chain. The keys drive the dispatch below.
 _EVIDENCE_LABEL = {"evm": "EVM", "solana": "Solana", "bitcoin": "Bitcoin"}
 
 

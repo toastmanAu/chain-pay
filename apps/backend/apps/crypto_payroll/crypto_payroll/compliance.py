@@ -18,13 +18,10 @@ from typing import Iterable
 
 import frappe
 
-from crypto_payroll.chains import rules_for
+from crypto_payroll.chains import CHAIN_RULES, rules_for
 
 
-ALLOWED_CHAINS = {
-    "ckb:mainnet", "ckb:testnet", "evm:11155111",
-    "sol:devnet", "sol:mainnet", "btc:testnet", "btc:mainnet",
-}
+ALLOWED_CHAINS = set(CHAIN_RULES)
 MAX_EXPORT_ROWS = 10_000
 UNAVAILABLE = "unavailable"
 
