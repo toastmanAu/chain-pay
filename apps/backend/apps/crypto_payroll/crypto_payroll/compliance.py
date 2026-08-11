@@ -216,22 +216,7 @@ def _source_digests(batch) -> set[str]:
     # are still valid here even though those chains aren't registered yet.
     rules = CHAIN_RULES.get(batch.chain)
     evm = rules.rebuild_evidence(batch) if rules is not None and rules.evidence_key == "evm" else None
-    solana = None
-    if batch.chain.startswith("sol:"):
-        solana = {
-            "review_digest": batch.review_digest,
-            "source_address": batch.source_address,
-            "recipient_address": batch.recipient_address,
-            "fee_payer_address": batch.fee_payer_address,
-            "nonce_account": batch.nonce_account,
-            "nonce_authority": batch.nonce_authority,
-            "durable_nonce": batch.durable_nonce,
-            "finalized_slot": str(batch.finalized_slot),
-            "amount_lamports": str(batch.amount_lamports),
-            "fee_lamports": str(batch.fee_lamports),
-            "fee_payer_policy": batch.fee_payer_policy,
-            "solana_message_base64": batch.solana_message_base64,
-        }
+    solana = rules.rebuild_evidence(batch) if rules is not None and rules.evidence_key == "solana" else None
     bitcoin = None
     if batch.chain.startswith("btc:"):
         try:

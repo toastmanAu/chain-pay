@@ -4,8 +4,6 @@ from __future__ import annotations
 import hashlib
 import json
 import re
-import base64
-import binascii
 from datetime import timezone
 from decimal import Decimal
 
@@ -13,6 +11,7 @@ import frappe
 from frappe.utils import get_datetime
 
 from crypto_payroll.chains import CHAIN_RULES
+from crypto_payroll.chains.base import BASE58_INDEX, base58_bytes
 from crypto_payroll.setup.custom_fields import ensure_custom_fields
 from crypto_payroll.setup.seed import ensure_cost_center, ensure_fiscal_year
 from crypto_payroll.compliance import export_payload, normalise_filters
@@ -23,8 +22,6 @@ EXPENSE_ACCOUNT = "Salary or Wage Expense"
 TREASURY_ACCOUNT = "Crypto Treasury Asset"
 _TX_HASH = re.compile(r"^0x[0-9a-fA-F]{64}$")
 _HEX_DIGEST = re.compile(r"^[0-9a-f]{64}$")
-_BASE58_ALPHABET = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
-_BASE58_INDEX = {character: index for index, character in enumerate(_BASE58_ALPHABET)}
 _U64_MAX = 18_446_744_073_709_551_615
 _MAX_BTC_SATS = 2_100_000_000_000_000
 
@@ -47,33 +44,12 @@ def _canonical_uint(value, path: str, *, positive: bool = False, maximum=None) -
     return number
 
 
-def _base58_bytes(value, size: int, path: str) -> str:
-    text = str(value or "")
-    if not text or any(character not in _BASE58_INDEX for character in text):
-        frappe.throw(f"{path} must be canonical base58")
-    number = 0
-    for character in text:
-        number = number * 58 + _BASE58_INDEX[character]
-    decoded = (b"\x00" * (len(text) - len(text.lstrip("1")))) + (
-        number.to_bytes((number.bit_length() + 7) // 8, "big") if number else b""
-    )
-    encoded = "1" * (len(decoded) - len(decoded.lstrip(b"\x00")))
-    remainder = int.from_bytes(decoded, "big")
-    suffix = ""
-    while remainder:
-        remainder, digit = divmod(remainder, 58)
-        suffix = _BASE58_ALPHABET[digit] + suffix
-    if len(decoded) != size or encoded + suffix != text:
-        frappe.throw(f"{path} must encode exactly {size} bytes")
-    return text
-
-
 def _bitcoin_address(value, chain: str, path: str) -> str:
     text = str(value or "")
-    if 26 <= len(text) <= 35 and all(character in _BASE58_INDEX for character in text):
+    if 26 <= len(text) <= 35 and all(character in BASE58_INDEX for character in text):
         number = 0
         for character in text:
-            number = number * 58 + _BASE58_INDEX[character]
+            number = number * 58 + BASE58_INDEX[character]
         decoded = b"\0" * (len(text) - len(text.lstrip("1"))) + number.to_bytes((number.bit_length() + 7) // 8, "big")
         versions = {0, 5} if chain == "btc:mainnet" else {111, 196}
         if len(decoded) == 25 and decoded[0] in versions and hashlib.sha256(hashlib.sha256(decoded[:-4]).digest()).digest()[:4] == decoded[-4:]:
@@ -148,7 +124,7 @@ def _normalise_record(record: dict | str) -> dict:
         frappe.throw("record.chain is unsupported")
 
     if chain.startswith("sol:"):
-        tx_hash = _base58_bytes(record.get("txHash"), 64, "record.txHash")
+        tx_hash = base58_bytes(record.get("txHash"), 64, "record.txHash")
     elif chain.startswith("btc:"):
         tx_hash = str(record.get("txHash") or "")
         if not re.fullmatch(r"[0-9a-f]{64}", tx_hash):
@@ -247,52 +223,8 @@ def _normalise_record(record: dict | str) -> dict:
         frappe.throw("record.evm is only valid for EVM payments")
 
     solana = None
-    if chain.startswith("sol:"):
-        raw_solana = record.get("solana")
-        if not isinstance(raw_solana, dict):
-            frappe.throw("record.solana is required for a Solana payment")
-        _strict_keys(raw_solana, {"reviewDigest", "sourceAddress", "recipientAddress", "feePayerAddress", "nonceAccount", "nonceAuthority", "durableNonce", "finalizedSlot", "amountLamports", "feeLamports", "feePayerPolicy", "messageBase64"}, "record.solana")
-        review_digest = str(raw_solana.get("reviewDigest") or "")
-        if not _HEX_DIGEST.fullmatch(review_digest):
-            frappe.throw("record.solana.reviewDigest must be a lowercase 32-byte hex digest")
-        addresses = {
-            field: _base58_bytes(raw_solana.get(field), 32, f"record.solana.{field}")
-            for field in ("sourceAddress", "recipientAddress", "feePayerAddress", "nonceAccount", "nonceAuthority", "durableNonce")
-        }
-        if addresses["sourceAddress"] == addresses["recipientAddress"]:
-            frappe.throw("record.solana source and recipient must be different")
-        if addresses["nonceAccount"] in {addresses["sourceAddress"], addresses["recipientAddress"], addresses["feePayerAddress"]}:
-            frappe.throw("record.solana nonce account must be distinct from payment accounts")
-        finalized_slot = _canonical_uint(raw_solana.get("finalizedSlot"), "record.solana.finalizedSlot", positive=True, maximum=_U64_MAX)
-        amount_lamports = _canonical_uint(raw_solana.get("amountLamports"), "record.solana.amountLamports", positive=True, maximum=_U64_MAX)
-        fee_lamports = _canonical_uint(raw_solana.get("feeLamports"), "record.solana.feeLamports", maximum=_U64_MAX)
-        if len(lines) != 1 or int(lines[0]["crypto_value"]) != amount_lamports:
-            frappe.throw("record.solana.amountLamports must match the single SOL payment line")
-        if raw_solana.get("feePayerPolicy") != "transaction_fee_payer":
-            frappe.throw("record.solana.feePayerPolicy must be transaction_fee_payer")
-        message_base64 = str(raw_solana.get("messageBase64") or "")
-        if len(message_base64) > 4096:
-            frappe.throw("record.solana.messageBase64 is too large")
-        try:
-            decoded_message = base64.b64decode(message_base64, validate=True)
-        except (binascii.Error, ValueError):
-            frappe.throw("record.solana.messageBase64 must be canonical base64")
-        if not decoded_message or base64.b64encode(decoded_message).decode("ascii") != message_base64:
-            frappe.throw("record.solana.messageBase64 must be canonical base64")
-        solana = {
-            "review_digest": review_digest,
-            "source_address": addresses["sourceAddress"],
-            "recipient_address": addresses["recipientAddress"],
-            "fee_payer_address": addresses["feePayerAddress"],
-            "nonce_account": addresses["nonceAccount"],
-            "nonce_authority": addresses["nonceAuthority"],
-            "durable_nonce": addresses["durableNonce"],
-            "finalized_slot": str(finalized_slot),
-            "amount_lamports": str(amount_lamports),
-            "fee_lamports": str(fee_lamports),
-            "fee_payer_policy": "transaction_fee_payer",
-            "solana_message_base64": message_base64,
-        }
+    if rules is not None and rules.evidence_key == "solana":
+        solana = rules.normalise_evidence(record, lines, tx_hash)
     elif record.get("solana") is not None:
         frappe.throw("record.solana is only valid for Solana payments")
 

@@ -6,11 +6,14 @@ import frappe
 from crypto_payroll.chains.base import ChainRules
 from crypto_payroll.chains.ckb import CkbRules
 from crypto_payroll.chains.evm import EvmRules
+from crypto_payroll.chains.sol import SolRules
 
 CHAIN_RULES: dict[str, ChainRules] = {
     "ckb:mainnet": CkbRules(chain="ckb:mainnet"),
     "ckb:testnet": CkbRules(chain="ckb:testnet"),
     "evm:11155111": EvmRules(chain="evm:11155111"),
+    "sol:devnet": SolRules(chain="sol:devnet"),
+    "sol:mainnet": SolRules(chain="sol:mainnet"),
 }
 
 
