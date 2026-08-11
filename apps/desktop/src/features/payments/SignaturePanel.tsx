@@ -1,7 +1,7 @@
 import { type CkbMultisigConfig } from "@/lib/chains/ckb/multisig";
 import { PasteButton } from "@/components/clipboard/PasteButton";
 import { Section } from "@/components/ui/Section";
-import type { SignatureRow } from "./PayPanel";
+import type { SignatureRow } from "./payment-draft";
 
 export function SignaturePanel({
   cfg,

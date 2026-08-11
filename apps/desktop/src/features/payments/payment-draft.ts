@@ -1,6 +1,16 @@
 import type { PayeeProfile, PayrollBatchLine } from "@chain-pay/shared";
 import { ckbToShannons } from "@/lib/chains/ckb/units";
 
+/**
+ * One signature slot in the multisig collection UI. Lives here rather than in
+ * PayPanel so `SignaturePanel` doesn't have to import a type back out of the
+ * orchestrator it is rendered by.
+ */
+export interface SignatureRow {
+  slotIndex: number;
+  signature: string;
+}
+
 export interface RecipientRow {
   address: string;
   amountCkb: string;

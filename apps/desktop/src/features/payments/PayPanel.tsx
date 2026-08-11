@@ -38,6 +38,7 @@ import {
   monthEnd,
   monthStart,
   type RecipientRow,
+  type SignatureRow,
 } from "./payment-draft";
 import { usePayeesStore } from "@/stores/payees";
 import { usePayrollBatchesStore } from "@/stores/payroll-batches";
@@ -56,15 +57,9 @@ import { DraftForm } from "./DraftForm";
 import { PacketPanel } from "./PacketPanel";
 import { SignaturePanel } from "./SignaturePanel";
 import { BroadcastResult } from "./BroadcastResult";
-
-const DEFAULT_FEE_RATE = 1000n;
-
-export interface SignatureRow {
-  slotIndex: number;
-  signature: string;
-}
-
-type Phase = "draft" | "packet-ready" | "broadcast-ready" | "broadcasted";
+import { useFxSnapshot } from "./hooks/useFxSnapshot";
+import { usePaymentDraft } from "./hooks/usePaymentDraft";
+import { usePaymentLifecycle } from "./hooks/usePaymentLifecycle";
 
 export function PayPanel() {
   const treasuries = useTreasuryStore((s) => s.treasuries);
@@ -74,28 +69,16 @@ export function PayPanel() {
 
   const ckbTreasuries = treasuries.filter(isMultisigTreasury).filter((t) => t.multisig.chain.startsWith("ckb:"));
 
-  const [treasuryId, setTreasuryId] = useState<string>(ckbTreasuries[0]?.id ?? "");
-  const [recipients, setRecipients] = useState<RecipientRow[]>([{ address: "", amountCkb: "" }]);
-  const [feeRate, setFeeRate] = useState(DEFAULT_FEE_RATE.toString());
-  const [label, setLabel] = useState("");
-  const [phase, setPhase] = useState<Phase>("draft");
-  const [skeleton, setSkeleton] = useState<PaymentSkeleton | null>(null);
-  const [packetJson, setPacketJson] = useState<string>("");
-  const [sigs, setSigs] = useState<SignatureRow[]>([]);
-  const [broadcastedTxHash, setBroadcastedTxHash] = useState<string | null>(null);
+  const draft = usePaymentDraft(ckbTreasuries[0]?.id ?? "");
+  const lifecycle = usePaymentLifecycle();
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
   // FX snapshot, lifted from DraftForm so handleBuild can persist it on the
   // PayrollBatch record. fxSnapshot maps CURRENCY → FxQuote (CKB-based).
-  const [fxSnapshot, setFxSnapshot] = useState<Map<string, FxQuote>>(new Map());
-  const [fxLoading, setFxLoading] = useState(false);
-  const [fxError, setFxError] = useState<string | null>(null);
-
-  // Active batch id for this draft. Set when build succeeds with payee-sourced
-  // rows; advances state on broadcast. null = manual one-off payment, no batch
-  // lifecycle attached.
-  const [activeBatchId, setActiveBatchId] = useState<string | null>(null);
+  // Named `fxState` rather than `fx` because both loadPayees and refetchFx
+  // already bind a local `fx` to the freshly fetched quote map.
+  const fxState = useFxSnapshot();
 
   // Pre-select a batch and hydrate recipient rows from its lines if the
   // navigator passed `autoSelectBatchId` via state. Used by ReviewInvoiceForm
@@ -107,10 +90,10 @@ export function PayPanel() {
     const state = location.state as { autoSelectBatchId?: string } | null;
     const batchId = state?.autoSelectBatchId;
     if (!batchId) return;
-    setActiveBatchId(batchId);
+    lifecycle.setActiveBatchId(batchId);
     const batch = usePayrollBatchesStore.getState().findById(batchId);
     if (!batch || batch.kind !== "payroll" || batch.lines.length === 0) return;
-    if (batch.treasuryId) setTreasuryId(batch.treasuryId);
+    if (batch.treasuryId) draft.setTreasuryId(batch.treasuryId);
     const payees = usePayeesStore.getState().payees;
     const hydrated: RecipientRow[] = batch.lines.map((line) => {
       const payee = payees.find((p) => p.id === line.payeeId);
@@ -125,7 +108,7 @@ export function PayPanel() {
       return row;
     });
     if (hydrated.length > 0) {
-      setRecipients(hydrated);
+      draft.setRecipients(hydrated);
       // Kick off FX fetch with the fresh rows so the operator doesn't have to
       // hunt for a "Fetch FX" button — by default that button only appears
       // after quotes load. Fires-and-forgets; refetchFx surfaces its own errors.
@@ -135,14 +118,14 @@ export function PayPanel() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const treasury = ckbTreasuries.find((t) => t.id === treasuryId);
+  const treasury = ckbTreasuries.find((t) => t.id === draft.treasuryId);
   const multisig = treasury?.multisig as CkbMultisig | undefined;
 
   // 2.7b-2 drain-on-mount: if signatures arrived via comm while this PayPanel
   // wasn't observable, they're buffered in incoming-sigs. Drain into the
   // active batch when its sighashDigest becomes known.
-  const activeBatch = activeBatchId
-    ? batchStore.batches.find((b) => b.id === activeBatchId)
+  const activeBatch = lifecycle.activeBatchId
+    ? batchStore.batches.find((b) => b.id === lifecycle.activeBatchId)
     : null;
   useEffect(() => {
     if (!activeBatch?.sighashDigest || !multisig) return;
@@ -178,10 +161,10 @@ export function PayPanel() {
       batchStore.selectDraft(null);
       return;
     }
-    if (batch.treasuryId !== treasuryId) {
+    if (batch.treasuryId !== draft.treasuryId) {
       // Switch treasuries first; the next render will materialize `cfg` and
       // re-enter this effect to actually hydrate.
-      setTreasuryId(batch.treasuryId);
+      draft.setTreasuryId(batch.treasuryId);
       return;
     }
     if (!cfg || !multisig) return;
@@ -207,30 +190,33 @@ export function PayPanel() {
           return { slotIndex: i, signature: found?.signature ?? "" };
         },
       );
-      setSkeleton(restored);
-      setPacketJson(json);
-      setSigs(restoredSigs);
-      setLabel(batch.label);
-      setActiveBatchId(batch.id);
-      setPhase("packet-ready");
+      lifecycle.setSkeleton(restored);
+      lifecycle.setPacketJson(json);
+      lifecycle.setSigs(restoredSigs);
+      draft.setLabel(batch.label);
+      lifecycle.setActiveBatchId(batch.id);
+      lifecycle.setPhase("packet-ready");
       setError(null);
     } catch (e) {
       setError(`Failed to resume draft: ${e instanceof Error ? e.message : String(e)}`);
     } finally {
       batchStore.selectDraft(null);
     }
-  }, [batchStore, treasuryId, cfg, multisig]);
+    // `draft.treasuryId` (not `draft`) stays the dependency: the hook returns a
+    // fresh object every render, so depending on it would re-run this effect on
+    // every render instead of only on a treasury switch.
+  }, [batchStore, draft.treasuryId, cfg, multisig]);
 
   // Persist sig collection incrementally so closing the window mid-collection
   // doesn't lose work. Wrapped setter — same shape as setSigs for callers,
   // but writes through to the active batch's partialSigs on every change.
   const updateSigs = (next: SignatureRow[]) => {
-    setSigs(next);
-    if (activeBatchId) {
+    lifecycle.setSigs(next);
+    if (lifecycle.activeBatchId) {
       const partials: PartialSigEntry[] = next
         .filter((s) => s.signature.trim().length > 0)
         .map((s) => ({ slotIndex: s.slotIndex, signature: s.signature.trim() }));
-      batchStore.updateBatch(activeBatchId, { partialSigs: partials });
+      batchStore.updateBatch(lifecycle.activeBatchId, { partialSigs: partials });
     }
   };
 
@@ -240,7 +226,7 @@ export function PayPanel() {
     setBusy(true);
     try {
       const treasuryScript = Script.from(treasuryLockScript(cfg));
-      const parsedRecipients = recipients.map((r, i) => {
+      const parsedRecipients = draft.recipients.map((r, i) => {
         const lock = lockFromAddress(r.address.trim());
         const capacity = ckbToShannons(r.amountCkb);
         if (capacity === null) throw new Error(`Recipient ${i + 1}: amount must be a positive number`);
@@ -258,20 +244,20 @@ export function PayPanel() {
         recipients: parsedRecipients,
         availableCells: cells,
         network: multisig.chain === "ckb:mainnet" ? "mainnet" : "testnet",
-        feeRateShannonsPerByte: BigInt(feeRate),
+        feeRateShannonsPerByte: BigInt(draft.feeRate),
       });
       const json = encodeTransferPacket({
         skeleton: result,
         treasuryConfig: cfg,
         network: multisig.chain === "ckb:mainnet" ? "mainnet" : "testnet",
-        ...(label.trim() ? { label: label.trim() } : {}),
+        ...(draft.label.trim() ? { label: draft.label.trim() } : {}),
       });
-      setSkeleton(result);
-      setPacketJson(json);
-      setSigs(
+      lifecycle.setSkeleton(result);
+      lifecycle.setPacketJson(json);
+      lifecycle.setSigs(
         Array.from({ length: cfg.m }, (_, i) => ({ slotIndex: i, signature: "" })),
       );
-      setPhase("packet-ready");
+      lifecycle.setPhase("packet-ready");
 
       // If the draft was sourced from payees, snapshot it as a PayrollBatch
       // in the 'calculated' state. Manual one-off payments (no payeeId on any
@@ -281,7 +267,7 @@ export function PayPanel() {
       // window reloads — critical because FX-rate drift on re-fetch would
       // otherwise change capacities → invalidate sigs already collected.
       const payeeLines = buildBatchLinesFromRecipients(
-        recipients,
+        draft.recipients,
         payeeStore.findById,
       );
       if (payeeLines.length > 0) {
@@ -291,11 +277,11 @@ export function PayPanel() {
         const batch: PayrollBatch = {
           id,
           kind: "payroll",
-          label: label.trim() || autoLabel(),
-          treasuryId,
+          label: draft.label.trim() || autoLabel(),
+          treasuryId: draft.treasuryId,
           cycleStart: monthStart(),
           cycleEnd: monthEnd(),
-          fxSnapshot: Array.from(fxSnapshot.values()),
+          fxSnapshot: Array.from(fxState.fxSnapshot.values()),
           lines: payeeLines,
           state: "calculated",
           createdAt: now,
@@ -312,7 +298,7 @@ export function PayPanel() {
           partialSigs: [],
         };
         batchStore.addBatch(batch);
-        setActiveBatchId(id);
+        lifecycle.setActiveBatchId(id);
       }
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : String(e));
@@ -365,31 +351,31 @@ export function PayPanel() {
   }
 
   const handleBroadcast = async () => {
-    if (!cfg || !skeleton) return;
+    if (!cfg || !lifecycle.skeleton) return;
     setError(null);
     setBusy(true);
     try {
-      const partials: PartialSignature[] = sigs.map((s) => {
+      const partials: PartialSignature[] = lifecycle.sigs.map((s) => {
         if (!s.signature.trim()) throw new Error("All signature slots must be filled");
         return { slotIndex: s.slotIndex, signature: s.signature.trim() };
       });
 
       // Mark the batch approved just before send so a network failure leaves
       // us in a recoverable state (approved → calculated is a legal revert).
-      if (activeBatchId) {
+      if (lifecycle.activeBatchId) {
         try {
-          batchStore.transition(activeBatchId, "approved");
+          batchStore.transition(lifecycle.activeBatchId, "approved");
         } catch {
           // ignore — batch may have been manually advanced or deleted
         }
       }
-      const txHash = await buildSignedTxAndBroadcast(skeleton.tx, partials);
-      setBroadcastedTxHash(txHash);
-      setPhase("broadcasted");
-      if (activeBatchId) {
+      const txHash = await buildSignedTxAndBroadcast(lifecycle.skeleton.tx, partials);
+      lifecycle.setBroadcastedTxHash(txHash);
+      lifecycle.setPhase("broadcasted");
+      if (lifecycle.activeBatchId) {
         try {
-          batchStore.transition(activeBatchId, "broadcasted");
-          batchStore.updateBatch(activeBatchId, {
+          batchStore.transition(lifecycle.activeBatchId, "broadcasted");
+          batchStore.updateBatch(lifecycle.activeBatchId, {
             pendingTxId: txHash,
             // Sigs are now embedded in the broadcast tx — no reason to keep
             // them around in the persisted batch.
@@ -404,7 +390,7 @@ export function PayPanel() {
       // Append input outpoints to broadcast errors so the user can paste them
       // straight into an explorer without digging in DevTools — diagnoses -52
       // (input at wrong lock) and -51 (sig vs lock mismatch) by inspection.
-      const inputs = skeleton?.tx.inputs ?? [];
+      const inputs = lifecycle.skeleton?.tx.inputs ?? [];
       const inputSummary = inputs
         .map((inp, i) => `  [${i}] ${hexFrom(inp.previousOutput.txHash)} #${inp.previousOutput.index}`)
         .join("\n");
@@ -415,16 +401,17 @@ export function PayPanel() {
     }
   };
 
+  // Clears exactly what the pre-hook inline handler cleared: the tx lifecycle
+  // (via lifecycle.reset), the error banner and the FX snapshot. `error` and the
+  // FX state live outside usePaymentLifecycle, so they are cleared here. All
+  // nine are independent useState setters batched into one render, so the
+  // reordering of setError relative to setActiveBatchId is not observable.
+  // recipients / feeRate / label are deliberately NOT cleared — BUG PIN.
   const reset = () => {
-    setPhase("draft");
-    setSkeleton(null);
-    setPacketJson("");
-    setSigs([]);
-    setBroadcastedTxHash(null);
+    lifecycle.reset();
     setError(null);
-    setActiveBatchId(null);
-    setFxSnapshot(new Map());
-    setFxError(null);
+    fxState.setFxSnapshot(new Map());
+    fxState.setFxError(null);
   };
 
   function fillAmountsFromFx(
@@ -450,7 +437,7 @@ export function PayPanel() {
   }
 
   async function loadPayees(payees: PayeeProfile[]) {
-    const existing = recipients.filter((r) => r.address.trim() || r.amountCkb.trim());
+    const existing = draft.recipients.filter((r) => r.address.trim() || r.amountCkb.trim());
     const additions = payees.map((p) => ({
       address: p.walletAddress,
       amountCkb: "",
@@ -458,32 +445,32 @@ export function PayPanel() {
     }));
     let next = [...existing, ...additions];
     if (next.length === 0) next = [{ address: "", amountCkb: "" }];
-    setRecipients(next);
+    draft.setRecipients(next);
 
     const currencies = Array.from(
       new Set(payees.map((p) => p.salaryFiat.currency.toUpperCase())),
     );
     if (currencies.length === 0) return;
 
-    setFxLoading(true);
-    setFxError(null);
+    fxState.setFxLoading(true);
+    fxState.setFxError(null);
     try {
       const fx = await fetchCkbPrices(currencies);
-      const merged = new Map(fxSnapshot);
+      const merged = new Map(fxState.fxSnapshot);
       for (const [k, v] of fx) merged.set(k, v);
-      setFxSnapshot(merged);
-      setRecipients(fillAmountsFromFx(next, merged));
+      fxState.setFxSnapshot(merged);
+      draft.setRecipients(fillAmountsFromFx(next, merged));
     } catch (e) {
-      setFxError(e instanceof Error ? e.message : String(e));
+      fxState.setFxError(e instanceof Error ? e.message : String(e));
     } finally {
-      setFxLoading(false);
+      fxState.setFxLoading(false);
     }
   }
 
   async function refetchFx(rowsOverride?: RecipientRow[]): Promise<void> {
     // Allow callers (e.g. mount-time hydration) to pass a fresh rows array so
     // currency detection isn't gated on the React state update having flushed.
-    const rows = rowsOverride ?? recipients;
+    const rows = rowsOverride ?? draft.recipients;
     const currencies = Array.from(
       new Set(
         rows
@@ -493,16 +480,16 @@ export function PayPanel() {
       ),
     );
     if (currencies.length === 0) return;
-    setFxLoading(true);
-    setFxError(null);
+    fxState.setFxLoading(true);
+    fxState.setFxError(null);
     try {
       const fx = await fetchCkbPrices(currencies);
-      setFxSnapshot(fx);
-      setRecipients(fillAmountsFromFx(rows, fx));
+      fxState.setFxSnapshot(fx);
+      draft.setRecipients(fillAmountsFromFx(rows, fx));
     } catch (e) {
-      setFxError(e instanceof Error ? e.message : String(e));
+      fxState.setFxError(e instanceof Error ? e.message : String(e));
     } finally {
-      setFxLoading(false);
+      fxState.setFxLoading(false);
     }
   }
 
@@ -533,9 +520,9 @@ export function PayPanel() {
 
       <Section title="1. Treasury">
         <select
-          value={treasuryId}
+          value={draft.treasuryId}
           onChange={(e) => {
-            setTreasuryId(e.target.value);
+            draft.setTreasuryId(e.target.value);
             reset();
           }}
           className={inputCls}
@@ -551,57 +538,57 @@ export function PayPanel() {
         ) : null}
       </Section>
 
-      {phase === "draft" && multisig ? (
+      {lifecycle.phase === "draft" && multisig ? (
         <DraftForm
           treasuryChain={multisig.chain}
-          recipients={recipients}
-          setRecipients={setRecipients}
-          feeRate={feeRate}
-          setFeeRate={setFeeRate}
-          label={label}
-          setLabel={setLabel}
+          recipients={draft.recipients}
+          setRecipients={draft.setRecipients}
+          feeRate={draft.feeRate}
+          setFeeRate={draft.setFeeRate}
+          label={draft.label}
+          setLabel={draft.setLabel}
           onBuild={handleBuild}
           busy={busy}
           syncReady={ckbSync.started && ckbSync.peers > 0}
           loadPayees={loadPayees}
           refetchFx={refetchFx}
-          fxQuotes={Array.from(fxSnapshot.values())}
-          fxLoading={fxLoading}
-          fxError={fxError}
+          fxQuotes={Array.from(fxState.fxSnapshot.values())}
+          fxLoading={fxState.fxLoading}
+          fxError={fxState.fxError}
         />
       ) : null}
 
-      {phase !== "draft" && skeleton && cfg ? (
+      {lifecycle.phase !== "draft" && lifecycle.skeleton && cfg ? (
         <PacketPanel
-          packetJson={packetJson}
-          skeleton={skeleton}
+          packetJson={lifecycle.packetJson}
+          skeleton={lifecycle.skeleton}
         />
       ) : null}
 
-      {(phase === "packet-ready" || phase === "broadcast-ready") && cfg && multisig ? (
+      {(lifecycle.phase === "packet-ready" || lifecycle.phase === "broadcast-ready") && cfg && multisig ? (
         <SignaturePanel
           cfg={cfg}
-          sigs={sigs}
+          sigs={lifecycle.sigs}
           setSigs={updateSigs}
           onBroadcast={handleBroadcast}
           busy={busy}
         />
       ) : null}
 
-      {(phase === "packet-ready" || phase === "broadcast-ready") &&
-      activeBatchId &&
+      {(lifecycle.phase === "packet-ready" || lifecycle.phase === "broadcast-ready") &&
+      lifecycle.activeBatchId &&
       activeBatch?.sighashDigest &&
       multisig &&
-      packetJson ? (
+      lifecycle.packetJson ? (
         <CommSendSection
-          batchId={activeBatchId}
+          batchId={lifecycle.activeBatchId}
           packet={
             {
               txHash: activeBatch.sighashDigest,
               treasuryAddress: multisig.address,
               // Spec: 24 h advisory expiry; receiver enforcement is 2.7b-3.
               expiresAt: Math.floor(Date.now() / 1000) + 86_400,
-              packet: packetJson as TransferPacket,
+              packet: lifecycle.packetJson as TransferPacket,
             } satisfies OutgoingPacket
           }
           multisig={{ pubkeyHashes: multisig.pubkeyHashes }}
@@ -656,8 +643,8 @@ export function PayPanel() {
               // buildSignedTxAndBroadcast merges sigs into tx, runs sanity
               // checks, then broadcasts — same path as manual handleBroadcast.
               const txHash = await buildSignedTxAndBroadcast(tx, partials);
-              setBroadcastedTxHash(txHash);
-              setPhase("broadcasted");
+              lifecycle.setBroadcastedTxHash(txHash);
+              lifecycle.setPhase("broadcasted");
               batchStore.transition(activeBatch.id, "broadcasted");
               batchStore.updateBatch(activeBatch.id, {
                 pendingTxId: txHash,
@@ -687,8 +674,8 @@ export function PayPanel() {
         </div>
       ) : null}
 
-      {phase === "broadcasted" && broadcastedTxHash ? (
-        <BroadcastResult txHash={broadcastedTxHash} network={multisig?.chain ?? ""} onReset={reset} />
+      {lifecycle.phase === "broadcasted" && lifecycle.broadcastedTxHash ? (
+        <BroadcastResult txHash={lifecycle.broadcastedTxHash} network={multisig?.chain ?? ""} onReset={reset} />
       ) : null}
 
       {error ? (
