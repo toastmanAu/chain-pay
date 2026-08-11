@@ -247,6 +247,19 @@ npm test --workspaces --if-present
 npm run typecheck
 ```
 
+Backend (Frappe `crypto_payroll` app) tests run inside the `chainpay-backend`
+container. Test modules live under `crypto_payroll/tests/` and
+`crypto_payroll/setup/` — `--app crypto_payroll` walks both:
+
+```bash
+# all backend tests (38: 32 API/compliance + 2 chain-vector + 4 setup)
+docker exec chainpay-backend bench --site chainpay.localhost run-tests --app crypto_payroll
+
+# a single module
+docker exec chainpay-backend bench --site chainpay.localhost run-tests --module crypto_payroll.tests.test_api
+docker exec chainpay-backend bench --site chainpay.localhost run-tests --module crypto_payroll.tests.test_chains
+```
+
 What to expect on first launch:
 
 1. Window opens, Dashboard route.
