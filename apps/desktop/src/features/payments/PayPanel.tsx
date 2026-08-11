@@ -3,7 +3,6 @@ import { Link, useLocation } from "react-router-dom";
 import { addressPayloadFromString } from "@ckb-ccc/core/advanced";
 import {
   bytesFrom,
-  hashTypeFrom,
   hexFrom,
   Script,
   Transaction,
@@ -19,6 +18,9 @@ import {
   lockArgsFromConfig,
   type CkbMultisigConfig,
 } from "@/lib/chains/ckb/multisig";
+import { bytesEqual, bytesHex } from "@/lib/chains/ckb/bytes";
+import { SHANNONS_PER_CKB, ckbToShannons } from "@/lib/chains/ckb/units";
+import { lockFromAddress } from "@/lib/chains/ckb/address-lock";
 import {
   buildPaymentSkeleton,
   type PaymentSkeleton,
@@ -57,7 +59,6 @@ import {
 import { formatCkb } from "@/lib/format/ckb";
 import { Section } from "@/components/ui/Section";
 
-const SHANNONS_PER_CKB = 100_000_000n;
 const DEFAULT_FEE_RATE = 1000n;
 
 interface RecipientRow {
@@ -966,16 +967,6 @@ function dumpInputsForInspection(tx: Transaction, multisig: CkbMultisig): void {
   console.warn("[chainpay] tx inputs to broadcast", summary);
 }
 
-function bytesEqual(a: Uint8Array, b: Uint8Array): boolean {
-  if (a.length !== b.length) return false;
-  for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;
-  return true;
-}
-
-function bytesHex(b: Uint8Array): string {
-  return Array.from(b, (x) => x.toString(16).padStart(2, "0")).join("");
-}
-
 function buildBatchLinesFromRecipients(
   rows: RecipientRow[],
   findPayee: (id: string) => PayeeProfile | undefined,
@@ -1132,29 +1123,4 @@ function BroadcastResult({
 
 const inputCls =
   "w-full rounded-md border border-surface-hi bg-bg px-3 py-2 text-sm text-fg placeholder:text-fg-muted focus:border-accent focus:outline-none";
-
-function lockFromAddress(addr: string): Script {
-  if (!addr) throw new Error("Recipient address is empty");
-  const { format, payload } = addressPayloadFromString(addr);
-  if (format !== 0) {
-    throw new Error(`unsupported address format ${format} (only Full / CKB2021 supported)`);
-  }
-  if (payload.length < 33) throw new Error(`address payload too short: ${payload.length} bytes`);
-  const codeHash = hexFrom(new Uint8Array(payload.slice(0, 32)));
-  const hashType = hashTypeFrom(payload[32]!);
-  const args = hexFrom(new Uint8Array(payload.slice(33)));
-  return Script.from({ codeHash, hashType, args });
-}
-
-function ckbToShannons(amountCkb: string): bigint | null {
-  const trimmed = amountCkb.trim();
-  if (!/^\d+(\.\d+)?$/.test(trimmed)) return null;
-  const [wholeStr, fracStr = ""] = trimmed.split(".");
-  const whole = BigInt(wholeStr || "0");
-  const fracPadded = (fracStr + "00000000").slice(0, 8);
-  const frac = BigInt(fracPadded);
-  const total = whole * SHANNONS_PER_CKB + frac;
-  if (total <= 0n) return null;
-  return total;
-}
 
