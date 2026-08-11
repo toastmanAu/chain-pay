@@ -65,7 +65,7 @@ With the backend running, also run:
 
 ```sh
 docker compose --env-file docker/.env -f docker/docker-compose.yml exec -T backend \
-  bench --site chainpay.localhost run-tests --module crypto_payroll.test_api
+  bench --site chainpay.localhost run-tests --module crypto_payroll.tests.test_api
 ```
 
 The backend suite includes Safe source persistence, dual-hash replay,

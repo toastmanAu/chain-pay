@@ -28,7 +28,14 @@ _IDS = [
     "secure-SOL-A", "secure-SOL-B",
     "secure-BTC-A", "secure-BTC-B", "secure-EXPORT-BTC",
     "secure-EVM-ROUNDTRIP",
+    "secure-SOL-ROUNDTRIP-DEVNET", "secure-SOL-ROUNDTRIP-MAINNET",
+    "secure-BTC-ROUNDTRIP-TESTNET", "secure-BTC-ROUNDTRIP-MAINNET",
 ]
+
+# Well-known, valid Base58Check mainnet P2PKH address (Bitcoin genesis-block
+# coinbase payout address) — used only as a destination in test fixtures for
+# the btc:mainnet leg of the evidence round-trip; no key material involved.
+_MAINNET_BTC_ADDRESS = "1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa"
 
 
 def _b58(data: bytes) -> str:
@@ -94,7 +101,7 @@ def _evm_record(batch_id="secure-EVM-A", outer_byte="11", safe_byte="22"):
     }
 
 
-def _solana_record(batch_id="secure-SOL-A", signature_byte=7, digest_byte="ab"):
+def _solana_record(batch_id="secure-SOL-A", signature_byte=7, digest_byte="ab", chain="sol:devnet"):
     source = _b58(bytes([1]) * 32)
     recipient = _b58(bytes([2]) * 32)
     fee_payer = _b58(bytes([3]) * 32)
@@ -105,7 +112,7 @@ def _solana_record(batch_id="secure-SOL-A", signature_byte=7, digest_byte="ab"):
         "batchId": batch_id,
         "sourceType": "send",
         "label": f"Solana payment {batch_id}",
-        "chain": "sol:devnet",
+        "chain": chain,
         "txHash": _b58(bytes([signature_byte]) * 64),
         "confirmedAt": "2026-08-05T02:40:00Z",
         "lines": [{
@@ -130,13 +137,14 @@ def _solana_record(batch_id="secure-SOL-A", signature_byte=7, digest_byte="ab"):
     }
 
 
-def _bitcoin_record(batch_id="secure-BTC-A", tx_byte="31", digest_byte="41"):
-    destination = "mipcBbFg9gMiCh81Kj8tqqdgoZub1ZJRfn"
+def _bitcoin_record(batch_id="secure-BTC-A", tx_byte="31", digest_byte="41", chain="btc:testnet", destination=None):
+    if destination is None:
+        destination = _MAINNET_BTC_ADDRESS if chain == "btc:mainnet" else "mipcBbFg9gMiCh81Kj8tqqdgoZub1ZJRfn"
     return {
         "batchId": batch_id,
         "sourceType": "send",
         "label": f"Bitcoin payment {batch_id}",
-        "chain": "btc:testnet",
+        "chain": chain,
         "txHash": tx_byte * 32,
         "confirmedAt": "2026-08-06T02:40:00Z",
         "lines": [{
@@ -688,23 +696,76 @@ class TestConfirmedPaymentAccounting(FrappeTestCase):
                     )
 
     def test_evidence_round_trips_through_the_registry(self):
-        """normalise_evidence and rebuild_evidence must agree on key sets.
+        """normalise_evidence and rebuild_evidence must agree on key sets, for
+        every chain that carries chain-specific evidence.
 
         A drift between them silently breaks _source_digests, so pin it here.
+        Driven off CHAIN_RULES itself (not a hardcoded chain list): a future
+        chain #5 is covered automatically the moment it's registered there,
+        as long as it has a non-None evidence_key. ckb:* has no evidence
+        block (evidence_key is None) and is deliberately skipped, not
+        asserted-empty — an empty-dict comparison would pass vacuously and
+        prove nothing.
         """
-        from crypto_payroll.chains import rules_for
+        from crypto_payroll.chains import CHAIN_RULES
 
         ensure_custom_fields()
-        record = _evm_record(batch_id="secure-EVM-ROUNDTRIP", outer_byte="33", safe_byte="44")
-        persist_confirmed_payment(record)
-        batch = frappe.get_doc(
-            "Crypto Payment Batch",
-            frappe.db.get_value(
-                "Crypto Payment Batch", {"external_id": "secure-EVM-ROUNDTRIP"}, "name"
+
+        expected_key_counts = {"evm": 10, "solana": 12, "bitcoin": 12}
+        # batch_id plus fixture bytes unique PER CHAIN (not just per evidence
+        # kind) — _existing_batch looks up an existing record by
+        # review_digest/tx hash across all chains, so reusing the same bytes
+        # for e.g. sol:devnet and sol:mainnet collides and raises
+        # "already exists with different immutable data" instead of exercising
+        # both legs.
+        fixtures = {
+            "evm:11155111": ("secure-EVM-ROUNDTRIP", "33", "44"),
+            "sol:devnet": ("secure-SOL-ROUNDTRIP-DEVNET", 9, "c9"),
+            "sol:mainnet": ("secure-SOL-ROUNDTRIP-MAINNET", 10, "ca"),
+            "btc:testnet": ("secure-BTC-ROUNDTRIP-TESTNET", "35", "45"),
+            "btc:mainnet": ("secure-BTC-ROUNDTRIP-MAINNET", "36", "46"),
+        }
+        batch_ids = {chain: batch_id for chain, (batch_id, _, _) in fixtures.items()}
+        builders = {
+            "evm": lambda batch_id, chain: _evm_record(
+                batch_id=batch_id, outer_byte=fixtures[chain][1], safe_byte=fixtures[chain][2]
             ),
-        )
-        rules = rules_for("evm:11155111")
-        inbound = rules.normalise_evidence(record, [], "0x" + "33" * 32)
-        outbound = rules.rebuild_evidence(batch)
-        self.assertEqual(set(inbound), set(outbound))
-        self.assertEqual(inbound, outbound)
+            "solana": lambda batch_id, chain: _solana_record(
+                batch_id=batch_id, signature_byte=fixtures[chain][1],
+                digest_byte=fixtures[chain][2], chain=chain,
+            ),
+            "bitcoin": lambda batch_id, chain: _bitcoin_record(
+                batch_id=batch_id, tx_byte=fixtures[chain][1],
+                digest_byte=fixtures[chain][2], chain=chain,
+            ),
+        }
+
+        covered = set()
+        for chain, rules in CHAIN_RULES.items():
+            if rules.evidence_key is None:
+                continue
+            with self.subTest(chain=chain):
+                covered.add(chain)
+                batch_id = batch_ids[chain]
+                record = builders[rules.evidence_key](batch_id, chain)
+                persist_confirmed_payment(record)
+                batch = frappe.get_doc(
+                    "Crypto Payment Batch",
+                    frappe.db.get_value(
+                        "Crypto Payment Batch", {"external_id": batch_id}, "name"
+                    ),
+                )
+                lines = [
+                    {"crypto_value": str(int(line["crypto"]["value"]))}
+                    for line in record["lines"]
+                ]
+                inbound = rules.normalise_evidence(record, lines, record["txHash"])
+                outbound = rules.rebuild_evidence(batch)
+                self.assertEqual(set(inbound), set(outbound))
+                self.assertEqual(inbound, outbound)
+                self.assertEqual(len(inbound), expected_key_counts[rules.evidence_key])
+
+        # Guard against the loop silently covering nothing (e.g. every chain
+        # ending up with evidence_key None) — that would make every assertion
+        # above vacuously true.
+        self.assertEqual(covered, set(batch_ids))
