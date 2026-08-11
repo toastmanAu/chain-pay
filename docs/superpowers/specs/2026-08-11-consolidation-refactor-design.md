@@ -103,7 +103,13 @@ Accepted rather than preserved behind a size variant: one consistent `Tile` is t
 end state, and a variant prop existing solely to freeze one screen's styling would outlive
 its reason. Verified exhaustive by review — Dashboard and TreasuryDetail are unaffected.
 
-These two are the **only** intended user-visible changes. Any other observable difference is
+**3. CreateSolanaPayment SOL amounts gain thousands separators (discovered during Task 9, ruled
+2026-08-11).** Its private `formatSol` omitted the separator that the shared
+`@/lib/format/sol` applies, so the same amount rendered differently on the payment screen than
+on the Solana treasury screen beside it. The Task 9 implementer correctly refused to swap it
+silently and escalated. Migrating it completes the de-duplication with no private copies left.
+
+These three are the **only** intended user-visible changes. Any other observable difference is
 a defect.
 
 ## Workstream 1 — Backend chain registry
