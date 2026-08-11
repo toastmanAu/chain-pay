@@ -12,6 +12,9 @@
 
 - **Every commit is behaviour-preserving.** The single declared exception is deleting `shannonsToCkbDisplay` in favour of `formatCkb`, which adds thousands separators at those call sites. Any other observable change is a defect.
 - **Do not modify existing tests to make them pass.** If an existing test fails, the refactor broke something — revert and re-approach. This applies especially to `TreasuryDetail.bitcoin.test.tsx`, `TreasuryDetail.solana.test.tsx`, and the 28 tests in `test_api.py`.
+  - **One carve-out (ruled 2026-08-11):** assertions on CKB *display strings* affected by the `shannonsToCkbDisplay` deletion in Task 9 may be updated, because that change is intended. Every such edit must be named individually in the commit message. No other test edit is permitted under any justification.
+  - **One tracked deviation (ruled 2026-08-11):** Task 1 Step 6 narrows `test_chain_registry_covers_every_supported_chain` to the two CKB keys so each intermediate commit stays green; Task 4 Step 1 widens it back to all seven. The controller verifies the widening before Task 4 is marked complete.
+  - **Pure-move tasks (ruled 2026-08-11):** Tasks 2–4 add no dedicated unit tests for `chains/{evm,sol,btc}.py`. Their coverage is the existing 28 end-to-end tests, and Task 5's round-trip test is the structural gate. This is a deliberate choice, not an oversight.
 - **Backend test command is `bench --site chainpay.localhost run-tests --module crypto_payroll.test_api`** until Task 16 changes it. `--app crypto_payroll` finds only 4 tests and is NOT a valid gate.
 - Run backend tests inside the container: `docker exec chainpay-backend bench --site chainpay.localhost run-tests --module crypto_payroll.test_api`. Expected: `Ran 28 tests ... OK`.
 - Desktop suite: `npm --workspace apps/desktop run test`. Expected baseline: `154 files, 1077 passed | 4 skipped`.
