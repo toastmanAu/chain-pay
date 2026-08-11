@@ -18,7 +18,7 @@ from typing import Iterable
 
 import frappe
 
-from crypto_payroll.chains import CHAIN_RULES
+from crypto_payroll.chains import rules_for
 
 
 ALLOWED_CHAINS = {
@@ -211,32 +211,13 @@ def _source_digests(batch) -> set[str]:
         }
         for row in sorted(batch.payments, key=lambda row: (int(row.idx or 0), row.name or ""))
     ]
-    # Same migrated-chains-only lookup rationale as api/__init__.py:
-    # CHAIN_RULES.get() rather than rules_for(), since Solana/Bitcoin batches
-    # are still valid here even though those chains aren't registered yet.
-    rules = CHAIN_RULES.get(batch.chain)
-    evm = rules.rebuild_evidence(batch) if rules is not None and rules.evidence_key == "evm" else None
-    solana = rules.rebuild_evidence(batch) if rules is not None and rules.evidence_key == "solana" else None
-    bitcoin = None
-    if batch.chain.startswith("btc:"):
-        try:
-            outputs = json.loads(batch.bitcoin_outputs_json)
-        except (TypeError, json.JSONDecodeError):
-            frappe.throw(f"payment record {batch.name} has invalid Bitcoin outputs")
-        bitcoin = {
-            "review_digest": batch.review_digest,
-            "wtxid": batch.wtxid,
-            "raw_transaction_hash": batch.raw_transaction_hash,
-            "bitcoin_block_height": str(batch.bitcoin_block_height),
-            "block_hash": batch.block_hash,
-            "confirmations": str(batch.confirmations),
-            "input_value_sats": str(batch.input_value_sats),
-            "output_value_sats": str(batch.output_value_sats),
-            "fee_sats": str(batch.fee_sats),
-            "fee_rate_sats_per_vbyte": str(batch.fee_rate_sats_per_vbyte),
-            "fee_payer_policy": batch.fee_payer_policy,
-            "bitcoin_outputs_json": json.dumps(outputs, sort_keys=True, separators=(",", ":")),
-        }
+    # The batch's own chain rules rebuild whichever evidence object they own;
+    # the other two stay None, matching how _normalise_record wrote them.
+    rules = rules_for(batch.chain)
+    rebuilt = rules.rebuild_evidence(batch) if rules.evidence_key else None
+    evm = rebuilt if rules.evidence_key == "evm" else None
+    solana = rebuilt if rules.evidence_key == "solana" else None
+    bitcoin = rebuilt if rules.evidence_key == "bitcoin" else None
     source = {
         "batch_id": batch.external_id,
         "source_type": batch.source_type,
@@ -288,17 +269,8 @@ def _fx_fields(raw: str | None) -> dict[str, str]:
 
 
 def _network_fee(batch) -> tuple[str, str, str]:
-    if batch.chain == "evm:11155111" and batch.gas_fee_wei:
-        value = str(batch.gas_fee_wei)
-        return value, f"{format_units(value, 18)} ETH", batch.gas_payer or "executor"
-    if batch.chain.startswith("sol:") and batch.fee_lamports is not None:
-        value = str(batch.fee_lamports)
-        payer = f"{batch.fee_payer_policy}:{batch.fee_payer_address}"
-        return value, f"{format_units(value, 9)} SOL", payer
-    if batch.chain.startswith("btc:") and batch.fee_sats is not None:
-        value = str(batch.fee_sats)
-        return value, f"{format_units(value, 8)} BTC", batch.fee_payer_policy or "transaction_inputs"
-    return UNAVAILABLE, UNAVAILABLE, UNAVAILABLE
+    fee = rules_for(batch.chain).network_fee(batch)
+    return fee if fee else (UNAVAILABLE, UNAVAILABLE, UNAVAILABLE)
 
 
 def _utc_datetime(value) -> str:
