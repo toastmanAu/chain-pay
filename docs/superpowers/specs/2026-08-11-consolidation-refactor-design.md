@@ -90,10 +90,31 @@ this refactor touches — do not run unless the module is named explicitly.
 
 ## Declared behaviour changes
 
-**1. CKB amounts gain thousands separators (planned).** Deleting `shannonsToCkbDisplay` and
-pointing its call sites at `formatCkb` adds thousands separators at those sites. This is
-accepted deliberately: it removes an internal inconsistency in how PayPanel renders CKB
-amounts.
+**1. CKB amounts gain thousands separators at DISPLAY sites only (revised 2026-08-11 after a
+regression).** Originally this change deleted `shannonsToCkbDisplay` outright and pointed all
+its call sites at `formatCkb`.
+
+That was wrong, and it shipped a real break in Task 9 before Task 13's characterization tests
+caught it. The two functions were **not** duplicates. `formatCkb` renders a number for a human;
+`shannonsToCkbDisplay` serialised a number into the `amountCkb` **form field**, which
+`ckbToShannons` later re-parses with `/^\d+(\.\d+)?$/`. That regex rejects commas, so after the
+swap any payee whose FX-converted salary reached 1000 CKB got an unparseable amount, and
+`buildBatchLinesFromRecipients` **silently dropped the row** — on the core payee-sourced payroll
+path.
+
+The corrected design keeps the two roles explicitly separate:
+
+| Role | Function | Output |
+|---|---|---|
+| Display, for humans | `formatCkb` (`lib/format/ckb`) | `1,234.5` |
+| Serialise, for a field `ckbToShannons` re-parses | `toCkbInputValue` (`lib/chains/ckb/units`) | `1234.5` |
+
+`toCkbInputValue` lives beside `ckbToShannons` as its inverse, with a round-trip test pinning
+the pair, so the next reader cannot mistake them for redundant again. Separators therefore
+appear only where a value is rendered, never where one is re-parsed.
+
+**Lesson worth keeping:** two functions that differ only in formatting are not necessarily
+duplicates — check whether either output is consumed by a parser before merging them.
 
 **2. SafeApprovalDetail tiles grow (discovered during Task 7, ruled 2026-08-11).** The three
 `Tile` copies were not identical, as the plan assumed. Dashboard and TreasuryDetail already
