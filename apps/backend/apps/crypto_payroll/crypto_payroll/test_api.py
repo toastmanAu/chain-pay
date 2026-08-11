@@ -619,6 +619,34 @@ class TestConfirmedPaymentAccounting(FrappeTestCase):
         with self.assertRaises(frappe.ValidationError):
             export_compliance({"chain": "ckb:testnet"}, "csv")
 
+    def test_chain_registry_covers_every_supported_chain(self):
+        from crypto_payroll.chains import CHAIN_RULES, rules_for
+
+        # NOTE: temporarily narrowed to the CKB-only keys registered by this
+        # commit. Widened back to the full seven-chain set in Task 4 once
+        # evm/sol/btc rules are registered (see chains/__init__.py).
+        self.assertEqual(
+            set(CHAIN_RULES),
+            {
+                "ckb:mainnet",
+                "ckb:testnet",
+            },
+        )
+        ckb = rules_for("ckb:testnet")
+        self.assertEqual((ckb.asset, ckb.decimals), ("CKB", 8))
+        self.assertIsNone(ckb.max_native_units)
+        self.assertIsNone(ckb.evidence_key)
+        self.assertEqual(
+            ckb.validate_tx_hash("0x" + "AB" * 32, "record.txHash"),
+            "0x" + "ab" * 32,
+        )
+
+    def test_chain_registry_rejects_unknown_chain(self):
+        from crypto_payroll.chains import rules_for
+
+        with self.assertRaises(frappe.ValidationError):
+            rules_for("doge:mainnet")
+
     def test_compliance_export_requires_an_accounts_role(self):
         throwaway_email = "roleless-accounting-user@chainpay.test"
         if not frappe.db.exists("User", throwaway_email):
