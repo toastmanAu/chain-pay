@@ -622,14 +622,15 @@ class TestConfirmedPaymentAccounting(FrappeTestCase):
     def test_chain_registry_covers_every_supported_chain(self):
         from crypto_payroll.chains import CHAIN_RULES, rules_for
 
-        # NOTE: temporarily narrowed to the CKB-only keys registered by this
-        # commit. Widened back to the full seven-chain set in Task 4 once
-        # evm/sol/btc rules are registered (see chains/__init__.py).
+        # NOTE: temporarily narrowed to the CKB+EVM keys registered so far.
+        # Widened again in Task 3 (Solana) and Task 4 (Bitcoin) as each
+        # chain's rules are registered (see chains/__init__.py).
         self.assertEqual(
             set(CHAIN_RULES),
             {
                 "ckb:mainnet",
                 "ckb:testnet",
+                "evm:11155111",
             },
         )
         ckb = rules_for("ckb:testnet")

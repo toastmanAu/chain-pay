@@ -12,6 +12,7 @@ from decimal import Decimal
 import frappe
 from frappe.utils import get_datetime
 
+from crypto_payroll.chains import CHAIN_RULES
 from crypto_payroll.setup.custom_fields import ensure_custom_fields
 from crypto_payroll.setup.seed import ensure_cost_center, ensure_fiscal_year
 from crypto_payroll.compliance import export_payload, normalise_filters
@@ -21,7 +22,6 @@ COMPANY_CURRENCY = "USD"
 EXPENSE_ACCOUNT = "Salary or Wage Expense"
 TREASURY_ACCOUNT = "Crypto Treasury Asset"
 _TX_HASH = re.compile(r"^0x[0-9a-fA-F]{64}$")
-_EVM_ADDRESS = re.compile(r"^0x[0-9a-fA-F]{40}$")
 _HEX_DIGEST = re.compile(r"^[0-9a-f]{64}$")
 _BASE58_ALPHABET = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
 _BASE58_INDEX = {character: index for index, character in enumerate(_BASE58_ALPHABET)}
@@ -233,50 +233,16 @@ def _normalise_record(record: dict | str) -> dict:
             }
         )
 
+    # Dispatched through the chain-rules registry (crypto_payroll.chains).
+    # Only migrated chains have an entry here — Solana and Bitcoin still use
+    # their inline blocks below until Tasks 3/4 move them into the registry
+    # too, so this looks up CHAIN_RULES directly rather than rules_for(),
+    # which would throw for a chain that's merely "not yet migrated" instead
+    # of one that's genuinely unsupported (already rejected above).
+    rules = CHAIN_RULES.get(chain)
     evm = None
-    if chain == "evm:11155111":
-        raw_evm = record.get("evm")
-        if not isinstance(raw_evm, dict):
-            frappe.throw("record.evm is required for a Sepolia payment")
-        _strict_keys(raw_evm, {"safeAddress", "safeTxHash", "outerTxHash", "executorAddress", "recipientAddress", "confirmedBlockNumber", "gasUsed", "effectiveGasPriceWei", "gasFeeWei", "gasPayer"}, "record.evm")
-        address_fields = ("safeAddress", "executorAddress", "recipientAddress")
-        addresses = {}
-        for field in address_fields:
-            value = str(raw_evm.get(field) or "").lower()
-            if not _EVM_ADDRESS.fullmatch(value):
-                frappe.throw(f"record.evm.{field} must be a 20-byte EVM address")
-            addresses[field] = value
-        safe_tx_hash = str(raw_evm.get("safeTxHash") or "").lower()
-        outer_tx_hash = str(raw_evm.get("outerTxHash") or "").lower()
-        if not _TX_HASH.fullmatch(safe_tx_hash):
-            frappe.throw("record.evm.safeTxHash must be a 32-byte hash")
-        if outer_tx_hash != tx_hash:
-            frappe.throw("record.evm.outerTxHash must match record.txHash")
-        try:
-            confirmed_block = int(str(raw_evm.get("confirmedBlockNumber")))
-            gas_used = int(str(raw_evm.get("gasUsed")))
-            gas_price = int(str(raw_evm.get("effectiveGasPriceWei")))
-            gas_fee = int(str(raw_evm.get("gasFeeWei")))
-        except (TypeError, ValueError):
-            frappe.throw("record.evm receipt values must be decimal integers")
-        if confirmed_block <= 0 or gas_used <= 0 or gas_price <= 0:
-            frappe.throw("record.evm block and gas values must be positive")
-        if gas_fee != gas_used * gas_price:
-            frappe.throw("record.evm.gasFeeWei must equal gasUsed × effectiveGasPriceWei")
-        if raw_evm.get("gasPayer") != "executor":
-            frappe.throw("record.evm.gasPayer must be executor")
-        evm = {
-            "safe_address": addresses["safeAddress"],
-            "safe_tx_hash": safe_tx_hash,
-            "outer_tx_hash": outer_tx_hash,
-            "executor_address": addresses["executorAddress"],
-            "recipient_address": addresses["recipientAddress"],
-            "confirmed_block_number": str(confirmed_block),
-            "gas_used": str(gas_used),
-            "effective_gas_price_wei": str(gas_price),
-            "gas_fee_wei": str(gas_fee),
-            "gas_payer": "executor",
-        }
+    if rules is not None and rules.evidence_key == "evm":
+        evm = rules.normalise_evidence(record, lines, tx_hash)
     elif record.get("evm") is not None:
         frappe.throw("record.evm is only valid for EVM payments")
 

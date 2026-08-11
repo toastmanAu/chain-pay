@@ -18,6 +18,8 @@ from typing import Iterable
 
 import frappe
 
+from crypto_payroll.chains import CHAIN_RULES
+
 
 ALLOWED_CHAINS = {
     "ckb:mainnet", "ckb:testnet", "evm:11155111",
@@ -209,20 +211,11 @@ def _source_digests(batch) -> set[str]:
         }
         for row in sorted(batch.payments, key=lambda row: (int(row.idx or 0), row.name or ""))
     ]
-    evm = None
-    if batch.chain == "evm:11155111":
-        evm = {
-            "safe_address": batch.safe_address,
-            "safe_tx_hash": batch.safe_tx_hash,
-            "outer_tx_hash": batch.tx_hash,
-            "executor_address": batch.executor_address,
-            "recipient_address": batch.recipient_address,
-            "confirmed_block_number": str(batch.confirmed_block_number),
-            "gas_used": str(batch.gas_used),
-            "effective_gas_price_wei": str(batch.effective_gas_price_wei),
-            "gas_fee_wei": str(batch.gas_fee_wei),
-            "gas_payer": batch.gas_payer,
-        }
+    # Same migrated-chains-only lookup rationale as api/__init__.py:
+    # CHAIN_RULES.get() rather than rules_for(), since Solana/Bitcoin batches
+    # are still valid here even though those chains aren't registered yet.
+    rules = CHAIN_RULES.get(batch.chain)
+    evm = rules.rebuild_evidence(batch) if rules is not None and rules.evidence_key == "evm" else None
     solana = None
     if batch.chain.startswith("sol:"):
         solana = {
