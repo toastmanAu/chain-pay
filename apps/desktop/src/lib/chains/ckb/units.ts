@@ -11,3 +11,18 @@ export function ckbToShannons(amountCkb: string): bigint | null {
   if (total <= 0n) return null;
   return total;
 }
+
+/**
+ * Inverse of {@link ckbToShannons}: serialises shannons into the plain
+ * decimal string that function accepts back (no thousands separators).
+ *
+ * This is for **form fields** that get re-parsed by `ckbToShannons`, not for
+ * human display — `ckbToShannons`'s regex (`/^\d+(\.\d+)?$/`) rejects commas,
+ * so its output must never be run through a display formatter first. For
+ * rendering to a human, use `formatCkb` in `lib/format/ckb.ts` instead.
+ */
+export function toCkbInputValue(shannons: bigint): string {
+  const whole = shannons / SHANNONS_PER_CKB;
+  const frac = (shannons % SHANNONS_PER_CKB).toString().padStart(8, "0").replace(/0+$/, "");
+  return frac ? `${whole.toString()}.${frac}` : whole.toString();
+}

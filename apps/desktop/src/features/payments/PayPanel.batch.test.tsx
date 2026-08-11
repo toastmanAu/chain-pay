@@ -254,23 +254,40 @@ describe("PayPanel — FX", () => {
     expect(fetchCkbPrices).toHaveBeenCalledWith(["USD"]);
   });
 
-  it("BUG PIN: an FX amount of 1000 CKB or more is written with thousands separators, which then fails the build", async () => {
-    // fillAmountsFromFx stores formatCkb(shannons) — a *display* string — into
-    // amountCkb, but ckbToShannons only accepts /^\d+(\.\d+)?$/. Any payee
-    // whose converted salary reaches 1000 CKB therefore cannot be built, and
-    // buildBatchLinesFromRecipients would silently drop the line.
+  it("REGRESSION FIXED: an FX amount of 1000 CKB or more still builds — fillAmountsFromFx no longer stores a thousands-separated string", async () => {
+    // Previously fillAmountsFromFx stored formatCkb(shannons) — a *display*
+    // string with thousands separators — into amountCkb, but ckbToShannons
+    // only accepts /^\d+(\.\d+)?$/. Any payee whose converted salary reached
+    // 1000 CKB could not be built, and buildBatchLinesFromRecipients silently
+    // dropped the line. Fixed by writing toCkbInputValue(shannons) instead,
+    // which round-trips through ckbToShannons with no separators.
     usePayeesStore.setState({
       payees: [payee({ salaryFiat: { currency: "USD", minor: 500_000n } })],
     });
     vi.mocked(fetchCkbPrices).mockResolvedValue(new Map([["USD", USD_QUOTE]]));
     renderPanel();
-    await draftFromPayee("1,000,000");
+    await draftFromPayee("1000000");
 
     fireEvent.click(buildButton());
-    await waitFor(() =>
-      expect(screen.getByText("Recipient 1: amount must be a positive number")).toBeInTheDocument(),
-    );
-    expect(buildPaymentSkeleton).not.toHaveBeenCalled();
+    await waitFor(() => expect(screen.getByDisplayValue(PACKET_JSON)).toBeInTheDocument());
+    expect(
+      screen.queryByText("Recipient 1: amount must be a positive number"),
+    ).not.toBeInTheDocument();
+    expect(buildPaymentSkeleton).toHaveBeenCalled();
+
+    // The row must also survive into the persisted payroll batch line, not
+    // just pass the build-time parse — this is the actual payee-sourced
+    // payroll path the regression broke end to end.
+    const batch = usePayrollBatchesStore.getState().batches[0] as PayrollBatch;
+    expect(batch.lines).toEqual([
+      {
+        payeeId: "p1",
+        fiat: { currency: "USD", minor: 500_000n },
+        crypto: { asset: "CKB", value: 100_000_000_000_000n, decimals: 8 },
+        fxRate: "0.005",
+        feeAllocated: { asset: "CKB", value: 0n, decimals: 8 },
+      },
+    ]);
   });
 
   it("shows the FX error and leaves manually typed amounts untouched", async () => {

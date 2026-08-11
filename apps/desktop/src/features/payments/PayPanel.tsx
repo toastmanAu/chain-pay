@@ -16,7 +16,7 @@ import {
   assertMultisigBytesMatchTreasury,
   dumpInputsForInspection,
 } from "@/lib/chains/ckb/multisig-assert";
-import { SHANNONS_PER_CKB, ckbToShannons } from "@/lib/chains/ckb/units";
+import { SHANNONS_PER_CKB, ckbToShannons, toCkbInputValue } from "@/lib/chains/ckb/units";
 import { lockFromAddress } from "@/lib/chains/ckb/address-lock";
 import {
   buildPaymentSkeleton,
@@ -439,7 +439,9 @@ export function PayPanel() {
       if (!quote) return row;
       try {
         const shannons = fiatToCkbShannons(payee.salaryFiat, quote);
-        const ckb = formatCkb(shannons);
+        // Stored into amountCkb, a form field re-parsed by ckbToShannons —
+        // must stay unformatted (no thousands separators). See units.ts.
+        const ckb = toCkbInputValue(shannons);
         return { ...row, amountCkb: ckb, fxRate: quote.rate };
       } catch {
         return row;
