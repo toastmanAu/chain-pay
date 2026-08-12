@@ -272,9 +272,13 @@ describe("PayPanel — incoming-sigs drain", () => {
       expect(batch.partialSigs?.find((p) => p.slotIndex === 0)?.signature).toBe(operatorSig);
     });
 
-    // A comm signature for the SAME slot the operator just filled (a would-be
-    // clobber), plus a genuine one for the still-empty slot.
-    bufferSig(0, signDigest(DIGEST, KEY_C));
+    // A comm signature for the SAME slot the operator just filled — SIG_A is
+    // genuinely valid for slot 0 (recovers to HASH_A, pubkeyHashes[0]), so
+    // only the `existingSlots` occupied-slot check can reject it; a
+    // signature from the wrong key would be rejected by pubkey-mismatch
+    // instead and prove nothing about the occupied-slot guard specifically.
+    // Plus a genuine signature for the still-empty slot.
+    bufferSig(0, SIG_A);
     bufferSig(1, SIG_B);
 
     // Nudge the drain effect to re-run: any write to the batches store gives
@@ -289,11 +293,19 @@ describe("PayPanel — incoming-sigs drain", () => {
     await waitFor(() => {
       expect((sigBoxes()[1] as HTMLTextAreaElement).value).toBe(SIG_B);
     });
-    // Slot 0 is exactly what the operator typed — the rejected KEY_C
-    // signature never reached the textarea or the store.
+    // Slot 0 is exactly what the operator typed — the rejected, otherwise-
+    // valid SIG_A never reached the textarea or the store.
     expect((sigBoxes()[0] as HTMLTextAreaElement).value).toBe(operatorSig);
     const batch = usePayrollBatchesStore.getState().batches[0] as PayrollBatch;
     expect(batch.partialSigs?.find((p) => p.slotIndex === 0)?.signature).toBe(operatorSig);
+    // Array.find returns the FIRST match, so if drainIncomingSigsInto's
+    // existingSlots guard were ever dropped, a second (accepted) entry for
+    // slot 0 would be appended alongside the operator's — masked by the
+    // .find() above, which would keep reporting the operator's value
+    // regardless. Asserting the exact length closes that blind spot: there
+    // must be exactly the operator's slot-0 entry and the drain's slot-1
+    // entry, no silently-appended duplicate.
+    expect(batch.partialSigs).toHaveLength(2);
   });
 
   it("leaves the buffer untouched for a manual payment with no active batch", async () => {

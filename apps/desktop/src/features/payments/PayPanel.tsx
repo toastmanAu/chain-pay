@@ -148,6 +148,15 @@ export function PayPanel() {
     // very state this effect reacts to risks a feedback loop.
     const updated = usePayrollBatchesStore.getState().findById(activeBatch.id);
     const partials = updated?.partialSigs ?? [];
+    // `prev.map` only fills rows that already exist in `sigs` — it cannot
+    // create a row for a slot `sigs` doesn't have yet. That's safe only
+    // because a merge can never land while `sigs` is empty for a batch that
+    // has this effect live: handleBuild seeds all `cfg.m` rows into `sigs`
+    // in the same commit that sets `activeBatchId` (and the resume effect
+    // does the same via `restoredSigs`), so by the time `activeBatch` is
+    // non-null here, `sigs` already has one row per slot. If a future path
+    // ever sets `activeBatchId` without seeding `sigs` first, a merge landing
+    // in that window would be silently dropped with no later re-sync.
     lifecycle.setSigs((prev) =>
       prev.map((row) => {
         const found = partials.find((p) => p.slotIndex === row.slotIndex);
