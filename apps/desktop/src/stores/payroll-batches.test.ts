@@ -504,6 +504,26 @@ describe("2.7c auto-broadcast state transitions", () => {
     expect(b.broadcastInFlight).toBeUndefined();
   });
 
+  it("markBroadcastFailed transitions broadcast_countdown → broadcast_failed (onElapsed pre-check)", async () => {
+    // BUG 4 fix: this is the transition AutoBroadcastCountdown.onElapsed's
+    // three pre-checks rely on — before state-machine.ts allowed it, this
+    // call silently no-op'd (canTransition guard returned the batch
+    // untouched), leaving broadcast_countdown wedged with no error and no
+    // Retry button. See docs/superpowers/plans/2026-08-12-auto-broadcast-bundle.md Task A.
+    const { usePayrollBatchesStore } = await import("./payroll-batches");
+    const store = usePayrollBatchesStore.getState();
+    store.addBatch({
+      id: "b1",
+      state: "broadcast_countdown",
+      broadcastInFlight: undefined,
+    } as any);
+    store.markBroadcastFailed("b1", "Configure broadcast RPC URL in Settings");
+    const b = store.findById("b1")!;
+    expect(b.state).toBe("broadcast_failed");
+    expect(b.broadcastError).toBe("Configure broadcast RPC URL in Settings");
+    expect(b.broadcastInFlight).toBeUndefined();
+  });
+
   it("retryAutoBroadcast transitions broadcast_failed → approved (operator re-arms)", async () => {
     const { usePayrollBatchesStore } = await import("./payroll-batches");
     const store = usePayrollBatchesStore.getState();
