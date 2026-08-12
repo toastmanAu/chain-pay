@@ -215,6 +215,46 @@ describe("PayPanel — hydration from a persisted batch", () => {
     await waitFor(() => expect(fetchCkbPrices).toHaveBeenCalledWith(["USD"]));
   });
 
+  it("hydrates a sub-100-shannon line as plain decimal, not exponential notation, and survives into a built batch", async () => {
+    // 42 shannons = 4.2e-7 CKB. (Number(v) / 1e8).toString() renders that as
+    // "4.2e-7", which ckbToShannons's /^\d+(\.\d+)?$/ regex rejects — the row
+    // is then silently dropped by buildBatchLinesFromRecipients, the same
+    // silent-drop class as the FX-refresh regression fixed in Task B.
+    usePayeesStore.setState({ payees: [payee()] });
+    usePayrollBatchesStore.setState({
+      batches: [
+        draftBatch({
+          id: "batch-dust",
+          lines: [
+            {
+              payeeId: "p1",
+              fiat: { currency: "USD", minor: 250n },
+              crypto: { asset: "CKB", value: 42n, decimals: 8 },
+              fxRate: "0.005",
+              feeAllocated: { asset: "CKB", value: 0n, decimals: 8 },
+            },
+          ],
+        }),
+      ],
+      selectedDraftId: null,
+    });
+    vi.mocked(fetchCkbPrices).mockResolvedValue(new Map());
+
+    renderPanel([{ pathname: "/pay", state: { autoSelectBatchId: "batch-dust" } }]);
+
+    await waitFor(() => expect(amountInputs()[0]).toHaveValue("0.00000042"));
+
+    fireEvent.click(buildButton());
+    await waitFor(() => expect(screen.getByDisplayValue(PACKET_JSON)).toBeInTheDocument());
+
+    const built = usePayrollBatchesStore
+      .getState()
+      .batches.find((b) => b.id !== "batch-dust") as PayrollBatch;
+    expect(built).toBeDefined();
+    expect(built.lines).toHaveLength(1);
+    expect(built.lines[0]?.crypto.value).toBe(42n);
+  });
+
   it("switches treasury first, then hydrates the packet and signature slots on the next render", async () => {
     useTreasuryStore.setState({
       treasuries: [TREASURY_A, TREASURY_B],

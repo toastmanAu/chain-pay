@@ -16,7 +16,7 @@ import {
   assertMultisigBytesMatchTreasury,
   dumpInputsForInspection,
 } from "@/lib/chains/ckb/multisig-assert";
-import { SHANNONS_PER_CKB, ckbToShannons, toCkbInputValue } from "@/lib/chains/ckb/units";
+import { ckbToShannons, toCkbInputValue } from "@/lib/chains/ckb/units";
 import { lockFromAddress } from "@/lib/chains/ckb/address-lock";
 import {
   buildPaymentSkeleton,
@@ -99,9 +99,7 @@ export function PayPanel() {
       const payee = payees.find((p) => p.id === line.payeeId);
       const row: RecipientRow = {
         address: payee?.walletAddress ?? "",
-        amountCkb: line.crypto.value > 0n
-          ? (Number(line.crypto.value) / Number(SHANNONS_PER_CKB)).toString()
-          : "",
+        amountCkb: line.crypto.value > 0n ? toCkbInputValue(line.crypto.value) : "",
         payeeId: line.payeeId,
       };
       if (line.fxRate && line.fxRate !== "0") row.fxRate = line.fxRate;
