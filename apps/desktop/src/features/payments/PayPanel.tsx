@@ -42,7 +42,6 @@ import {
 } from "./payment-draft";
 import { usePayeesStore } from "@/stores/payees";
 import { usePayrollBatchesStore } from "@/stores/payroll-batches";
-import { useNetworkConfigStore } from "@/stores/network-config";
 import { useIncomingSigsStore } from "@/stores/incoming-sigs";
 import type { TransferPacket } from "@chain-pay/shared";
 import type { OutgoingPacket } from "@/lib/comm/types";
@@ -57,6 +56,7 @@ import { DraftForm } from "./DraftForm";
 import { PacketPanel } from "./PacketPanel";
 import { SignaturePanel } from "./SignaturePanel";
 import { BroadcastResult } from "./BroadcastResult";
+import { useAutoBroadcast } from "./hooks/useAutoBroadcast";
 import { useFxSnapshot } from "./hooks/useFxSnapshot";
 import { usePaymentDraft } from "./hooks/usePaymentDraft";
 import { usePaymentLifecycle } from "./hooks/usePaymentLifecycle";
@@ -386,6 +386,19 @@ export function PayPanel() {
     return lightClient().broadcastTransaction(tx);
   }
 
+  // The auto-broadcast countdown's elapsed handler. `buildSignedTxAndBroadcast`
+  // is handed in rather than reimplemented so the auto path runs the *same*
+  // pre-broadcast multisig guard as the manual button above.
+  const onAutoBroadcastElapsed = useAutoBroadcast({
+    batch: activeBatch,
+    batchStore,
+    broadcast: buildSignedTxAndBroadcast,
+    onBroadcasted: (txHash) => {
+      lifecycle.setBroadcastedTxHash(txHash);
+      lifecycle.setPhase("broadcasted");
+    },
+  });
+
   const handleBroadcast = async () => {
     if (!cfg || !lifecycle.skeleton) return;
     setError(null);
@@ -646,61 +659,7 @@ export function PayPanel() {
       {/* Auto-broadcast countdown — fires when store transitions to broadcast_countdown. */}
       {activeBatch && activeBatch.state === "broadcast_countdown" ? (
         <AutoBroadcastCountdown
-          onElapsed={async () => {
-            // Guard: a broadcast RPC URL must be configured (or light-client
-            // broadcast must be viable). Check before marking initiating so
-            // the user sees a clear error instead of a silent failure. This
-            // relies on state-machine.ts allowing broadcast_countdown →
-            // broadcast_failed (see Task A of the auto-broadcast bug bundle);
-            // before that, markBroadcastFailed silently no-op'd here and the
-            // batch stayed wedged in broadcast_countdown forever.
-            const { broadcastRpcUrl } = useNetworkConfigStore.getState();
-            if (!broadcastRpcUrl) {
-              batchStore.markBroadcastFailed(
-                activeBatch.id,
-                "Configure broadcast RPC URL in Settings",
-              );
-              return;
-            }
-            // Reconstruct the tx from the persisted bytes so this path is
-            // independent of React state (skeleton may be null if the user
-            // navigated away and back).
-            if (!activeBatch.txBytes) {
-              batchStore.markBroadcastFailed(
-                activeBatch.id,
-                "No transaction bytes in batch — this draft can't be resumed; start a new payment",
-              );
-              return;
-            }
-            if (!activeBatch.partialSigs || activeBatch.partialSigs.length === 0) {
-              batchStore.markBroadcastFailed(
-                activeBatch.id,
-                "No partial signatures collected yet — collect signatures, then retry the broadcast",
-              );
-              return;
-            }
-            batchStore.markBroadcastInitiating(activeBatch.id);
-            try {
-              const tx = Transaction.fromBytes(bytesFrom(activeBatch.txBytes));
-              const partials: PartialSignature[] = activeBatch.partialSigs.map((p) => ({
-                slotIndex: p.slotIndex,
-                signature: p.signature,
-              }));
-              // buildSignedTxAndBroadcast merges sigs into tx, runs sanity
-              // checks, then broadcasts — same path as manual handleBroadcast.
-              const txHash = await buildSignedTxAndBroadcast(tx, partials);
-              lifecycle.setBroadcastedTxHash(txHash);
-              lifecycle.setPhase("broadcasted");
-              batchStore.transition(activeBatch.id, "broadcasted");
-              batchStore.updateBatch(activeBatch.id, {
-                pendingTxId: txHash,
-                partialSigs: [],
-              });
-            } catch (err) {
-              const msg = err instanceof Error ? err.message : String(err);
-              batchStore.markBroadcastFailed(activeBatch.id, msg);
-            }
-          }}
+          onElapsed={onAutoBroadcastElapsed}
           onCancel={() => batchStore.cancelAutoBroadcast(activeBatch.id)}
         />
       ) : null}
