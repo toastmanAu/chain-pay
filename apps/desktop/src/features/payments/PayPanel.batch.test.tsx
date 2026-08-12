@@ -390,6 +390,28 @@ describe("PayPanel — FX", () => {
     await waitFor(() => expect(amountInputs()[0]).toHaveValue("250"));
   });
 
+  it("the error-state retry button actually re-fetches (previously same bug as re-fetch)", async () => {
+    // Same defect and fix as "the re-fetch button actually re-fetches" above,
+    // but through FxSnapshotPanel's OTHER call site — the inline "retry" link
+    // shown in its error branch. Task B wrapped both buttons identically
+    // (`onClick={() => void onRefresh()}`), but only the success-state
+    // "re-fetch" button had a test; this button was left exercising the same
+    // MouseEvent-as-rowsOverride bug unverified.
+    usePayeesStore.setState({ payees: [payee()] });
+    vi.mocked(fetchCkbPrices).mockRejectedValue(new Error("CoinGecko HTTP 429 Too Many Requests"));
+    renderPanel();
+    await addPayeeFromPicker();
+
+    expect(await screen.findByText(/FX fetch failed: CoinGecko HTTP 429/)).toBeInTheDocument();
+
+    vi.mocked(fetchCkbPrices)
+      .mockClear()
+      .mockResolvedValue(new Map([["USD", USD_QUOTE]]));
+    fireEvent.click(screen.getByRole("button", { name: "retry" }));
+
+    await waitFor(() => expect(fetchCkbPrices).toHaveBeenCalledWith(["USD"]));
+  });
+
   it("re-quotes correctly when refetchFx is reached with a real rows array", async () => {
     // The same function, reached the way the batch-hydration effect reaches it
     // (refetchFx(hydratedRows)) rather than through the broken button, does

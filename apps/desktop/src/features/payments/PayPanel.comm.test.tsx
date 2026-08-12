@@ -446,6 +446,55 @@ describe("PayPanel — auto-broadcast", () => {
     expect(screen.getByRole("button", { name: "Retry broadcast" })).toBeInTheDocument();
   });
 
+  it("a batch with no transaction bytes surfaces an error and reaches broadcast_failed", async () => {
+    // FIXED (was BUG PIN): same defect as the missing-RPC-URL and
+    // no-collected-signatures cases above, hit via the second onElapsed
+    // pre-check (Task A's third armed guard) instead of the first or third.
+    // Not "another" bug — it is the identical broadcast_countdown →
+    // broadcast_failed transition, exercised through the !txBytes guard
+    // clause. Task A also reworded this branch's message (step A5), so
+    // neither the branch nor the new string had coverage before this test.
+    //
+    // Can't reuse elapseCountdown()/countdownBatch() as-is: it drives
+    // activeBatchId via `selectedDraftId`, whose resume-hydration effect
+    // (PayPanel.tsx) itself bails out — and never sets activeBatchId — when
+    // `batch.txBytes` is missing, so the countdown UI would never mount and
+    // the very guard under test would stay unreached. Instead, set
+    // activeBatchId directly via the `autoSelectBatchId` router-state path
+    // (the same one ReviewInvoiceForm uses), which only needs the batch id
+    // to exist in the store — no txBytes required to reach the countdown.
+    useNetworkConfigStore.setState({ network: "testnet", broadcastRpcUrl: "http://node:8114" });
+    // `Partial<PayrollBatch>` overrides can't carry `txBytes: undefined`
+    // under `exactOptionalPropertyTypes` (the property must be absent, not
+    // present-and-undefined) — strip it via destructuring instead.
+    const { txBytes: _txBytes, ...batch } = countdownBatch();
+    usePayrollBatchesStore.setState({
+      batches: [batch as PayrollBatch],
+      selectedDraftId: null,
+    });
+    vi.useFakeTimers();
+    renderPanel([{ pathname: "/pay", state: { autoSelectBatchId: batch.id } }]);
+    expect(screen.getByText(/Broadcasting in/)).toBeInTheDocument();
+    // One act() per second: AutoBroadcastCountdown chains its setTimeout from
+    // an effect, so the next timer is only registered once React commits the
+    // previous tick.
+    for (let tick = 0; tick <= 5; tick += 1) {
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(1_000);
+      });
+    }
+
+    expect(assertGuardSpy).not.toHaveBeenCalled();
+    expect(broadcastTransaction).not.toHaveBeenCalled();
+    const after = usePayrollBatchesStore.getState().batches[0] as PayrollBatch;
+    expect(after.state).toBe("broadcast_failed");
+    expect(after.broadcastError).toBe(
+      "No transaction bytes in batch — this draft can't be resumed; start a new payment",
+    );
+    expect(screen.getByText("Broadcast failed")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Retry broadcast" })).toBeInTheDocument();
+  });
+
   it("cancelling the countdown returns the batch to approved without broadcasting", async () => {
     useNetworkConfigStore.setState({ network: "testnet", broadcastRpcUrl: "http://node:8114" });
     usePayrollBatchesStore.setState({
