@@ -131,10 +131,37 @@ export function PayPanel() {
     if (!activeBatch?.sighashDigest || !multisig) return;
     const buffered = useIncomingSigsStore.getState().peek(activeBatch.sighashDigest);
     if (buffered.length === 0) return;
-    batchStore.drainIncomingSigsInto(activeBatch.id, {
+    const { merged } = batchStore.drainIncomingSigsInto(activeBatch.id, {
       m: multisig.m,
       pubkeyHashes: multisig.pubkeyHashes,
     });
+    if (merged === 0) return;
+    // Reflect what the drain just merged into the batch's partialSigs back
+    // into the `sigs` React state SignaturePanel renders and the M-of-N gate
+    // reads. drainIncomingSigsInto already refuses to overwrite a slot
+    // already present in partialSigs (`existingSlots`), so this can never
+    // clobber an operator-typed signature — it only fills in what the drain
+    // just accepted. Read fresh from the store rather than off `activeBatch`,
+    // since the drain call above just mutated it. Uses lifecycle.setSigs
+    // directly, NOT updateSigs: updateSigs writes straight back into the
+    // store's partialSigs on every call, and looping that write through the
+    // very state this effect reacts to risks a feedback loop.
+    const updated = usePayrollBatchesStore.getState().findById(activeBatch.id);
+    const partials = updated?.partialSigs ?? [];
+    lifecycle.setSigs((prev) =>
+      prev.map((row) => {
+        const found = partials.find((p) => p.slotIndex === row.slotIndex);
+        return found ? { ...row, signature: found.signature } : row;
+      }),
+    );
+    // `lifecycle` is a freshly-allocated object every render (same reasoning
+    // as the resume effect below), so it deliberately stays out of the
+    // dependency array — including it would re-run this effect on every
+    // render. Safe without it: the drain itself is idempotent (the
+    // `buffered.length === 0` guard above short-circuits once the buffer is
+    // empty) and lifecycle.setSigs never changes activeBatch, multisig or
+    // batchStore, so it cannot re-trigger this effect.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeBatch?.id, activeBatch?.sighashDigest, multisig, batchStore]);
   const cfg = useMemo<CkbMultisigConfig | null>(() => {
     if (!multisig) return null;

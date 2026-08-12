@@ -72,7 +72,6 @@ import {
   broadcastButton,
   buildButton,
   buildOnce,
-  captureUnhandledRejections,
   CFG_B,
   currentSkeletonTx,
   DIGEST,
@@ -327,14 +326,15 @@ describe("PayPanel — FX", () => {
     expect(screen.queryByText(/FX snapshot/)).not.toBeInTheDocument();
   });
 
-  it("BUG PIN: the re-fetch button hands its click event to refetchFx, which throws instead of refetching", async () => {
-    // FxSnapshotPanel renders <button onClick={onRefresh}> and PayPanel passes
-    // `refetchFx` straight in, so React invokes it as refetchFx(mouseEvent).
-    // refetchFx treats its first argument as `rowsOverride` and calls
-    // rows.map(...) on the event → TypeError, swallowed as an unhandled
-    // rejection. The operator sees nothing happen. DraftForm's prop type
-    // `refetchFx: () => void | Promise<void>` is what hides this from tsc.
-    // The "retry" button in the FX error branch has the identical defect.
+  it("the re-fetch button actually re-fetches (previously BUG PIN)", async () => {
+    // FIXED (was BUG PIN): FxSnapshotPanel used to render
+    // <button onClick={onRefresh}>, so React invoked it as
+    // refetchFx(mouseEvent); refetchFx treated its first argument as
+    // `rowsOverride` and called rows.map(...) on the event → TypeError,
+    // swallowed as an unhandled rejection with no visible effect. Both call
+    // sites in FxSnapshotPanel now wrap the handler as
+    // `onClick={() => void onRefresh()}`, so no event ever reaches
+    // refetchFx and it re-fetches with the current draft rows instead.
     usePayeesStore.setState({ payees: [payee()] });
     vi.mocked(fetchCkbPrices).mockResolvedValue(new Map([["USD", USD_QUOTE]]));
     renderPanel();
@@ -343,16 +343,11 @@ describe("PayPanel — FX", () => {
     vi.mocked(fetchCkbPrices)
       .mockClear()
       .mockResolvedValue(new Map([["USD", { ...USD_QUOTE, rate: "0.01" }]]));
-    const rejections = await captureUnhandledRejections(() => {
-      fireEvent.click(screen.getByRole("button", { name: "re-fetch" }));
-    });
+    fireEvent.click(screen.getByRole("button", { name: "re-fetch" }));
 
-    expect(rejections.map((r) => (r as Error).message)).toEqual([
-      "rows.map is not a function",
-    ]);
-    expect(fetchCkbPrices).not.toHaveBeenCalled();
-    // Amounts are untouched — no 250 CKB re-quote reaches the row.
-    expect(amountInputs()[0]).toHaveValue("500");
+    await waitFor(() => expect(fetchCkbPrices).toHaveBeenCalledWith(["USD"]));
+    // $2.50 at the new rate (1 CKB = 0.01 USD) re-quotes to 250 CKB.
+    await waitFor(() => expect(amountInputs()[0]).toHaveValue("250"));
   });
 
   it("re-quotes correctly when refetchFx is reached with a real rows array", async () => {

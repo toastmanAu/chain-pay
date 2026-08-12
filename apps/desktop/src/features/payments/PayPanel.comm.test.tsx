@@ -237,12 +237,11 @@ describe("PayPanel — incoming-sigs drain", () => {
     expect(batch.state).toBe("calculated");
   });
 
-  it("BUG PIN: a drained signature never reaches the signature textareas", async () => {
-    // The drain writes to batch.partialSigs, but PayPanel's `sigs` React state
-    // is only ever seeded by handleBuild (empty) or the resume effect. Nothing
-    // syncs state ← store, so a comm-arrived signature is invisible in the
-    // SignaturePanel until the operator resumes the draft, and Broadcast stays
-    // disabled even though M sigs are collected.
+  it("a drained signature reaches the signature textareas and unlocks Merge & broadcast (previously BUG PIN)", async () => {
+    // FIXED (was BUG PIN): the drain wrote to batch.partialSigs, but nothing
+    // synced PayPanel's `sigs` React state — the drain effect now calls
+    // lifecycle.setSigs after a merge, reconciling each persisted slot back
+    // into the row the SignaturePanel textareas and the M-of-N gate read.
     bufferSig(0, SIG_A);
     bufferSig(1, SIG_B);
     await buildPayeeBatch();
@@ -251,8 +250,50 @@ describe("PayPanel — incoming-sigs drain", () => {
       const batch = usePayrollBatchesStore.getState().batches[0] as PayrollBatch;
       expect(batch.partialSigs).toHaveLength(2);
     });
-    expect(sigBoxes().map((b) => (b as HTMLTextAreaElement).value)).toEqual(["", ""]);
-    expect(screen.getByRole("button", { name: /Merge & broadcast/ })).toBeDisabled();
+    await waitFor(() => {
+      expect(sigBoxes().map((b) => (b as HTMLTextAreaElement).value)).toEqual([SIG_A, SIG_B]);
+    });
+    expect(screen.getByRole("button", { name: /Merge & broadcast/ })).toBeEnabled();
+  });
+
+  it("does not overwrite an operator-typed signature when a later drain touches the same slot", async () => {
+    // Proves the reconciliation added for the fix above cannot reopen the
+    // "never clobber operator input" guarantee that drainIncomingSigsInto
+    // already provides at the store layer (its `existingSlots` check). A
+    // comm signature arriving for a slot the operator already filled must
+    // leave that slot's textarea untouched; a genuine signature for a
+    // still-empty slot must still come through.
+    await buildPayeeBatch();
+
+    const operatorSig = `0x${"99".repeat(65)}`;
+    fireEvent.change(sigBoxes()[0]!, { target: { value: operatorSig } });
+    await waitFor(() => {
+      const batch = usePayrollBatchesStore.getState().batches[0] as PayrollBatch;
+      expect(batch.partialSigs?.find((p) => p.slotIndex === 0)?.signature).toBe(operatorSig);
+    });
+
+    // A comm signature for the SAME slot the operator just filled (a would-be
+    // clobber), plus a genuine one for the still-empty slot.
+    bufferSig(0, signDigest(DIGEST, KEY_C));
+    bufferSig(1, SIG_B);
+
+    // Nudge the drain effect to re-run: any write to the batches store gives
+    // PayPanel a fresh `batchStore` reference, which is exactly what a
+    // second comm delivery does in the running app. This mirrors that
+    // without touching the sig rows themselves.
+    act(() => {
+      const id = usePayrollBatchesStore.getState().batches[0]!.id;
+      usePayrollBatchesStore.getState().updateBatch(id, {});
+    });
+
+    await waitFor(() => {
+      expect((sigBoxes()[1] as HTMLTextAreaElement).value).toBe(SIG_B);
+    });
+    // Slot 0 is exactly what the operator typed — the rejected KEY_C
+    // signature never reached the textarea or the store.
+    expect((sigBoxes()[0] as HTMLTextAreaElement).value).toBe(operatorSig);
+    const batch = usePayrollBatchesStore.getState().batches[0] as PayrollBatch;
+    expect(batch.partialSigs?.find((p) => p.slotIndex === 0)?.signature).toBe(operatorSig);
   });
 
   it("leaves the buffer untouched for a manual payment with no active batch", async () => {
