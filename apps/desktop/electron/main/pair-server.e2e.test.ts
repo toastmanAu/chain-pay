@@ -143,7 +143,7 @@ describe("pair-server end-to-end", () => {
     const newDispatcher = new Agent({ connect: { ca: restarted.certPem } });
     try {
       const res = await fetch(`https://127.0.0.1:${restarted.port}/health`, {
-        // @ts-expect-error
+        // @ts-expect-error — undici dispatcher
         dispatcher: newDispatcher,
       });
       expect(res.status).toBe(200);

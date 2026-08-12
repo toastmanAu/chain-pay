@@ -55,7 +55,7 @@ export function CkbTreasuryDetail({ treasury }: { treasury: MultisigTreasury }) 
     return () => {
       cancelled = true;
     };
-  }, [lcReady, subscribed, script, ckbSync.tipBlockNumber]);
+  }, [lcReady, subscribed, script, ckbSync.tipBlockNumber, SUBSCRIBE_BUFFER_BLOCKS]);
 
   const balanceQuery = useQuery({
     queryKey: ["treasury-balance", multisig.address],

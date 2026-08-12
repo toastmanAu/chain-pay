@@ -93,7 +93,7 @@ export async function readSafeSnapshot(
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     if (message.startsWith("Safe returned")) throw error;
-    throw new Error(`Contract is not a readable Safe: ${message}`);
+    throw new Error(`Contract is not a readable Safe: ${message}`, { cause: error });
   }
 }
 

@@ -37,7 +37,6 @@ export function extractFields(pages: PageOcr[]): ExtractionResult {
   // total
   const totalMatch = allText.match(TOTAL_LABEL_RE);
   if (totalMatch) {
-    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
     const parsed = parseCurrency(totalMatch[1]!);
     if (parsed.total !== undefined) {
       body.total = parsed.total;
@@ -61,7 +60,6 @@ export function extractFields(pages: PageOcr[]): ExtractionResult {
   // dates
   const issued = allText.match(ISSUED_RE);
   if (issued) {
-    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
     const d = parseDate(issued[1]!);
     if (d) {
       body.issue_date = d;
@@ -70,7 +68,6 @@ export function extractFields(pages: PageOcr[]): ExtractionResult {
   }
   const due = allText.match(DUE_RE);
   if (due) {
-    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
     const d = parseDate(due[1]!);
     if (d) {
       body.due_date = d;
@@ -118,7 +115,6 @@ export function extractFields(pages: PageOcr[]): ExtractionResult {
   }
   const evm = allText.match(EVM_RE);
   if (evm) {
-    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
     body.payment_details = { ...(body.payment_details ?? {}), evm_address: evm[1]!.toLowerCase() };
     field_confidences.evm_address = 0.99;
   }

@@ -59,7 +59,6 @@ export class RelayClient {
   async pollSession(id: string): Promise<unknown> {
     const deadline = this.pollTimeoutMs;
     let waited = 0;
-    // eslint-disable-next-line no-constant-condition
     while (true) {
       const res = await this.fetchImpl(`${this.baseUrl}/session/${id}`);
       if (!res.ok) throw new Error(`relay /session poll failed: ${res.status}`);

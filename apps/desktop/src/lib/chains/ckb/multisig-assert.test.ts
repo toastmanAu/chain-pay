@@ -137,7 +137,6 @@ describe("assertMultisigBytesMatchTreasury", () => {
 
 describe("dumpInputsForInspection", () => {
   beforeEach(() => {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     delete (globalThis as any).__chainpay_debug;
   });
 
@@ -155,7 +154,6 @@ describe("dumpInputsForInspection", () => {
 
     dumpInputsForInspection(tx, multisig);
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const debug = (globalThis as any).__chainpay_debug;
     expect(debug).toBeDefined();
     expect(debug.treasuryAddress).toBe(multisig.address);

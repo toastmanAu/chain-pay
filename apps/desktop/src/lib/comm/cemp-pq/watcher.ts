@@ -62,7 +62,6 @@ export function createWatcher(deps: WatcherDeps): Watcher {
   let timer: ReturnType<typeof setInterval> | null = null;
 
   if (!deps.sendAck && process.env["NODE_ENV"] !== "test") {
-    // eslint-disable-next-line no-console
     console.warn(
       "[comm] watcher: sendAck dep not wired — auto-ack will be skipped for incoming packets",
     );
@@ -106,7 +105,6 @@ export function createWatcher(deps: WatcherDeps): Watcher {
       if (deps.sendAck) {
         void deps.sendAck(senderHashHex, { txHash: body.txHash }).catch(
           (err: unknown) => {
-            // eslint-disable-next-line no-console
             console.warn(
               "[comm] auto-ack emission failed",
               { senderHashHex, txHash: body.txHash },

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { Cell, hexFrom, HasherCkb, numToBytes, OutPoint, Script } from "@ckb-ccc/core";
+import { Cell, HasherCkb, numToBytes, OutPoint, Script } from "@ckb-ccc/core";
 import type { Hex20 } from "@chain-pay/shared";
 import { treasuryLockScript } from "./address";
 import type { CkbMultisigConfig } from "./multisig";

@@ -12,7 +12,7 @@ import {
   parseCurrency,
   parseDate,
 } from "@chain-pay/shared";
-import type { ExtractionResult, MapperFn, PageOcr } from "./types";
+import type { MapperFn, PageOcr } from "./types";
 import { SuryaContentError } from "./types";
 import { parseBlocks, parseTable, type Block } from "./surya-html";
 
@@ -20,8 +20,8 @@ const STAGE_NAME = "schema-extraction" as const;
 const STAGE_MODEL = "surya-mapper-v1" as const;
 const STAGE_VERSION = "0.1.0" as const;
 
-const SUBTOTAL_RE = /subtotal\s*[:\-]?\s*[\$£€]?\s*([\d,]+(?:\.\d+)?)/i;
-const TAX_RE = /^(?:tax|gst|vat)\s*(?:\(?\d+%?\)?)?\s*[:\-]?\s*[\$£€]?\s*([\d,]+(?:\.\d+)?)/i;
+const SUBTOTAL_RE = /subtotal\s*[:-]?\s*[$£€]?\s*([\d,]+(?:\.\d+)?)/i;
+const TAX_RE = /^(?:tax|gst|vat)\s*(?:\(?\d+%?\)?)?\s*[:-]?\s*[$£€]?\s*([\d,]+(?:\.\d+)?)/i;
 
 type Mut = {
   body: Partial<Invoice["invoice"]>;

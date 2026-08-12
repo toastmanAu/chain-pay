@@ -57,7 +57,7 @@ export async function syncBitcoinWatch(args: {
   } catch (caught) {
     const message = safeSyncError(caught);
     useBitcoinWatchStore.getState().failSync(args.treasuryId, message);
-    throw new Error(message);
+    throw new Error(message, { cause: caught });
   }
 }
 

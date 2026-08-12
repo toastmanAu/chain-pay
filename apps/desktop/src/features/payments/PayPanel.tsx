@@ -6,7 +6,7 @@ import {
   Script,
   Transaction,
 } from "@ckb-ccc/core";
-import { isMultisigTreasury, type CkbMultisig, type Treasury } from "@chain-pay/shared";
+import { isMultisigTreasury, type CkbMultisig } from "@chain-pay/shared";
 import { useTreasuryStore } from "@/stores/treasury";
 import { useSyncStore } from "@/stores/sync";
 import { lightClient } from "@/lib/light-client/client";
@@ -204,7 +204,9 @@ export function PayPanel() {
     }
     // `draft.treasuryId` (not `draft`) stays the dependency: the hook returns a
     // fresh object every render, so depending on it would re-run this effect on
-    // every render instead of only on a treasury switch.
+    // every render instead of only on a treasury switch. Same reasoning applies
+    // to `lifecycle`, which is likewise a freshly-allocated object every render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [batchStore, draft.treasuryId, cfg, multisig]);
 
   // Persist sig collection incrementally so closing the window mid-collection

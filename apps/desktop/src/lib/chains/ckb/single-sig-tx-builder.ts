@@ -86,7 +86,6 @@ export function buildSingleSigSend(input: SingleSigSendInput): SingleSigSendSkel
   if (remainder >= minChange) {
     const changeOutput = tx.outputs[tx.outputs.length - 1];
     // changeOutput was just pushed above — it exists.
-    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
     changeOutput!.capacity = remainder;
     return { tx, totalIn, totalOut: totalOut + remainder, change: remainder, fee: feeWithChange };
   }

@@ -31,7 +31,6 @@ describe("sendAffordability", () => {
     const outputsTotal = 6_100_000_000n; // 61 CKB
     const feeReserve = SEND_FEE_RESERVE_SHANNONS; // 1 CKB = 100_000_000n
     const balance = 6_100_000_000n; // only 61 CKB
-    const expectedShortfall = outputsTotal + feeReserve - balance; // 100_000_000n = 1 CKB
     const result = sendAffordability(outputsTotal, feeReserve, balance);
     expect(result.affordable).toBe(false);
     expect(result.shortfallShannons).toBe(100_000_000n);

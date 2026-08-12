@@ -5,7 +5,6 @@ import { Buffer } from "node:buffer";
 import {
   NONCE_ACCOUNT_LENGTH,
   NonceAccount,
-  PublicKey,
   SystemProgram,
 } from "@solana/web3.js";
 import type {
