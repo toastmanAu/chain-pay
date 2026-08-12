@@ -615,7 +615,11 @@ export function PayPanel() {
           onElapsed={async () => {
             // Guard: a broadcast RPC URL must be configured (or light-client
             // broadcast must be viable). Check before marking initiating so
-            // the user sees a clear error instead of a silent failure.
+            // the user sees a clear error instead of a silent failure. This
+            // relies on state-machine.ts allowing broadcast_countdown →
+            // broadcast_failed (see Task A of the auto-broadcast bug bundle);
+            // before that, markBroadcastFailed silently no-op'd here and the
+            // batch stayed wedged in broadcast_countdown forever.
             const { broadcastRpcUrl } = useNetworkConfigStore.getState();
             if (!broadcastRpcUrl) {
               batchStore.markBroadcastFailed(
@@ -628,11 +632,17 @@ export function PayPanel() {
             // independent of React state (skeleton may be null if the user
             // navigated away and back).
             if (!activeBatch.txBytes) {
-              batchStore.markBroadcastFailed(activeBatch.id, "No transaction bytes in batch");
+              batchStore.markBroadcastFailed(
+                activeBatch.id,
+                "No transaction bytes in batch — this draft can't be resumed; start a new payment",
+              );
               return;
             }
             if (!activeBatch.partialSigs || activeBatch.partialSigs.length === 0) {
-              batchStore.markBroadcastFailed(activeBatch.id, "No partial signatures collected yet");
+              batchStore.markBroadcastFailed(
+                activeBatch.id,
+                "No partial signatures collected yet — collect signatures, then retry the broadcast",
+              );
               return;
             }
             batchStore.markBroadcastInitiating(activeBatch.id);

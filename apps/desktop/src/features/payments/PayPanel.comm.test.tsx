@@ -344,20 +344,20 @@ describe("PayPanel — auto-broadcast", () => {
     expect(after.partialSigs).toHaveLength(2);
   });
 
-  it("BUG PIN: a missing broadcast RPC URL wedges the batch in broadcast_countdown with no error", async () => {
-    // onElapsed's three pre-checks call markBroadcastFailed while the batch is
-    // STILL in `broadcast_countdown`, but the state machine only allows
-    // broadcast_countdown → {broadcast_initiating, approved, cancelled}.
-    // markBroadcastFailed no-ops on an illegal transition (`if
-    // (!canTransition(...)) return b`), so nothing is recorded at all: no
-    // state change, no broadcastError, no Retry button. The countdown has
-    // already set its firedRef, so it never fires again either — the batch is
-    // stuck showing "Broadcasting in 0…" forever.
-    //
-    // The source comment says these checks exist "so the user sees a clear
-    // error instead of a silent failure"; the code does the opposite. The
-    // post-markBroadcastInitiating catch block is unaffected (see the drift
-    // test above) because broadcast_initiating → broadcast_failed IS legal.
+  it("a missing broadcast RPC URL surfaces an error and reaches broadcast_failed", async () => {
+    // FIXED (was BUG PIN): onElapsed's three pre-checks call
+    // markBroadcastFailed while the batch is STILL in `broadcast_countdown`.
+    // Before Task A of the auto-broadcast bug bundle, the state machine only
+    // allowed broadcast_countdown → {broadcast_initiating, approved,
+    // cancelled}, so markBroadcastFailed no-op'd on the illegal transition
+    // (`if (!canTransition(...)) return b`) — no state change, no
+    // broadcastError, no Retry button, and the countdown's firedRef meant it
+    // never fired again either. The batch sat stuck showing "Broadcasting in
+    // 0…" forever. state-machine.ts now allows broadcast_countdown →
+    // broadcast_failed, so this pre-check reaches the user for the first
+    // time. The post-markBroadcastInitiating catch block was always fine
+    // (see the drift test above) because broadcast_initiating →
+    // broadcast_failed was already legal.
     //
     // primeStores leaves broadcastRpcUrl empty on purpose here.
     await elapseCountdown(countdownBatch());
@@ -365,22 +365,32 @@ describe("PayPanel — auto-broadcast", () => {
     expect(assertGuardSpy).not.toHaveBeenCalled();
     expect(broadcastTransaction).not.toHaveBeenCalled();
     const after = usePayrollBatchesStore.getState().batches[0] as PayrollBatch;
-    expect(after.state).toBe("broadcast_countdown");
-    expect(after.broadcastError).toBeUndefined();
-    expect(screen.queryByText("Broadcast failed")).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Retry broadcast" })).not.toBeInTheDocument();
-    expect(screen.getByText(/Broadcasting in 0/)).toBeInTheDocument();
+    expect(after.state).toBe("broadcast_failed");
+    expect(after.broadcastError).toBe("Configure broadcast RPC URL in Settings");
+    expect(screen.getByText("Broadcast failed")).toBeInTheDocument();
+    expect(screen.getByText("Configure broadcast RPC URL in Settings")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Retry broadcast" })).toBeInTheDocument();
+    expect(screen.queryByText(/Broadcasting in/)).not.toBeInTheDocument();
   });
 
-  it("BUG PIN: a batch with no collected signatures wedges the same way", async () => {
+  it("a batch with no collected signatures surfaces an error and reaches broadcast_failed", async () => {
+    // FIXED (was BUG PIN): same defect as the missing-RPC-URL case above, hit
+    // via the third onElapsed pre-check instead of the first. Not "another"
+    // bug — it is the identical broadcast_countdown → broadcast_failed
+    // transition, exercised through a different guard clause, so it flips to
+    // asserting fixed behaviour in the same commit as that test.
     useNetworkConfigStore.setState({ network: "testnet", broadcastRpcUrl: "http://node:8114" });
     await elapseCountdown(countdownBatch({ partialSigs: [] }));
 
     expect(assertGuardSpy).not.toHaveBeenCalled();
     expect(broadcastTransaction).not.toHaveBeenCalled();
     const after = usePayrollBatchesStore.getState().batches[0] as PayrollBatch;
-    expect(after.state).toBe("broadcast_countdown");
-    expect(after.broadcastError).toBeUndefined();
+    expect(after.state).toBe("broadcast_failed");
+    expect(after.broadcastError).toBe(
+      "No partial signatures collected yet — collect signatures, then retry the broadcast",
+    );
+    expect(screen.getByText("Broadcast failed")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Retry broadcast" })).toBeInTheDocument();
   });
 
   it("cancelling the countdown returns the batch to approved without broadcasting", async () => {
