@@ -119,12 +119,13 @@ export function useCommSendRetry({
 
     return () => {
       unsub();
-      // Deliberately reads the LIVE ref, not a snapshot captured at effect-setup
-      // time: this effect runs once on mount, and `timersRef.current` is mutated
-      // continuously afterward (every store change re-runs scheduleAll, which
-      // adds/removes timer entries). Capturing `timersRef.current` into a local
-      // here would only see the near-empty map from mount time and leak every
-      // timer scheduled later in the component's lifetime.
+      // The lint rule guards against a ref whose `.current` is REASSIGNED between
+      // effect setup and cleanup, leaving the cleanup holding a stale value. That
+      // cannot happen here: `timersRef.current` is the one Map allocated by
+      // useRef, never reassigned — scheduleAll only mutates it in place via
+      // set/delete. Reading it live and capturing it into a local at setup would
+      // therefore be equivalent, so the warning is a false positive and clearing
+      // the live map is correct.
       // eslint-disable-next-line react-hooks/exhaustive-deps
       for (const t of timersRef.current.values()) clearTimeout(t);
       timersRef.current.clear();
