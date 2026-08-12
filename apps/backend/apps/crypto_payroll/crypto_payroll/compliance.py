@@ -18,11 +18,10 @@ from typing import Iterable
 
 import frappe
 
+from crypto_payroll.chains import CHAIN_RULES, rules_for
 
-ALLOWED_CHAINS = {
-    "ckb:mainnet", "ckb:testnet", "evm:11155111",
-    "sol:devnet", "sol:mainnet", "btc:testnet", "btc:mainnet",
-}
+
+ALLOWED_CHAINS = set(CHAIN_RULES)
 MAX_EXPORT_ROWS = 10_000
 UNAVAILABLE = "unavailable"
 
@@ -209,56 +208,13 @@ def _source_digests(batch) -> set[str]:
         }
         for row in sorted(batch.payments, key=lambda row: (int(row.idx or 0), row.name or ""))
     ]
-    evm = None
-    if batch.chain == "evm:11155111":
-        evm = {
-            "safe_address": batch.safe_address,
-            "safe_tx_hash": batch.safe_tx_hash,
-            "outer_tx_hash": batch.tx_hash,
-            "executor_address": batch.executor_address,
-            "recipient_address": batch.recipient_address,
-            "confirmed_block_number": str(batch.confirmed_block_number),
-            "gas_used": str(batch.gas_used),
-            "effective_gas_price_wei": str(batch.effective_gas_price_wei),
-            "gas_fee_wei": str(batch.gas_fee_wei),
-            "gas_payer": batch.gas_payer,
-        }
-    solana = None
-    if batch.chain.startswith("sol:"):
-        solana = {
-            "review_digest": batch.review_digest,
-            "source_address": batch.source_address,
-            "recipient_address": batch.recipient_address,
-            "fee_payer_address": batch.fee_payer_address,
-            "nonce_account": batch.nonce_account,
-            "nonce_authority": batch.nonce_authority,
-            "durable_nonce": batch.durable_nonce,
-            "finalized_slot": str(batch.finalized_slot),
-            "amount_lamports": str(batch.amount_lamports),
-            "fee_lamports": str(batch.fee_lamports),
-            "fee_payer_policy": batch.fee_payer_policy,
-            "solana_message_base64": batch.solana_message_base64,
-        }
-    bitcoin = None
-    if batch.chain.startswith("btc:"):
-        try:
-            outputs = json.loads(batch.bitcoin_outputs_json)
-        except (TypeError, json.JSONDecodeError):
-            frappe.throw(f"payment record {batch.name} has invalid Bitcoin outputs")
-        bitcoin = {
-            "review_digest": batch.review_digest,
-            "wtxid": batch.wtxid,
-            "raw_transaction_hash": batch.raw_transaction_hash,
-            "bitcoin_block_height": str(batch.bitcoin_block_height),
-            "block_hash": batch.block_hash,
-            "confirmations": str(batch.confirmations),
-            "input_value_sats": str(batch.input_value_sats),
-            "output_value_sats": str(batch.output_value_sats),
-            "fee_sats": str(batch.fee_sats),
-            "fee_rate_sats_per_vbyte": str(batch.fee_rate_sats_per_vbyte),
-            "fee_payer_policy": batch.fee_payer_policy,
-            "bitcoin_outputs_json": json.dumps(outputs, sort_keys=True, separators=(",", ":")),
-        }
+    # The batch's own chain rules rebuild whichever evidence object they own;
+    # the other two stay None, matching how _normalise_record wrote them.
+    rules = rules_for(batch.chain)
+    rebuilt = rules.rebuild_evidence(batch) if rules.evidence_key else None
+    evm = rebuilt if rules.evidence_key == "evm" else None
+    solana = rebuilt if rules.evidence_key == "solana" else None
+    bitcoin = rebuilt if rules.evidence_key == "bitcoin" else None
     source = {
         "batch_id": batch.external_id,
         "source_type": batch.source_type,
@@ -310,17 +266,8 @@ def _fx_fields(raw: str | None) -> dict[str, str]:
 
 
 def _network_fee(batch) -> tuple[str, str, str]:
-    if batch.chain == "evm:11155111" and batch.gas_fee_wei:
-        value = str(batch.gas_fee_wei)
-        return value, f"{format_units(value, 18)} ETH", batch.gas_payer or "executor"
-    if batch.chain.startswith("sol:") and batch.fee_lamports is not None:
-        value = str(batch.fee_lamports)
-        payer = f"{batch.fee_payer_policy}:{batch.fee_payer_address}"
-        return value, f"{format_units(value, 9)} SOL", payer
-    if batch.chain.startswith("btc:") and batch.fee_sats is not None:
-        value = str(batch.fee_sats)
-        return value, f"{format_units(value, 8)} BTC", batch.fee_payer_policy or "transaction_inputs"
-    return UNAVAILABLE, UNAVAILABLE, UNAVAILABLE
+    fee = rules_for(batch.chain).network_fee(batch)
+    return fee if fee else (UNAVAILABLE, UNAVAILABLE, UNAVAILABLE)
 
 
 def _utc_datetime(value) -> str:

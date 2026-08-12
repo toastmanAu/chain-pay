@@ -183,7 +183,6 @@ export function App() {
           ).chainpay.lcStorage.clear();
           globalThis.localStorage?.removeItem("chain-pay:wipe-lc-on-next-boot");
         } catch (err) {
-          // eslint-disable-next-line no-console
           console.error("lcStorage.clear failed:", err);
         }
       }

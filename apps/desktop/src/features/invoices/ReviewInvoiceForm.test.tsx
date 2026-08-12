@@ -4,7 +4,7 @@ import { cleanup, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { InvoiceRecord, Treasury } from "@chain-pay/shared";
+import type { Treasury } from "@chain-pay/shared";
 import { useInvoicesStore, type StoredInvoiceRecord } from "@/stores/invoices";
 import { useInvoiceDraftsStore } from "@/stores/invoice-drafts";
 import { usePayrollBatchesStore } from "@/stores/payroll-batches";

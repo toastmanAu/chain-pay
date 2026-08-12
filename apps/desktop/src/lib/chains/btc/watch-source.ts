@@ -292,7 +292,7 @@ function parseExtendedPublicKey(
     return { value, node };
   } catch (error) {
     if (error instanceof Error && error.message.includes("not permitted")) throw error;
-    throw new Error("Invalid Bitcoin extended public key");
+    throw new Error("Invalid Bitcoin extended public key", { cause: error });
   }
 }
 

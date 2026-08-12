@@ -40,8 +40,8 @@ function parseMessagePointer(outputDataHex: string): { txHash: string; index: nu
   const bytes = hexToBytes(outputDataHex);
   const view = new DataView(bytes.buffer, bytes.byteOffset);
 
-  // HDR = 4 (full_size) + 2*4 (off_tx, off_idx) = 12
-  const HDR = 12;
+  // _HDR = 4 (full_size) + 2*4 (off_tx, off_idx) = 12 (documents the layout; offsets below are read directly)
+  const _HDR = 12;
   // tx_ser = 4-byte length prefix + 32-byte hash; read offset from the offsets table
   const offTx = view.getUint32(4, true);
   const offIdx = view.getUint32(8, true);

@@ -12,6 +12,7 @@ import { parseSolanaAddress } from "@/lib/chains/sol/address";
 import { useSolanaPaymentsStore } from "@/stores/solana-payments";
 import { useTreasuryStore } from "@/stores/treasury";
 import { postFinalizedSolanaPayment } from "@/lib/accounting/solana-accounting";
+import { formatSol } from "@/lib/format/sol";
 
 const MAX_SIGNATURE_ENVELOPE_BYTES = 2_048;
 
@@ -244,7 +245,6 @@ function solToLamports(value: string): string {
   if (lamports <= 0n || lamports > 18_446_744_073_709_551_615n) throw new Error("SOL amount is outside the supported range");
   return lamports.toString();
 }
-function formatSol(value: string): string { const amount = BigInt(value); const whole = amount / 1_000_000_000n; const fraction = (amount % 1_000_000_000n).toString().padStart(9, "0").replace(/0+$/, ""); return fraction ? `${whole}.${fraction}` : whole.toString(); }
 function usdToMinor(value: string): string { if (!/^(?:0|[1-9]\d*)(?:\.\d{1,2})?$/.test(value)) throw new Error("Enter a canonical USD accounting value with at most 2 decimal places"); const [whole, fraction = ""] = value.split("."); const minor = BigInt(whole!) * 100n + BigInt(fraction.padEnd(2, "0") || "0"); if (minor <= 0n || minor > 18_446_744_073_709_551_615n) throw new Error("Accounting value is outside the supported range"); return minor.toString(); }
 function formatUsdMinor(value: string): string { const minor = BigInt(value); return `${minor / 100n}.${(minor % 100n).toString().padStart(2, "0")}`; }
 function canonicalPayee(value: string): string { const trimmed = value.trim(); if (!trimmed || trimmed !== value || trimmed.length > 140) throw new Error("Payee / accounting reference must not have surrounding whitespace"); return trimmed; }

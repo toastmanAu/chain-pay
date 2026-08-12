@@ -139,7 +139,6 @@ export const usePeerBookStore = create<PeerBookStore>()(
                 addrHash,
               });
             } catch (err) {
-              // eslint-disable-next-line no-console
               console.warn(
                 "[peer-book] dropped peer during v1→v2 migration:",
                 p.address,

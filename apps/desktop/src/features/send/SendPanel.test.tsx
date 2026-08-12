@@ -47,7 +47,6 @@ vi.mock("@/lib/chains/ckb/secp256k1-lock", () => ({
 }));
 
 vi.mock("@/lib/signers/joyid-relay-ckb-tx-signer", () => ({
-  // eslint-disable-next-line @typescript-eslint/explicit-function-return-type
   JoyIdRelaySigner: vi.fn().mockImplementation(function (this: Record<string, unknown>) {
     this["kind"] = "joyid";
     this["connect"] = vi.fn();
@@ -56,7 +55,6 @@ vi.mock("@/lib/signers/joyid-relay-ckb-tx-signer", () => ({
 }));
 
 vi.mock("@/lib/signers/local-keystore-ckb-tx-signer", () => ({
-  // eslint-disable-next-line @typescript-eslint/explicit-function-return-type
   LocalKeystoreCkbTxSigner: vi.fn().mockImplementation(function (this: Record<string, unknown>) {
     this["kind"] = "local-keystore";
     this["connect"] = vi.fn();
@@ -65,7 +63,6 @@ vi.mock("@/lib/signers/local-keystore-ckb-tx-signer", () => ({
 }));
 
 vi.mock("@/stores/joyid-sign", () => ({
-  // eslint-disable-next-line @typescript-eslint/explicit-function-return-type
   useJoyIdSignStore: () => ({
     open: false,
     qrUrl: null,
@@ -113,7 +110,6 @@ vi.mock("@/lib/accounting/ipc", () => ({
 // Import the component AFTER mocks are registered
 // ---------------------------------------------------------------------------
 
-// eslint-disable-next-line import/first
 import { SendPanel } from "./SendPanel";
 
 // ---------------------------------------------------------------------------

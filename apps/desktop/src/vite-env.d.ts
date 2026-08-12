@@ -7,6 +7,10 @@ interface ImportMetaEnv {
   readonly VITE_EVM_SEPOLIA_RPC_URL?: string;
 }
 
+// Ambient declaration merging with vite/client's `ImportMeta` — augments `import.meta.env`
+// project-wide via TypeScript's global interface merging, not a local code reference, so
+// eslint's usage analysis can't see the effect. Renaming would break the merge.
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 interface ImportMeta {
   readonly env: ImportMetaEnv;
 }

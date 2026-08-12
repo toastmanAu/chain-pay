@@ -1,4 +1,7 @@
 import { useSyncStore } from "@/stores/sync";
+import { Tile } from "@/components/ui/Tile";
+import { formatBlockNumber } from "@/lib/format/block";
+import { secondsAgo } from "@/lib/format/time";
 
 type PhaseStatus = "done" | "in-progress" | "next" | "blocked";
 
@@ -100,7 +103,7 @@ export function Dashboard() {
       </section>
 
       {ckb.lastPolledAt > 0 ? (
-        <p className="text-xs text-fg-muted">last polled {Math.max(0, Math.round((Date.now() - ckb.lastPolledAt) / 1000))}s ago</p>
+        <p className="text-xs text-fg-muted">last polled {secondsAgo(ckb.lastPolledAt)}s ago</p>
       ) : null}
     </div>
   );
@@ -179,28 +182,3 @@ const PHASE_STATUS_STYLES: Record<
   },
 };
 
-function Tile({
-  label,
-  value,
-  hint,
-  tone = "default",
-}: {
-  label: string;
-  value: string;
-  hint: string;
-  tone?: "default" | "accent" | "danger";
-}) {
-  const valueClass = tone === "accent" ? "text-accent" : tone === "danger" ? "text-danger" : "text-fg";
-  return (
-    <div className="rounded-lg border border-surface-hi bg-surface p-5">
-      <div className="text-xs uppercase tracking-wide text-fg-muted">{label}</div>
-      <div className={`mt-2 text-2xl font-semibold tabular-nums ${valueClass}`}>{value}</div>
-      <div className="mt-1 text-xs text-fg-muted">{hint}</div>
-    </div>
-  );
-}
-
-function formatBlockNumber(n: bigint): string {
-  const s = n.toString();
-  return s.replace(/\B(?=(\d{3})+(?!\d))/g, ",");
-}

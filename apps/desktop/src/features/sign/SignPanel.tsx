@@ -16,8 +16,7 @@ import {
   useIncomingPacketsStore,
   type IncomingPacketEntry,
 } from "@/stores/incoming-packets";
-
-const SHANNONS_PER_CKB = 100_000_000n;
+import { formatCkb } from "@/lib/format/ckb";
 
 interface SignResult {
   signature: string;
@@ -232,15 +231,6 @@ function KV({ label, value }: { label: string; value: string }) {
       <div className="mt-1 text-sm tabular-nums">{value}</div>
     </div>
   );
-}
-
-function formatCkb(shannons: bigint): string {
-  const whole = shannons / SHANNONS_PER_CKB;
-  const fractional = shannons % SHANNONS_PER_CKB;
-  const wholeFmt = whole.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ",");
-  if (fractional === 0n) return wholeFmt;
-  const fracStr = fractional.toString().padStart(8, "0").replace(/0+$/, "");
-  return `${wholeFmt}.${fracStr}`;
 }
 
 function bytesToHex(bytes: Uint8Array): string {

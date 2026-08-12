@@ -117,7 +117,7 @@ export class WalletConnectSafeOwnerSigner implements SignerTransport {
     } catch (error) {
       const message = walletConnectError(error, "WalletConnect pairing failed");
       this.setStatus({ state: "error", message });
-      throw new Error(message);
+      throw new Error(message, { cause: error });
     }
   }
 
@@ -171,7 +171,7 @@ export class WalletConnectSafeOwnerSigner implements SignerTransport {
         CAIP_CHAIN,
       );
     } catch (error) {
-      throw new Error(walletConnectError(error, "WalletConnect signature request failed"));
+      throw new Error(walletConnectError(error, "WalletConnect signature request failed"), { cause: error });
     }
     if (typeof raw !== "string" || !/^0x[0-9a-fA-F]{130}$/.test(raw)) {
       throw new Error("WalletConnect wallet returned a malformed Safe owner signature");
@@ -259,8 +259,7 @@ async function createWalletConnectProvider(projectId: string): Promise<WalletCon
 
 function silentWalletConnectLogger(): object {
   const noop = () => undefined;
-  let logger: object;
-  logger = new Proxy(
+  const logger: object = new Proxy(
     {},
     {
       get: (_target, property) => {

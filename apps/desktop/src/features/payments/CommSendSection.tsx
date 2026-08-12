@@ -43,7 +43,7 @@ export function CommSendSection({
   disabledReason,
 }: CommSendSectionProps) {
   const network = useNetworkConfigStore((s) => s.network);
-  const { sendAll, retry } = useCommSendDispatch();
+  const { sendAll } = useCommSendDispatch();
   // Subscribe to the batch's commSendStatus directly so pills re-render on writes.
   const batch = usePayrollBatchesStore((s) => s.batches.find((b) => b.id === batchId));
   const peers = usePeerBookStore((s) => s.peers);

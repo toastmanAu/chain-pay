@@ -4,14 +4,13 @@ from __future__ import annotations
 import hashlib
 import json
 import re
-import base64
-import binascii
 from datetime import timezone
 from decimal import Decimal
 
 import frappe
 from frappe.utils import get_datetime
 
+from crypto_payroll.chains import rules_for
 from crypto_payroll.setup.custom_fields import ensure_custom_fields
 from crypto_payroll.setup.seed import ensure_cost_center, ensure_fiscal_year
 from crypto_payroll.compliance import export_payload, normalise_filters
@@ -20,13 +19,9 @@ COMPANY = "ChainPay Test"
 COMPANY_CURRENCY = "USD"
 EXPENSE_ACCOUNT = "Salary or Wage Expense"
 TREASURY_ACCOUNT = "Crypto Treasury Asset"
-_TX_HASH = re.compile(r"^0x[0-9a-fA-F]{64}$")
-_EVM_ADDRESS = re.compile(r"^0x[0-9a-fA-F]{40}$")
-_HEX_DIGEST = re.compile(r"^[0-9a-f]{64}$")
-_BASE58_ALPHABET = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
-_BASE58_INDEX = {character: index for index, character in enumerate(_BASE58_ALPHABET)}
-_U64_MAX = 18_446_744_073_709_551_615
-_MAX_BTC_SATS = 2_100_000_000_000_000
+# Chain-specific evidence sub-objects, and the label each one reports itself as
+# when it appears on the wrong chain. The keys drive the dispatch below.
+_EVIDENCE_LABEL = {"evm": "EVM", "solana": "Solana", "bitcoin": "Bitcoin"}
 
 
 def _strict_keys(value: dict, allowed: set[str], path: str) -> None:
@@ -45,73 +40,6 @@ def _canonical_uint(value, path: str, *, positive: bool = False, maximum=None) -
     if maximum is not None and number > maximum:
         frappe.throw(f"{path} is outside the supported range")
     return number
-
-
-def _base58_bytes(value, size: int, path: str) -> str:
-    text = str(value or "")
-    if not text or any(character not in _BASE58_INDEX for character in text):
-        frappe.throw(f"{path} must be canonical base58")
-    number = 0
-    for character in text:
-        number = number * 58 + _BASE58_INDEX[character]
-    decoded = (b"\x00" * (len(text) - len(text.lstrip("1")))) + (
-        number.to_bytes((number.bit_length() + 7) // 8, "big") if number else b""
-    )
-    encoded = "1" * (len(decoded) - len(decoded.lstrip(b"\x00")))
-    remainder = int.from_bytes(decoded, "big")
-    suffix = ""
-    while remainder:
-        remainder, digit = divmod(remainder, 58)
-        suffix = _BASE58_ALPHABET[digit] + suffix
-    if len(decoded) != size or encoded + suffix != text:
-        frappe.throw(f"{path} must encode exactly {size} bytes")
-    return text
-
-
-def _bitcoin_address(value, chain: str, path: str) -> str:
-    text = str(value or "")
-    if 26 <= len(text) <= 35 and all(character in _BASE58_INDEX for character in text):
-        number = 0
-        for character in text:
-            number = number * 58 + _BASE58_INDEX[character]
-        decoded = b"\0" * (len(text) - len(text.lstrip("1"))) + number.to_bytes((number.bit_length() + 7) // 8, "big")
-        versions = {0, 5} if chain == "btc:mainnet" else {111, 196}
-        if len(decoded) == 25 and decoded[0] in versions and hashlib.sha256(hashlib.sha256(decoded[:-4]).digest()).digest()[:4] == decoded[-4:]:
-            return text
-    lowered = text.lower()
-    if text != lowered or "1" not in lowered:
-        frappe.throw(f"{path} must be a canonical address for {chain}")
-    hrp, data_text = lowered.rsplit("1", 1)
-    if hrp != ("bc" if chain == "btc:mainnet" else "tb") or len(data_text) < 7 or len(lowered) > 90:
-        frappe.throw(f"{path} must be a canonical address for {chain}")
-    alphabet = "qpzry9x8gf2tvdw0s3jn54khce6mua7l"
-    try:
-        data = [alphabet.index(character) for character in data_text]
-    except ValueError:
-        frappe.throw(f"{path} must be a canonical address for {chain}")
-    polymod = 1
-    expanded = [ord(character) >> 5 for character in hrp] + [0] + [ord(character) & 31 for character in hrp] + data
-    for item in expanded:
-        top = polymod >> 25
-        polymod = (polymod & 0x1FFFFFF) << 5 ^ item
-        for index, generator in enumerate((0x3B6A57B2, 0x26508E6D, 0x1EA119FA, 0x3D4233DD, 0x2A1462B3)):
-            if (top >> index) & 1:
-                polymod ^= generator
-    payload = data[:-6]
-    if not payload or payload[0] > 1 or polymod != (1 if payload[0] == 0 else 0x2BC830A3):
-        frappe.throw(f"{path} must be a canonical address for {chain}")
-    accumulator = 0
-    bits = 0
-    program = bytearray()
-    for item in payload[1:]:
-        accumulator = (accumulator << 5) | item
-        bits += 5
-        while bits >= 8:
-            bits -= 8
-            program.append((accumulator >> bits) & 255)
-    if bits >= 5 or ((accumulator << (8 - bits)) & 255) != 0 or len(program) < 2 or len(program) > 40 or (payload[0] == 0 and len(program) not in {20, 32}) or (payload[0] == 1 and len(program) != 32):
-        frappe.throw(f"{path} must be a canonical address for {chain}")
-    return text
 
 
 def _minor_to_major(minor: str) -> Decimal:
@@ -143,20 +71,12 @@ def _normalise_record(record: dict | str) -> dict:
     if source_type not in {"send", "payroll"}:
         frappe.throw("record.sourceType must be send or payroll")
 
+    # rules_for is the only chain allowlist: an unregistered chain throws
+    # "record.chain is unsupported" here, exactly as the old literal set did.
     chain = str(record.get("chain") or "")
-    if chain not in {"ckb:mainnet", "ckb:testnet", "evm:11155111", "sol:devnet", "sol:mainnet", "btc:testnet", "btc:mainnet"}:
-        frappe.throw("record.chain is unsupported")
+    rules = rules_for(chain)
 
-    if chain.startswith("sol:"):
-        tx_hash = _base58_bytes(record.get("txHash"), 64, "record.txHash")
-    elif chain.startswith("btc:"):
-        tx_hash = str(record.get("txHash") or "")
-        if not re.fullmatch(r"[0-9a-f]{64}", tx_hash):
-            frappe.throw("record.txHash must be a lowercase Bitcoin transaction id")
-    else:
-        tx_hash = str(record.get("txHash") or "").lower()
-        if not _TX_HASH.fullmatch(tx_hash):
-            frappe.throw("record.txHash must be a 0x-prefixed 32-byte transaction hash")
+    tx_hash = rules.validate_tx_hash(record.get("txHash"), "record.txHash")
 
     try:
         confirmed_at = get_datetime(record.get("confirmedAt"))
@@ -203,16 +123,13 @@ def _normalise_record(record: dict | str) -> dict:
         elif currency != line_currency:
             frappe.throw("a confirmed payment record cannot mix fiat currencies")
         fiat_minor = _canonical_uint(fiat.get("minor"), f"record.lines[{index}].fiat.minor", positive=True)
-        maximum = _U64_MAX if chain.startswith("sol:") else (_MAX_BTC_SATS if chain.startswith("btc:") else None)
+        maximum = rules.max_native_units
         crypto_value = _canonical_uint(crypto.get("value"), f"record.lines[{index}].crypto.value", positive=True, maximum=maximum)
         crypto_decimals = _canonical_uint(crypto.get("decimals"), f"record.lines[{index}].crypto.decimals")
         if crypto_decimals < 0 or crypto_decimals > 30:
             frappe.throw(f"record.lines[{index}].crypto.decimals is invalid")
         crypto_asset = str(crypto.get("asset") or "").upper()
-        expected_asset, expected_decimals = (
-            ("ETH", 18) if chain == "evm:11155111" else
-            (("SOL", 9) if chain.startswith("sol:") else (("BTC", 8) if chain.startswith("btc:") else ("CKB", 8)))
-        )
+        expected_asset, expected_decimals = rules.asset, rules.decimals
         if crypto_asset != expected_asset or crypto_decimals != expected_decimals:
             frappe.throw(
                 f"record.lines[{index}] must contain {expected_asset} "
@@ -233,154 +150,18 @@ def _normalise_record(record: dict | str) -> dict:
             }
         )
 
-    evm = None
-    if chain == "evm:11155111":
-        raw_evm = record.get("evm")
-        if not isinstance(raw_evm, dict):
-            frappe.throw("record.evm is required for a Sepolia payment")
-        _strict_keys(raw_evm, {"safeAddress", "safeTxHash", "outerTxHash", "executorAddress", "recipientAddress", "confirmedBlockNumber", "gasUsed", "effectiveGasPriceWei", "gasFeeWei", "gasPayer"}, "record.evm")
-        address_fields = ("safeAddress", "executorAddress", "recipientAddress")
-        addresses = {}
-        for field in address_fields:
-            value = str(raw_evm.get(field) or "").lower()
-            if not _EVM_ADDRESS.fullmatch(value):
-                frappe.throw(f"record.evm.{field} must be a 20-byte EVM address")
-            addresses[field] = value
-        safe_tx_hash = str(raw_evm.get("safeTxHash") or "").lower()
-        outer_tx_hash = str(raw_evm.get("outerTxHash") or "").lower()
-        if not _TX_HASH.fullmatch(safe_tx_hash):
-            frappe.throw("record.evm.safeTxHash must be a 32-byte hash")
-        if outer_tx_hash != tx_hash:
-            frappe.throw("record.evm.outerTxHash must match record.txHash")
-        try:
-            confirmed_block = int(str(raw_evm.get("confirmedBlockNumber")))
-            gas_used = int(str(raw_evm.get("gasUsed")))
-            gas_price = int(str(raw_evm.get("effectiveGasPriceWei")))
-            gas_fee = int(str(raw_evm.get("gasFeeWei")))
-        except (TypeError, ValueError):
-            frappe.throw("record.evm receipt values must be decimal integers")
-        if confirmed_block <= 0 or gas_used <= 0 or gas_price <= 0:
-            frappe.throw("record.evm block and gas values must be positive")
-        if gas_fee != gas_used * gas_price:
-            frappe.throw("record.evm.gasFeeWei must equal gasUsed × effectiveGasPriceWei")
-        if raw_evm.get("gasPayer") != "executor":
-            frappe.throw("record.evm.gasPayer must be executor")
-        evm = {
-            "safe_address": addresses["safeAddress"],
-            "safe_tx_hash": safe_tx_hash,
-            "outer_tx_hash": outer_tx_hash,
-            "executor_address": addresses["executorAddress"],
-            "recipient_address": addresses["recipientAddress"],
-            "confirmed_block_number": str(confirmed_block),
-            "gas_used": str(gas_used),
-            "effective_gas_price_wei": str(gas_price),
-            "gas_fee_wei": str(gas_fee),
-            "gas_payer": "executor",
-        }
-    elif record.get("evm") is not None:
-        frappe.throw("record.evm is only valid for EVM payments")
-
-    solana = None
-    if chain.startswith("sol:"):
-        raw_solana = record.get("solana")
-        if not isinstance(raw_solana, dict):
-            frappe.throw("record.solana is required for a Solana payment")
-        _strict_keys(raw_solana, {"reviewDigest", "sourceAddress", "recipientAddress", "feePayerAddress", "nonceAccount", "nonceAuthority", "durableNonce", "finalizedSlot", "amountLamports", "feeLamports", "feePayerPolicy", "messageBase64"}, "record.solana")
-        review_digest = str(raw_solana.get("reviewDigest") or "")
-        if not _HEX_DIGEST.fullmatch(review_digest):
-            frappe.throw("record.solana.reviewDigest must be a lowercase 32-byte hex digest")
-        addresses = {
-            field: _base58_bytes(raw_solana.get(field), 32, f"record.solana.{field}")
-            for field in ("sourceAddress", "recipientAddress", "feePayerAddress", "nonceAccount", "nonceAuthority", "durableNonce")
-        }
-        if addresses["sourceAddress"] == addresses["recipientAddress"]:
-            frappe.throw("record.solana source and recipient must be different")
-        if addresses["nonceAccount"] in {addresses["sourceAddress"], addresses["recipientAddress"], addresses["feePayerAddress"]}:
-            frappe.throw("record.solana nonce account must be distinct from payment accounts")
-        finalized_slot = _canonical_uint(raw_solana.get("finalizedSlot"), "record.solana.finalizedSlot", positive=True, maximum=_U64_MAX)
-        amount_lamports = _canonical_uint(raw_solana.get("amountLamports"), "record.solana.amountLamports", positive=True, maximum=_U64_MAX)
-        fee_lamports = _canonical_uint(raw_solana.get("feeLamports"), "record.solana.feeLamports", maximum=_U64_MAX)
-        if len(lines) != 1 or int(lines[0]["crypto_value"]) != amount_lamports:
-            frappe.throw("record.solana.amountLamports must match the single SOL payment line")
-        if raw_solana.get("feePayerPolicy") != "transaction_fee_payer":
-            frappe.throw("record.solana.feePayerPolicy must be transaction_fee_payer")
-        message_base64 = str(raw_solana.get("messageBase64") or "")
-        if len(message_base64) > 4096:
-            frappe.throw("record.solana.messageBase64 is too large")
-        try:
-            decoded_message = base64.b64decode(message_base64, validate=True)
-        except (binascii.Error, ValueError):
-            frappe.throw("record.solana.messageBase64 must be canonical base64")
-        if not decoded_message or base64.b64encode(decoded_message).decode("ascii") != message_base64:
-            frappe.throw("record.solana.messageBase64 must be canonical base64")
-        solana = {
-            "review_digest": review_digest,
-            "source_address": addresses["sourceAddress"],
-            "recipient_address": addresses["recipientAddress"],
-            "fee_payer_address": addresses["feePayerAddress"],
-            "nonce_account": addresses["nonceAccount"],
-            "nonce_authority": addresses["nonceAuthority"],
-            "durable_nonce": addresses["durableNonce"],
-            "finalized_slot": str(finalized_slot),
-            "amount_lamports": str(amount_lamports),
-            "fee_lamports": str(fee_lamports),
-            "fee_payer_policy": "transaction_fee_payer",
-            "solana_message_base64": message_base64,
-        }
-    elif record.get("solana") is not None:
-        frappe.throw("record.solana is only valid for Solana payments")
-
-    bitcoin = None
-    if chain.startswith("btc:"):
-        raw_bitcoin = record.get("bitcoin")
-        if not isinstance(raw_bitcoin, dict):
-            frappe.throw("record.bitcoin is required for a Bitcoin payment")
-        _strict_keys(raw_bitcoin, {"reviewDigest", "wtxid", "rawTransactionHash", "blockHeight", "blockHash", "confirmations", "inputValueSats", "outputValueSats", "feeSats", "feeRateSatsPerVbyte", "feePayerPolicy", "outputs"}, "record.bitcoin")
-        hex_values = {}
-        for field in ("reviewDigest", "wtxid", "rawTransactionHash", "blockHash"):
-            value = str(raw_bitcoin.get(field) or "")
-            if not _HEX_DIGEST.fullmatch(value):
-                frappe.throw(f"record.bitcoin.{field} must be lowercase 32-byte hex")
-            hex_values[field] = value
-        block_height = _canonical_uint(raw_bitcoin.get("blockHeight"), "record.bitcoin.blockHeight", positive=True, maximum=_U64_MAX)
-        confirmations = _canonical_uint(raw_bitcoin.get("confirmations"), "record.bitcoin.confirmations", positive=True, maximum=_U64_MAX)
-        input_sats = _canonical_uint(raw_bitcoin.get("inputValueSats"), "record.bitcoin.inputValueSats", positive=True, maximum=_MAX_BTC_SATS)
-        output_sats = _canonical_uint(raw_bitcoin.get("outputValueSats"), "record.bitcoin.outputValueSats", positive=True, maximum=_MAX_BTC_SATS)
-        fee_sats = _canonical_uint(raw_bitcoin.get("feeSats"), "record.bitcoin.feeSats", positive=True, maximum=_MAX_BTC_SATS)
-        if confirmations < 6 or input_sats != output_sats + fee_sats:
-            frappe.throw("record.bitcoin confirmation depth or satoshi conservation is invalid")
-        rate = str(raw_bitcoin.get("feeRateSatsPerVbyte") or "")
-        if not re.fullmatch(r"(?:0|[1-9][0-9]*)(?:\.[0-9]{1,3})?", rate):
-            frappe.throw("record.bitcoin.feeRateSatsPerVbyte is invalid")
-        if raw_bitcoin.get("feePayerPolicy") != "transaction_inputs":
-            frappe.throw("record.bitcoin.feePayerPolicy must be transaction_inputs")
-        raw_outputs = raw_bitcoin.get("outputs")
-        if not isinstance(raw_outputs, list) or len(raw_outputs) != len(lines):
-            frappe.throw("record.bitcoin.outputs must match payment lines")
-        outputs = []
-        previous_vout = -1
-        for index, output in enumerate(raw_outputs):
-            if not isinstance(output, dict):
-                frappe.throw(f"record.bitcoin.outputs[{index}] must be an object")
-            _strict_keys(output, {"vout", "destination", "valueSats"}, f"record.bitcoin.outputs[{index}]")
-            vout = _canonical_uint(output.get("vout"), f"record.bitcoin.outputs[{index}].vout", maximum=4_294_967_295)
-            value_sats = _canonical_uint(output.get("valueSats"), f"record.bitcoin.outputs[{index}].valueSats", positive=True, maximum=_MAX_BTC_SATS)
-            if vout <= previous_vout or value_sats != int(lines[index]["crypto_value"]):
-                frappe.throw("record.bitcoin outputs must be ordered and match payment lines")
-            previous_vout = vout
-            outputs.append({"vout": str(vout), "destination": _bitcoin_address(output.get("destination"), chain, f"record.bitcoin.outputs[{index}].destination"), "value_sats": str(value_sats)})
-        if sum(int(output["value_sats"]) for output in outputs) > output_sats:
-            frappe.throw("record.bitcoin payment outputs exceed transaction outputs")
-        bitcoin = {
-            "review_digest": hex_values["reviewDigest"], "wtxid": hex_values["wtxid"],
-            "raw_transaction_hash": hex_values["rawTransactionHash"], "bitcoin_block_height": str(block_height),
-            "block_hash": hex_values["blockHash"], "confirmations": str(confirmations),
-            "input_value_sats": str(input_sats), "output_value_sats": str(output_sats), "fee_sats": str(fee_sats),
-            "fee_rate_sats_per_vbyte": rate, "fee_payer_policy": "transaction_inputs",
-            "bitcoin_outputs_json": json.dumps(outputs, sort_keys=True, separators=(",", ":")),
-        }
-    elif record.get("bitcoin") is not None:
-        frappe.throw("record.bitcoin is only valid for Bitcoin payments")
+    # One dispatch for every chain-specific evidence object: the chain's rules
+    # own their own key, and any other key present is a wrong-chain payload.
+    # The loop variable is `evidence_label`, not `label` — `label` is the
+    # record's own title, read by the return below.
+    evidence: dict[str, dict | None] = {}
+    for key, evidence_label in _EVIDENCE_LABEL.items():
+        if rules.evidence_key == key:
+            evidence[key] = rules.normalise_evidence(record, lines, tx_hash)
+        elif record.get(key) is not None:
+            frappe.throw(f"record.{key} is only valid for {evidence_label} payments")
+        else:
+            evidence[key] = None
 
     return {
         "batch_id": batch_id,
@@ -392,9 +173,9 @@ def _normalise_record(record: dict | str) -> dict:
         "fiat_currency": currency,
         "fiat_total_minor": str(total_minor),
         "lines": lines,
-        "evm": evm,
-        "solana": solana,
-        "bitcoin": bitcoin,
+        "evm": evidence["evm"],
+        "solana": evidence["solana"],
+        "bitcoin": evidence["bitcoin"],
     }
 
 
@@ -632,21 +413,7 @@ def post_journal(batch_id: str) -> dict:
             "crypto_safe_tx_hash": safe_tx_hash,
             "user_remark": (
                 f"ChainPay {batch.source_type} {batch_id} · {batch.tx_hash}"
-                + (
-                    f" · SafeTx {safe_tx_hash} · gas paid by executor {batch.executor_address}"
-                    if safe_tx_hash
-                    else ""
-                )
-                + (
-                    f" · Solana review {batch.review_digest} · finalized slot {batch.finalized_slot} · fee {batch.fee_lamports} lamports paid by {batch.fee_payer_address}"
-                    if batch.chain.startswith("sol:") and batch.review_digest
-                    else ""
-                )
-                + (
-                    f" · Bitcoin review {batch.review_digest} · block {batch.bitcoin_block_height} · {batch.confirmations} confirmations · fee {batch.fee_sats} sats paid by transaction inputs"
-                    if batch.chain.startswith("btc:") and batch.review_digest
-                    else ""
-                )
+                + rules_for(batch.chain).journal_remark(batch)
             ),
             "accounts": accounts,
         }

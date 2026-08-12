@@ -119,6 +119,14 @@ export function useCommSendRetry({
 
     return () => {
       unsub();
+      // The lint rule guards against a ref whose `.current` is REASSIGNED between
+      // effect setup and cleanup, leaving the cleanup holding a stale value. That
+      // cannot happen here: `timersRef.current` is the one Map allocated by
+      // useRef, never reassigned — scheduleAll only mutates it in place via
+      // set/delete. Reading it live and capturing it into a local at setup would
+      // therefore be equivalent, so the warning is a false positive and clearing
+      // the live map is correct.
+      // eslint-disable-next-line react-hooks/exhaustive-deps
       for (const t of timersRef.current.values()) clearTimeout(t);
       timersRef.current.clear();
     };

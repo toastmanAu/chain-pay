@@ -70,7 +70,6 @@ export function UnlockModal({ open, onSubmit, onClose }: UnlockModalProps) {
           <input
             id="unlock-password"
             type="password"
-            // eslint-disable-next-line jsx-a11y/no-autofocus
             autoFocus
             autoComplete="current-password"
             value={password}

@@ -19,6 +19,7 @@ import {
   parseSafeApproval,
   serializeSafeApproval,
 } from "@/lib/chains/evm/safe-approval-interchange";
+import { Tile } from "@/components/ui/Tile";
 
 export function SafeApprovalDetail() {
   const { id } = useParams<{ id: string }>();
@@ -488,15 +489,6 @@ function ExecutionStatus({
       <div className="font-medium">{label}</div>
       {hash ? <div className="mt-2 break-all font-mono text-xs">{hash}</div> : null}
       <div className="mt-2 text-xs text-fg-muted">{detail}</div>
-    </div>
-  );
-}
-
-function Tile({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="rounded-lg border border-surface-hi bg-surface p-4">
-      <div className="text-xs uppercase tracking-wide text-fg-muted">{label}</div>
-      <div className="mt-2 text-lg font-semibold tabular-nums">{value}</div>
     </div>
   );
 }
