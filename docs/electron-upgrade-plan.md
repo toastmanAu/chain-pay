@@ -35,4 +35,4 @@ Electron 44 drops macOS 12 support; supported macOS builds need macOS 13 or late
 
 The exact product runtime is not proven upgraded by package tests alone. The release gate remains open until the runtime and signing checks above pass on the intended platforms.
 
-The Linux `AppImage` and unpacked directory build on 44.9.0. The `deb` target currently fails because the desktop package has no public homepage or maintainer email; supply those metadata values or remove the `deb` target before distributing a Debian package.
+The Linux `AppImage` and unpacked directory build on 44.9.0. On a throwaway profile upgraded from packaged Electron 33, the 44.9.0 dashboard reached testnet tip 22,789,969 with two peers and advanced to 22,789,972 on a later poll. This proves peer reconnection and tip polling after migration; the profile had no watched treasury script, so watched-script restoration remains unverified. The `deb` target currently fails because the desktop package has no public maintainer email; supply that metadata value or remove the `deb` target before distributing a Debian package.
