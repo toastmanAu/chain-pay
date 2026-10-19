@@ -141,12 +141,12 @@ describe("PayrollBatch state machine", () => {
       expect(canTransition("broadcast_initiating", "broadcast_failed")).toBe(true);
     });
 
-    it("allows broadcast_failed → approved (retryAutoBroadcast)", () => {
-      expect(canTransition("broadcast_failed", "approved")).toBe(true);
+    it("allows broadcast_failed → broadcast_countdown (retryAutoBroadcast)", () => {
+      expect(canTransition("broadcast_failed", "broadcast_countdown")).toBe(true);
     });
 
-    it("disallows broadcast_failed → broadcast_countdown directly", () => {
-      expect(canTransition("broadcast_failed", "broadcast_countdown")).toBe(false);
+    it("keeps broadcast_failed → approved available for manual recovery", () => {
+      expect(canTransition("broadcast_failed", "approved")).toBe(true);
     });
 
     it("disallows broadcasted reverts (terminal-ish, same as before)", () => {

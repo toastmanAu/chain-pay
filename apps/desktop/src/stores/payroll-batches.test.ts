@@ -524,14 +524,22 @@ describe("2.7c auto-broadcast state transitions", () => {
     expect(b.broadcastInFlight).toBeUndefined();
   });
 
-  it("retryAutoBroadcast transitions broadcast_failed → approved (operator re-arms)", async () => {
+  it("retryAutoBroadcast re-arms the countdown after a failed send", async () => {
     const { usePayrollBatchesStore } = await import("./payroll-batches");
     const store = usePayrollBatchesStore.getState();
     store.addBatch({ id: "b1", state: "broadcast_failed", broadcastError: "x" } as any);
     store.retryAutoBroadcast("b1");
     const b = store.findById("b1")!;
-    expect(b.state).toBe("approved");
+    expect(b.state).toBe("broadcast_countdown");
     expect(b.broadcastError).toBeUndefined();
+  });
+
+  it("lets only the first countdown callback claim broadcast initiation", async () => {
+    const { usePayrollBatchesStore } = await import("./payroll-batches");
+    const store = usePayrollBatchesStore.getState();
+    store.addBatch({ id: "b1", state: "broadcast_countdown" } as any);
+    expect(store.markBroadcastInitiating("b1")).toBe(true);
+    expect(store.markBroadcastInitiating("b1")).toBe(false);
   });
 });
 

@@ -10,7 +10,7 @@ import { useNetworkConfigStore } from "@/stores/network-config";
  * reads. The real store satisfies it.
  */
 export interface AutoBroadcastBatchStore {
-  markBroadcastInitiating: (batchId: string) => void;
+  markBroadcastInitiating: (batchId: string) => boolean;
   markBroadcastFailed: (batchId: string, error: string) => void;
   transition: (id: string, to: PayrollBatchState) => void;
   updateBatch: (
@@ -89,7 +89,7 @@ export function useAutoBroadcast({
       );
       return;
     }
-    batchStore.markBroadcastInitiating(batch.id);
+    if (!batchStore.markBroadcastInitiating(batch.id)) return;
     try {
       const tx = Transaction.fromBytes(bytesFrom(batch.txBytes));
       const partials: PartialSignature[] = batch.partialSigs.map((p) => ({

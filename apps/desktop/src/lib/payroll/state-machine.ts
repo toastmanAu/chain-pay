@@ -25,7 +25,7 @@ const TRANSITIONS: Record<PayrollBatchState, PayrollBatchState[]> = {
   approved: ["broadcasted", "broadcast_countdown", "calculated", "cancelled"],
   broadcast_countdown: ["broadcast_initiating", "broadcast_failed", "approved", "cancelled"],
   broadcast_initiating: ["broadcasted", "broadcast_failed"],
-  broadcast_failed: ["approved", "cancelled"],
+  broadcast_failed: ["broadcast_countdown", "approved", "cancelled"],
   broadcasted: ["confirmed", "failed"],
   confirmed: ["posting"],
   posting: ["posted", "post_failed"],

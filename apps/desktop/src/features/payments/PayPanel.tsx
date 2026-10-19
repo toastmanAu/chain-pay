@@ -614,7 +614,10 @@ export function PayPanel() {
         />
       ) : null}
 
-      {(lifecycle.phase === "packet-ready" || lifecycle.phase === "broadcast-ready") && cfg && multisig ? (
+      {(lifecycle.phase === "packet-ready" || lifecycle.phase === "broadcast-ready") &&
+      activeBatch?.state !== "broadcast_countdown" &&
+      activeBatch?.state !== "broadcast_initiating" &&
+      cfg && multisig ? (
         <SignaturePanel
           cfg={cfg}
           sigs={lifecycle.sigs}

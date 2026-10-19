@@ -324,6 +324,14 @@ describe("PayPanel — incoming-sigs drain", () => {
 // ---------------------------------------------------------------------------
 
 describe("PayPanel — auto-broadcast", () => {
+  it("does not offer a second manual broadcast while the countdown is armed", () => {
+    const batch = countdownBatch();
+    usePayrollBatchesStore.setState({ batches: [batch], selectedDraftId: batch.id });
+    renderPanel();
+    expect(screen.getByText(/Broadcasting in/)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Merge & broadcast" })).not.toBeInTheDocument();
+  });
+
   /** Resume a countdown batch and let the 5s countdown elapse. */
   async function elapseCountdown(batch: PayrollBatch): Promise<void> {
     usePayrollBatchesStore.setState({ batches: [batch], selectedDraftId: batch.id });
@@ -424,6 +432,25 @@ describe("PayPanel — auto-broadcast", () => {
     expect(screen.getByText("Configure broadcast RPC URL in Settings")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Retry broadcast" })).toBeInTheDocument();
     expect(screen.queryByText(/Broadcasting in/)).not.toBeInTheDocument();
+  });
+
+  it("retries a failed auto broadcast after the operator configures the RPC URL", async () => {
+    await elapseCountdown(countdownBatch());
+    expect(usePayrollBatchesStore.getState().batches[0]?.state).toBe("broadcast_failed");
+
+    useNetworkConfigStore.setState({ network: "testnet", broadcastRpcUrl: "http://node:8114" });
+    fireEvent.click(screen.getByRole("button", { name: "Retry broadcast" }));
+    expect(usePayrollBatchesStore.getState().batches[0]?.state).toBe("broadcast_countdown");
+    expect(screen.getByText(/Broadcasting in/)).toBeInTheDocument();
+
+    for (let tick = 0; tick <= 5; tick += 1) {
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(1_000);
+      });
+    }
+
+    expect(broadcastTransaction).toHaveBeenCalledTimes(1);
+    expect(usePayrollBatchesStore.getState().batches[0]?.state).toBe("broadcasted");
   });
 
   it("a batch with no collected signatures surfaces an error and reaches broadcast_failed", async () => {
