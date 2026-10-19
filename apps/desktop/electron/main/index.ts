@@ -147,8 +147,26 @@ async function createWindow(): Promise<void> {
   });
 
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
-    shell.openExternal(url);
+    try {
+      const destination = new URL(url);
+      if (destination.protocol === "https:" || destination.protocol === "http:") {
+        void shell.openExternal(url).catch(() => undefined);
+      }
+    } catch {
+      // Reject malformed destinations from the untrusted renderer.
+    }
     return { action: "deny" };
+  });
+
+  mainWindow.webContents.on("will-navigate", (event, url) => {
+    const allowedOrigin = isDev && process.env.ELECTRON_RENDERER_URL
+      ? new URL(process.env.ELECTRON_RENDERER_URL).origin
+      : rendererServer?.origin;
+    try {
+      if (new URL(url).origin !== allowedOrigin) event.preventDefault();
+    } catch {
+      event.preventDefault();
+    }
   });
 
   mainWindow.once("ready-to-show", () => mainWindow?.show());
