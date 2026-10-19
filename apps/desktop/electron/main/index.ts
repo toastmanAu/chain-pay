@@ -230,19 +230,17 @@ app.whenReady().then(async () => {
 
   // keyvault host — encrypted BIP39 signer (single-sig SMB send path only).
   // The WASM pkg is a synchronous CJS module (wasm-pack --target nodejs).
-  // Both this source file (electron/main/) and the compiled output (out/main/)
-  // are 4 levels deep in the workspace, so the relative path is the same.
+  // In development the pkg lives in the workspace. The packaged app copies
+  // it into resources so the main process can load the JS and adjacent WASM.
   {
     const kvStore = new KeyvaultStore(
       path.join(app.getPath("userData"), "keyvault"),
     );
     const _require = createRequire(import.meta.url);
-    const keyvaultWasm = _require(
-      join(
-        __dirname,
-        "../../../../packages/ckb-keyvault-wasm/pkg/ckb_keyvault_wasm.js",
-      ),
-    ) as Parameters<typeof registerKeyvaultHost>[0]["wasm"];
+    const wasmPath = app.isPackaged
+      ? join(process.resourcesPath, "ckb-keyvault-wasm", "ckb_keyvault_wasm.js")
+      : join(__dirname, "../../../../packages/ckb-keyvault-wasm/pkg/ckb_keyvault_wasm.js");
+    const keyvaultWasm = _require(wasmPath) as Parameters<typeof registerKeyvaultHost>[0]["wasm"];
     registerKeyvaultHost({ store: kvStore, wasm: keyvaultWasm });
   }
 

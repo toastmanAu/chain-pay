@@ -96,6 +96,13 @@
       "out/**/*",
       "resources/**/*"
     ],
+    "extraResources": [
+      {
+        "from": "../../packages/ckb-keyvault-wasm/pkg",
+        "to": "ckb-keyvault-wasm",
+        "filter": ["ckb_keyvault_wasm.js", "ckb_keyvault_wasm_bg.wasm"]
+      }
+    ],
     "mac": {
       "category": "public.app-category.finance",
       "target": [
