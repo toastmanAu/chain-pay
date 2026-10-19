@@ -35,10 +35,12 @@ import { registerKeyvaultHost } from "./keyvault-host";
 import { registerBitcoinIpc } from "./bitcoin-host";
 import { registerSolanaIpc } from "./solana-host";
 import type { CkbNetwork } from "@/lib/light-client/network-configs";
+import { rendererPortForProfile, startRendererServer } from "./renderer-protocol";
 
 const isDev = !app.isPackaged;
 
 let mainWindow: BrowserWindow | null = null;
+let rendererServer: Awaited<ReturnType<typeof startRendererServer>> | null = null;
 
 let rootKeypairCache: RootKeypair | null = null;
 let rootKeypairPromise: Promise<RootKeypair> | null = null;
@@ -152,9 +154,8 @@ async function createWindow(): Promise<void> {
   mainWindow.once("ready-to-show", () => mainWindow?.show());
 
   if (isDev) {
-    mainWindow.webContents.on("console-message", (_event, level, message, line, sourceId) => {
-      const tag = ["LOG", "WARN", "ERROR", "DBG"][level] ?? "LOG";
-      process.stdout.write(`[renderer ${tag}] ${message} (${sourceId}:${line})\n`);
+    mainWindow.webContents.on("console-message", (details) => {
+      process.stdout.write(`[renderer ${details.level.toUpperCase()}] ${details.message} (${details.sourceId}:${details.lineNumber})\n`);
     });
     mainWindow.webContents.openDevTools({ mode: "detach" });
   }
@@ -162,7 +163,12 @@ async function createWindow(): Promise<void> {
   if (isDev && process.env.ELECTRON_RENDERER_URL) {
     await mainWindow.loadURL(process.env.ELECTRON_RENDERER_URL);
   } else {
-    await mainWindow.loadFile(join(__dirname, "../renderer/index.html"));
+    rendererServer ??= await startRendererServer(
+      join(__dirname, "../renderer"),
+      CSP,
+      rendererPortForProfile(app.getPath("userData")),
+    );
+    await mainWindow.loadURL(`${rendererServer.origin}/`);
   }
 }
 
@@ -305,7 +311,7 @@ app.on("will-quit", (e) => {
   if (quitting) return;
   e.preventDefault();
   quitting = true;
-  stopPairServer().finally(() => app.quit());
+  Promise.allSettled([stopPairServer(), rendererServer?.close()]).finally(() => app.quit());
 });
 
 app.on("window-all-closed", () => {

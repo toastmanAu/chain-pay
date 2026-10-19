@@ -70,7 +70,7 @@
     "@types/react-dom": "^19.0.0",
     "@vitejs/plugin-react": "^4.3.0",
     "@vitest/coverage-v8": "^4.1.6",
-    "electron": "^33.0.0",
+    "electron": "44.4.5",
     "electron-builder": "^25.1.0",
     "electron-vite": "^2.3.0",
     "eslint": "10.8.0",
