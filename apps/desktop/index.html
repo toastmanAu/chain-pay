@@ -2,6 +2,8 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
+    <!-- electron-vite emits ./assets in packaged HTML; keep them at the localhost origin root on SPA routes. -->
+    <base href="/" />
     <!-- CSP is applied via Electron session.webRequest.onHeadersReceived in electron/main/index.ts.
          Keeping it there (not here) lets us relax 'unsafe-inline' in dev for Vite HMR while
          keeping it strict in production builds. -->
