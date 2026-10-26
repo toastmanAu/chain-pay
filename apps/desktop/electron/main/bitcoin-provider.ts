@@ -152,7 +152,7 @@ export async function confirmBitcoinBroadcast(args: {
     };
   } catch (error) {
     if (error instanceof BitcoinProviderError && error.code === "txid_mismatch") throw error;
-    const knownAfterConflict = await prepared.client.optionalJson(`/tx/${prepared.review.txid}/status`, statusSchema);
+    const knownAfterConflict = await getKnownTransaction(prepared.client, prepared.review.txid);
     if (knownAfterConflict) {
       return {
         ok: true,
@@ -183,7 +183,7 @@ async function prepareBitcoinBroadcast(args: {
   const [tipHeightText, tipHashText, existing] = await Promise.all([
     client.text("/blocks/tip/height"),
     client.text("/blocks/tip/hash"),
-    client.optionalJson(`/tx/${parsed.transaction.id}/status`, statusSchema),
+    getKnownTransaction(client, parsed.transaction.id),
   ]);
   if (existing && !args.allowKnown) {
     throw new BitcoinBroadcastValidationError("already_known", "Transaction is already known to the selected Bitcoin provider");
@@ -436,12 +436,13 @@ export async function getBitcoinTransactionStatus(args: {
   }
   const client = new EsploraClient(args.config, args.fetchImpl ?? fetch);
   await verifyProviderNetwork(args.chain, client);
-  const [tipHeightText, status] = await Promise.all([
+  const [tipHeightText, transaction] = await Promise.all([
     client.text("/blocks/tip/height"),
-    client.optionalJson(`/tx/${args.txid}/status`, statusSchema),
+    getKnownTransaction(client, args.txid),
   ]);
   const tipHeight = parseHeight(tipHeightText);
-  if (!status) return { state: "unknown", confirmations: 0, blockHeight: null, blockHash: null };
+  if (!transaction) return { state: "unknown", confirmations: 0, blockHeight: null, blockHash: null };
+  const status = transaction.status;
   if (!status.confirmed) {
     return { state: "pending", confirmations: 0, blockHeight: null, blockHash: null };
   }
@@ -467,6 +468,12 @@ async function verifyProviderNetwork(chain: BitcoinChain, client: EsploraClient)
   if (genesisHash !== TESTNET4_GENESIS_HASH) {
     throw new BitcoinProviderError("invalid_response", "Bitcoin provider does not serve Testnet4");
   }
+}
+
+async function getKnownTransaction(client: EsploraClient, txid: string): Promise<z.infer<typeof txSchema> | null> {
+  const transaction = await client.optionalJson(`/tx/${txid}`, txSchema);
+  if (transaction && transaction.txid !== txid) throw invalidResponse();
+  return transaction;
 }
 
 class EsploraClient {

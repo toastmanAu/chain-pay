@@ -210,8 +210,8 @@ describe("Esplora Bitcoin provider", () => {
     const fetchImpl = vi.fn<typeof fetch>(async (input) => {
       const url = String(input);
       if (url.endsWith("/blocks/tip/height")) return new Response("104");
-      if (url.endsWith(`/tx/${txid}/status`)) {
-        return json({ confirmed: true, block_height: 99, block_hash: BLOCK_HASH });
+      if (url.endsWith(`/tx/${txid}`)) {
+        return json({ txid, vin: [], vout: [], status: { confirmed: true, block_height: 99, block_hash: BLOCK_HASH } });
       }
       if (url.endsWith("/block-height/99")) return new Response(BLOCK_HASH);
       return new Response("not found", { status: 404 });
@@ -233,7 +233,7 @@ describe("Esplora Bitcoin provider", () => {
     fetchImpl.mockImplementation(async (input) => {
       const url = String(input);
       if (url.endsWith("/blocks/tip/height")) return new Response("104");
-      if (url.includes("/status")) return json({ confirmed: true, block_height: 99, block_hash: ORPHAN_HASH });
+      if (url.endsWith(`/tx/${txid}`)) return json({ txid, vin: [], vout: [], status: { confirmed: true, block_height: 99, block_hash: ORPHAN_HASH } });
       return new Response(BLOCK_HASH);
     });
     await expect(
@@ -344,6 +344,23 @@ describe("Esplora Bitcoin provider", () => {
     })).rejects.toMatchObject({ code: "wrong_network" });
   });
 
+  it("does not mistake an unknown transaction's false status response for a broadcast", async () => {
+    const request = {
+      chain: "btc:mainnet" as const,
+      treasuryId: "btc-treasury",
+      watchedAddresses: [BIP143_ADDRESS],
+      rawTxHex: BIP143_SIGNED,
+    };
+    const fetchImpl = bitcoinBroadcastFetch({ falseStatusForUnknown: true, postStatus: 400 });
+    const review = await reviewBitcoinBroadcast({ request, config: { baseUrl: "https://example.com/api" }, fetchImpl });
+    expect(review.txid).toBe(BIP143_TXID);
+    await expect(confirmBitcoinBroadcast({
+      request: { ...request, reviewDigest: review.digest },
+      config: { baseUrl: "https://example.com/api" },
+      fetchImpl,
+    })).rejects.toMatchObject({ code: "rejected" });
+  });
+
   it("keeps provider rejection distinct from provider unavailability", async () => {
     const baseRequest = {
       chain: "btc:mainnet" as const,
@@ -372,6 +389,20 @@ describe("Esplora Bitcoin provider", () => {
       fetchImpl: vi.fn<typeof fetch>(async (input) => String(input).endsWith("/blocks/tip/height")
         ? new Response("2000")
         : new Response("not found", { status: 404 })),
+    })).resolves.toEqual({ state: "unknown", confirmations: 0, blockHeight: null, blockHash: null });
+  });
+
+  it("reports unknown when a provider returns false status for an absent transaction", async () => {
+    await expect(getBitcoinTransactionStatus({
+      chain: "btc:mainnet",
+      txid: BIP143_TXID,
+      config: { baseUrl: "https://example.com/api" },
+      fetchImpl: vi.fn<typeof fetch>(async (input) => {
+        const url = String(input);
+        if (url.endsWith("/blocks/tip/height")) return new Response("2000");
+        if (url.endsWith(`/tx/${BIP143_TXID}/status`)) return json({ confirmed: false });
+        return new Response("not found", { status: 404 });
+      }),
     })).resolves.toEqual({ state: "unknown", confirmations: 0, blockHeight: null, blockHash: null });
   });
 
@@ -416,6 +447,7 @@ function finalizedFetch(tipHeight: number, rawHex = BIP143_SIGNED, prevoutValue 
 
 function bitcoinBroadcastFetch(options: {
   known?: boolean;
+  falseStatusForUnknown?: boolean;
   returnedTxid?: string;
   missingPrevout?: boolean;
   postStatus?: number;
@@ -428,7 +460,12 @@ function bitcoinBroadcastFetch(options: {
     if (url.endsWith("/blocks/tip/hash")) return new Response(TIP_HASH);
     if (url.endsWith(`/block/${TIP_HASH}`)) return json({ id: TIP_HASH, height: 2_000, mediantime: 1_700_000_000 });
     if (url.endsWith(`/tx/${BIP143_TXID}/status`)) {
-      return options.known ? json({ confirmed: false }) : new Response("not found", { status: 404 });
+      return options.known || options.falseStatusForUnknown ? json({ confirmed: false }) : new Response("not found", { status: 404 });
+    }
+    if (url.endsWith(`/tx/${BIP143_TXID}`)) {
+      return options.known
+        ? json({ txid: BIP143_TXID, vin: [], vout: [], status: { confirmed: false } })
+        : new Response("not found", { status: 404 });
     }
     if (url.endsWith(`/tx/${BIP143_PREV_TXID}`)) {
       if (options.missingPrevout) return new Response("not found", { status: 404 });
