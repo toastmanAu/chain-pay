@@ -27,6 +27,7 @@ import {
 } from "./bitcoin-broadcast";
 
 const HASH = /^[0-9a-f]{64}$/;
+const TESTNET4_GENESIS_HASH = "00000000da84f2bafbbc53dee25a72ae507ff4914b867c565be350b0da8bf043";
 const MAX_ADDRESSES_PER_SCAN = 10_000;
 const MAX_HISTORY_PAGES = 10_000;
 const MAX_RESPONSE_BYTES = 16 * 1024 * 1024;
@@ -178,6 +179,7 @@ async function prepareBitcoinBroadcast(args: {
   validateBitcoinAddresses(request.chain, request.watchedAddresses);
   const parsed = parseFinalBitcoinTransaction(request.rawTxHex);
   const client = new EsploraClient(args.config, args.fetchImpl ?? fetch);
+  await verifyProviderNetwork(request.chain, client);
   const [tipHeightText, tipHashText, existing] = await Promise.all([
     client.text("/blocks/tip/height"),
     client.text("/blocks/tip/hash"),
@@ -267,6 +269,7 @@ export async function getFinalizedBitcoinPaymentEvidence(args: {
     throw new BitcoinProviderError("invalid_request", "Bitcoin finalized-evidence request does not match the reviewed payment");
   }
   const client = new EsploraClient(args.config, args.fetchImpl ?? fetch);
+  await verifyProviderNetwork(request.chain, client);
   const [tipText, status, rawHex] = await Promise.all([
     client.text("/blocks/tip/height"),
     client.optionalJson(`/tx/${review.txid}/status`, statusSchema),
@@ -317,7 +320,7 @@ export function providerConfigFromEnvironment(
   chain: BitcoinChain,
   env: NodeJS.ProcessEnv = process.env,
 ): BitcoinProviderConfig | null {
-  const suffix = chain === "btc:mainnet" ? "MAINNET" : "TESTNET";
+  const suffix = chain === "btc:mainnet" ? "MAINNET" : chain === "btc:testnet4" ? "TESTNET4" : "TESTNET";
   const rawUrl = env[`BITCOIN_${suffix}_ESPLORA_URL`]?.trim();
   if (!rawUrl) return null;
   let parsed: URL;
@@ -346,6 +349,7 @@ export async function scanBitcoinAddresses(args: {
   validateAddresses(args.chain, args.addresses);
   const fetchImpl = args.fetchImpl ?? fetch;
   const client = new EsploraClient(args.config, fetchImpl);
+  await verifyProviderNetwork(args.chain, client);
   const [tipHeightText, tipHashText] = await Promise.all([
     client.text("/blocks/tip/height"),
     client.text("/blocks/tip/hash"),
@@ -422,6 +426,7 @@ export async function scanBitcoinAddresses(args: {
 }
 
 export async function getBitcoinTransactionStatus(args: {
+  chain: BitcoinChain;
   txid: string;
   config: BitcoinProviderConfig;
   fetchImpl?: typeof fetch;
@@ -430,6 +435,7 @@ export async function getBitcoinTransactionStatus(args: {
     throw new BitcoinProviderError("invalid_request", "Bitcoin transaction id is invalid");
   }
   const client = new EsploraClient(args.config, args.fetchImpl ?? fetch);
+  await verifyProviderNetwork(args.chain, client);
   const [tipHeightText, status] = await Promise.all([
     client.text("/blocks/tip/height"),
     client.optionalJson(`/tx/${args.txid}/status`, statusSchema),
@@ -453,6 +459,14 @@ export async function getBitcoinTransactionStatus(args: {
     blockHeight: status.block_height,
     blockHash: status.block_hash,
   };
+}
+
+async function verifyProviderNetwork(chain: BitcoinChain, client: EsploraClient): Promise<void> {
+  if (chain !== "btc:testnet4") return;
+  const genesisHash = parseHash(await client.text("/block-height/0"));
+  if (genesisHash !== TESTNET4_GENESIS_HASH) {
+    throw new BitcoinProviderError("invalid_response", "Bitcoin provider does not serve Testnet4");
+  }
 }
 
 class EsploraClient {

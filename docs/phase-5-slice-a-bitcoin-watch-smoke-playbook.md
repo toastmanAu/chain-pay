@@ -1,8 +1,8 @@
 # Phase 5 Slice A — Bitcoin watch-only smoke playbook
 
-This playbook exercises Bitcoin testnet watch-only behavior. Regtest is intentionally not an
-importable ChainPay network in this slice: accepting `bcrt1…` would violate the mainnet/testnet-only
-scope. Provider protocol, pagination, reorg, and malformed-response cases are covered by the local
+This playbook exercises Bitcoin Testnet4 watch-only behavior. Testnet3 remains available for existing
+wallets; select the matching chain explicitly because both use `tb1…` addresses. Regtest is not an
+importable ChainPay network in this slice. Provider protocol, pagination, reorg, and malformed-response cases are covered by the local
 automated provider fixtures.
 
 ## Preconditions
@@ -15,10 +15,10 @@ automated provider fixtures.
 Set the provider in the environment used to start Electron:
 
 ```sh
-BITCOIN_TESTNET_ESPLORA_URL=https://your-testnet-provider.example/api npm run dev --workspace apps/desktop
+BITCOIN_TESTNET4_ESPLORA_URL=https://mempool.space/testnet4/api npm run dev --workspace apps/desktop
 ```
 
-If the provider requires a bearer token, set `BITCOIN_TESTNET_ESPLORA_BEARER_TOKEN` in the main
+If the provider requires a bearer token, set `BITCOIN_TESTNET4_ESPLORA_BEARER_TOKEN` in the main
 process environment. Never prefix these names with `VITE_`; Vite variables are renderer-visible.
 Loopback `http://127.0.0.1:PORT` is accepted for a self-hosted provider; non-loopback providers must
 use HTTPS.
@@ -26,9 +26,9 @@ use HTTPS.
 ## Import and refusal checks
 
 1. Open **Treasury → Add Bitcoin watch**.
-2. Keep **Bitcoin testnet** selected and import a testnet address with its explicit script type.
-3. Confirm the treasury opens as **Bitcoin watch-only** and has no send, signing, PSBT, or broadcast
-   action.
+2. Keep **Bitcoin Testnet4** selected and import a Testnet4 address with its explicit script type.
+3. Confirm the treasury opens as **Bitcoin watch-only** and has no send, signing, or PSBT action. Its
+   manual broadcast accepts only a finalized transaction signed elsewhere.
 4. Attempt to import the same source again. Confirm ChainPay refuses the duplicate.
 5. Attempt to import a `bc1…` mainnet address while testnet is selected. Confirm it is rejected.
 6. In the account-xpub flow, paste an `xprv`, `tprv`, or a 12-word seed phrase made only for this
@@ -62,13 +62,13 @@ npm test --workspace apps/desktop -- --run electron/main/bitcoin-provider.test.t
 ```
 
 For the manual unavailable case, stop the local provider or start ChainPay without
-`BITCOIN_TESTNET_ESPLORA_URL`. Confirm the treasury shows a clear configuration/sync error, retains
+`BITCOIN_TESTNET4_ESPLORA_URL`. Confirm the treasury shows a clear configuration/sync error, retains
 the last good snapshot, and remains usable for navigation. Restore the provider and refresh.
 
 ## IPC secrecy check
 
-Open renderer DevTools and inspect `window.chainpay.bitcoin`. It may expose only `status`, `scan`, and
-`transactionStatus` functions. Status responses contain only `{ configured }`; scan/status results
+Open renderer DevTools and inspect `window.chainpay.bitcoin`. Its methods should be the typed
+watch, review, broadcast, and finalized-evidence IPC bridge. Status responses contain only `{ configured }`; scan/status results
 contain public chain data only. Confirm provider URLs, bearer tokens, authorization headers, private
 keys, and seed phrases do not appear in renderer local storage, console output, accounting exports,
 or IPC responses.

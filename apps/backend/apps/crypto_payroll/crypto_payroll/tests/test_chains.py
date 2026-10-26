@@ -46,6 +46,11 @@ class TestBitcoinAddressVectors(FrappeTestCase):
                 "btc:testnet",
             ),
             (
+                "Testnet4 P2WPKH shares the testnet address format",
+                "tb1q720mtzgzd6tztx9kl9855l7xcmnd35rc6j70cz",
+                "btc:testnet4",
+            ),
+            (
                 "bech32 v0, 20-byte witness program (P2WPKH), BIP-173",
                 "bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4",
                 "btc:mainnet",

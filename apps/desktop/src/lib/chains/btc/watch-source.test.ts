@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   addDescriptorChecksum,
+  bitcoinWatchIdentity,
   deriveBitcoinReceiveAddress,
   descriptorChecksum,
   parseBitcoinWatchImport,
@@ -37,6 +38,15 @@ describe("Bitcoin descriptor checksums", () => {
 });
 
 describe("Bitcoin watch imports", () => {
+  it("keeps Testnet3 and Testnet4 watch identities separate for the same address", () => {
+    const address = "tb1q720mtzgzd6tztx9kl9855l7xcmnd35rc6j70cz";
+    const testnet3 = parseBitcoinWatchImport({ kind: "address", value: address, chain: "btc:testnet", scriptType: "p2wpkh" });
+    const testnet4 = parseBitcoinWatchImport({ kind: "address", value: address, chain: "btc:testnet4", scriptType: "p2wpkh" });
+    expect(testnet4.source).toEqual(testnet3.source);
+    expect(testnet4.chain).toBe("btc:testnet4");
+    expect(bitcoinWatchIdentity(testnet4)).not.toBe(bitcoinWatchIdentity(testnet3));
+  });
+
   it("normalizes and identifies standard mainnet and testnet addresses", () => {
     const mainnet = parseBitcoinWatchImport({
       kind: "address",

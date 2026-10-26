@@ -105,7 +105,8 @@ export function ComplianceExport({
               <option value="evm:11155111">Ethereum Sepolia</option>
               <option value="sol:devnet">Solana devnet</option>
               <option value="sol:mainnet">Solana mainnet</option>
-              <option value="btc:testnet">Bitcoin testnet</option>
+              <option value="btc:testnet">Bitcoin Testnet3</option>
+              <option value="btc:testnet4">Bitcoin Testnet4</option>
               <option value="btc:mainnet">Bitcoin mainnet</option>
             </select>
           </label>

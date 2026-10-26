@@ -1,6 +1,6 @@
 export type CkbChainId = `ckb:mainnet` | `ckb:testnet`;
 export type EvmChainId = `evm:${number}`;
-export type BtcChainId = `btc:mainnet` | `btc:testnet`;
+export type BtcChainId = `btc:mainnet` | `btc:testnet` | `btc:testnet4`;
 export type SolChainId = `sol:mainnet` | `sol:devnet`;
 
 export type ChainId = CkbChainId | EvmChainId | BtcChainId | SolChainId;

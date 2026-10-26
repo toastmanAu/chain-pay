@@ -640,6 +640,7 @@ class TestConfirmedPaymentAccounting(FrappeTestCase):
                 "sol:devnet",
                 "sol:mainnet",
                 "btc:testnet",
+                "btc:testnet4",
                 "btc:mainnet",
             },
         )
@@ -723,6 +724,7 @@ class TestConfirmedPaymentAccounting(FrappeTestCase):
             "sol:devnet": ("secure-SOL-ROUNDTRIP-DEVNET", 9, "c9"),
             "sol:mainnet": ("secure-SOL-ROUNDTRIP-MAINNET", 10, "ca"),
             "btc:testnet": ("secure-BTC-ROUNDTRIP-TESTNET", "35", "45"),
+            "btc:testnet4": ("secure-BTC-ROUNDTRIP-TESTNET4", "37", "47"),
             "btc:mainnet": ("secure-BTC-ROUNDTRIP-MAINNET", "36", "46"),
         }
         batch_ids = {chain: batch_id for chain, (batch_id, _, _) in fixtures.items()}

@@ -52,7 +52,7 @@ export function registerBitcoinIpc(): void {
       }
       const config = providerConfigFromEnvironment(request.chain);
       if (!config) throw new BitcoinProviderError("not_configured", "Bitcoin provider is not configured");
-      return getBitcoinTransactionStatus({ txid: request.txid, config });
+      return getBitcoinTransactionStatus({ chain: request.chain, txid: request.txid, config });
     },
   );
   ipcMain.handle(
@@ -99,7 +99,7 @@ export function registerBitcoinIpc(): void {
 }
 
 function validChain(value: unknown): value is BitcoinChain {
-  return value === "btc:mainnet" || value === "btc:testnet";
+  return value === "btc:mainnet" || value === "btc:testnet" || value === "btc:testnet4";
 }
 
 function validBroadcastRequest(value: unknown, confirmation: false): value is BitcoinBroadcastReviewRequest;

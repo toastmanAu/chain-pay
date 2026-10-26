@@ -8,7 +8,7 @@ private key, PSBT, or signing request.
 ## Prerequisites
 
 1. Start the local ERPNext stack and run `bench --site chainpay.localhost migrate`.
-2. Configure `BITCOIN_TESTNET_ESPLORA_URL` only in the desktop main-process environment.
+2. Configure `BITCOIN_TESTNET4_ESPLORA_URL` only in the desktop main-process environment.
 3. Configure the accounting bridge and start ChainPay with `npm run dev:desktop:accounting`.
 4. Import and sync a funded Bitcoin testnet watch-only treasury.
 5. Create, fully sign, and finalize a standard testnet transaction in an external wallet. Keep the raw hex and all signing material outside ChainPay until the final raw transaction is pasted.
@@ -27,7 +27,7 @@ private key, PSBT, or signing request.
 2. At six confirmations, verify the UI shows the canonical block height/hash evidence and then both the Crypto Payment Batch and Journal Entry identifiers.
 3. In ERPNext, verify one BTC/8-decimal child line per mapped external output, exact sats and USD values, txid/wtxid/raw hash, block/depth, totals, fee/rate, ordered output JSON, and `transaction_inputs` fee policy.
 4. Verify the submitted Journal Entry debit equals credit and contains only the committed USD obligations; the BTC fee is audit metadata under the current zero-FX policy.
-5. Export a Bitcoin-testnet compliance CSV and verify block height, exact native amount, `0.00001 BTC`-style fee formatting, transaction-input payer, immutable digest, and Journal Entry binding.
+5. Export a Bitcoin Testnet4 compliance CSV and verify block height, exact native amount, `0.00001 BTC`-style fee formatting, transaction-input payer, immutable digest, and Journal Entry binding.
 
 ## Recovery and negative gates
 
@@ -44,5 +44,5 @@ diff for Esplora endpoints/tokens/headers/upstream bodies, ERPNext secrets,
 private keys, seeds, and PSBT data. Run desktop typecheck/tests/build, shared and
 mobile regressions, backend migration/tests, and the advisory audit. Confirm no
 coin selection, construction, signing/custody, fee bumping, automatic
-rebroadcast, new Bitcoin script/network, arbitrary RPC, or WebSocket surface was
+rebroadcast, arbitrary RPC, or WebSocket surface was
 introduced.

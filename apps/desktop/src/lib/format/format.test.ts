@@ -82,7 +82,8 @@ describe("chainBadge", () => {
     expect(chainBadge("ckb:mainnet")).toBe("CKB mainnet");
     expect(chainBadge("ckb:testnet")).toBe("CKB testnet");
     expect(chainBadge("btc:mainnet")).toBe("Bitcoin mainnet");
-    expect(chainBadge("btc:testnet")).toBe("Bitcoin testnet");
+    expect(chainBadge("btc:testnet")).toBe("Bitcoin Testnet3");
+    expect(chainBadge("btc:testnet4")).toBe("Bitcoin Testnet4");
     expect(chainBadge("sol:mainnet")).toBe("Solana mainnet");
     expect(chainBadge("sol:devnet")).toBe("Solana devnet");
   });

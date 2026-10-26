@@ -180,7 +180,7 @@ export function BitcoinWatchDetail({ treasury }: { treasury: BitcoinWatchTreasur
 
       {!providerQuery.isLoading && !providerQuery.data?.configured ? (
         <p role="alert" className="rounded-md border border-warn/40 bg-warn/5 p-3 text-sm text-warn">
-          Configure {treasury.watch.chain === "btc:mainnet" ? "BITCOIN_MAINNET_ESPLORA_URL" : "BITCOIN_TESTNET_ESPLORA_URL"} in the desktop main-process environment, then restart ChainPay.
+          Configure {treasury.watch.chain === "btc:mainnet" ? "BITCOIN_MAINNET_ESPLORA_URL" : treasury.watch.chain === "btc:testnet4" ? "BITCOIN_TESTNET4_ESPLORA_URL" : "BITCOIN_TESTNET_ESPLORA_URL"} in the desktop main-process environment, then restart ChainPay.
         </p>
       ) : null}
       {record?.error ? (

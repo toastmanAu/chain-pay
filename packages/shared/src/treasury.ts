@@ -28,7 +28,7 @@ export interface EvmMultisig {
 
 export type MultisigConfig = CkbMultisig | EvmMultisig;
 
-export type BitcoinChain = "btc:mainnet" | "btc:testnet";
+export type BitcoinChain = "btc:mainnet" | "btc:testnet" | "btc:testnet4";
 
 export type BitcoinAddressScriptType = "p2pkh" | "p2sh" | "p2wpkh" | "p2wsh" | "p2tr";
 export type BitcoinDerivedScriptType = "p2pkh" | "p2sh-p2wpkh" | "p2wpkh" | "p2tr";

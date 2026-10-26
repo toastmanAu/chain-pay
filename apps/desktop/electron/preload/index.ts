@@ -150,7 +150,7 @@ const chainpayApi = {
       filters: {
         fromDate?: string;
         toDate?: string;
-        chain?: "ckb:mainnet" | "ckb:testnet" | "evm:11155111" | "sol:devnet" | "sol:mainnet" | "btc:testnet" | "btc:mainnet";
+        chain?: "ckb:mainnet" | "ckb:testnet" | "evm:11155111" | "sol:devnet" | "sol:mainnet" | "btc:testnet" | "btc:testnet4" | "btc:mainnet";
       },
       format: "csv" | "pdf",
     ): Promise<{

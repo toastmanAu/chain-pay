@@ -54,6 +54,22 @@ describe("Esplora Bitcoin provider", () => {
     expect(providerConfigFromEnvironment("btc:testnet", {
       BITCOIN_TESTNET_ESPLORA_URL: "http://127.0.0.1:3002/api",
     })).toEqual({ baseUrl: "http://127.0.0.1:3002/api" });
+    expect(providerConfigFromEnvironment("btc:testnet4", {
+      BITCOIN_TESTNET_ESPLORA_URL: "https://wrong-chain.example/api",
+      BITCOIN_TESTNET4_ESPLORA_URL: "https://mempool.space/testnet4/api",
+    })).toEqual({ baseUrl: "https://mempool.space/testnet4/api" });
+  });
+
+  it("rejects a Testnet4 provider serving another chain's genesis before scanning", async () => {
+    const fetchImpl = vi.fn<typeof fetch>(async () => new Response("0".repeat(64)));
+    await expect(scanBitcoinAddresses({
+      chain: "btc:testnet4",
+      addresses: ["tb1q720mtzgzd6tztx9kl9855l7xcmnd35rc6j70cz"],
+      config: { baseUrl: "https://wrong-chain.example/api" },
+      fetchImpl,
+    })).rejects.toMatchObject({ code: "invalid_response" });
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    expect(String(fetchImpl.mock.calls[0]?.[0])).toMatch(/\/block-height\/0$/);
   });
 
   it("paginates and deduplicates history, preserves exact sats, and invalidates orphan confirmations", async () => {
@@ -202,6 +218,7 @@ describe("Esplora Bitcoin provider", () => {
     });
     await expect(
       getBitcoinTransactionStatus({
+        chain: "btc:mainnet",
         txid,
         config: { baseUrl: "https://example.com/api" },
         fetchImpl,
@@ -221,6 +238,7 @@ describe("Esplora Bitcoin provider", () => {
     });
     await expect(
       getBitcoinTransactionStatus({
+        chain: "btc:mainnet",
         txid,
         config: { baseUrl: "https://example.com/api" },
         fetchImpl,
@@ -348,6 +366,7 @@ describe("Esplora Bitcoin provider", () => {
 
   it("reports unknown when a submitted transaction disappears from the provider", async () => {
     await expect(getBitcoinTransactionStatus({
+      chain: "btc:mainnet",
       txid: BIP143_TXID,
       config: { baseUrl: "https://example.com/api" },
       fetchImpl: vi.fn<typeof fetch>(async (input) => String(input).endsWith("/blocks/tip/height")
