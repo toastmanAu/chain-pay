@@ -17,3 +17,9 @@ The first provider lookup returned HTTP 404 for `/tx/:txid`, but its `/tx/:txid/
 The current treasury watches only the original fixed address, so ChainPay classifies both outputs as external. If output 1 is Sparrow change, an A3 accounting-bound review would incorrectly require a payee and USD obligation for it. A correct A3 path needs a transaction with no change output or a watch source that also proves the change address belongs to this wallet. Do not approve an accounting mapping that presents wallet change as a payment.
 
 At the last check the full transaction endpoint still returned 404 and the original faucet UTXO remained unspent. The operator chose to keep this transaction unbroadcast and replace it with a **no-change** transaction for the combined A2+A3 gate. The replacement should spend the same 50,000-sat UTXO, pay one externally controlled Testnet4 recipient address, and leave no change output; its destination, exact amount, fee, and signature must be reviewed again before any on-chain broadcast.
+
+## No-change replacement reviewed
+
+Sparrow supplied both its pre-signing transaction bytes and its finalized signed bytes. They share transaction ID `34f26f30229b2060b9101014f6150ba8f0436659a73a30314f615ae40cd2e90b`. The signed transaction has a two-item SegWit witness and wtxid `0be9d20ce45a614f31303aa7596643f0a80b15f6141010b960209b22306ff234`.
+
+ChainPay's read-only live review verified the confirmed 50,000-sat faucet input, one P2WPKH output of **49,890 sats** to `tb1q3n506r2xt3n3ypupl4s030sc4hhf05hmvyg4aj`, no change output, a **110-sat fee** at **1 sat/vB**, and no signature or policy warnings. The public provider's current minimum/recommended fee was 1 sat/vB. The original UTXO was still unspent and no broadcast was performed. Recipient ownership and the operator-approved test USD obligation remain to be confirmed before an accounting-bound review and explicit broadcast approval.
