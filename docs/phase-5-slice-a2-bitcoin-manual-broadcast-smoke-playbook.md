@@ -21,7 +21,7 @@ Never place provider credentials in renderer settings, the raw-transaction field
 
 1. In the external wallet, construct a testnet spend from a watched UTXO. Choose the destination and fee there, sign every input, finalize it, and export only the raw transaction hex. Do not export a PSBT.
 2. Open the matching **Bitcoin Testnet4** treasury in ChainPay and refresh it so the watched address set and tip are current.
-3. Paste the final raw hex into **Manual signed transaction broadcast** and select **Review signed transaction**.
+3. Paste the final raw hex into **Manual signed transaction broadcast** and select **Inspect signed transaction**.
 4. Verify all of the following before confirming:
    - the network and selected treasury;
    - transaction ID and immutable review digest;

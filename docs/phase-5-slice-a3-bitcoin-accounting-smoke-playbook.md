@@ -17,7 +17,7 @@ private key, PSBT, or signing request.
 
 1. Paste the final raw transaction and choose **Inspect signed transaction**.
 2. Verify every input, output, change candidate, fee, fee rate, txid, and warning.
-3. For every positive external output, enter a payee reference and positive USD obligation in cents. Confirm watched change and zero-value OP_RETURN outputs have no mapping fields.
+3. For every positive non-watched output, verify in the external wallet that it pays a different wallet, then enter a payee reference and positive USD obligation in cents. Check the ownership confirmation. A non-watched address can be another receive or change address in the source wallet; do not map a self-transfer as a payee payment. Confirm watched change and zero-value OP_RETURN outputs have no mapping fields.
 4. Choose **Prepare accounting-bound review**. Verify review v2 shows the exact immutable mappings and states that they are operator-approved, not signed by the external Bitcoin signers.
 5. Approve the immutable review and broadcast. Record the txid and review digest.
 
