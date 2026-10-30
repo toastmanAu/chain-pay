@@ -80,6 +80,32 @@ describe("Bitcoin broadcast lifecycle store", () => {
     expect(useBitcoinBroadcastStore.getState().records["btc-1"]).toMatchObject({ accountingState: "ready", finalizedEvidence: { confirmations: 6 } });
   });
 
+  it("waits for fresh finality after a pre-evidence regression without requiring reconciliation", async () => {
+    const { useBitcoinBroadcastStore } = await import("./bitcoin-broadcast");
+    const store = useBitcoinBroadcastStore.getState();
+    store.beginReview("btc-1", "btc:testnet", "00"); store.acceptReview("btc-1", reviewV2);
+    store.acceptReceipt("btc-1", { txid: reviewV2.txid, reviewDigest: reviewV2.digest, state: "submitted", submittedAt: "2026-08-06T00:00:00.000Z" });
+    store.refreshStatus("btc-1", { state: "confirming", confirmations: 2, blockHeight: 96, blockHash: "e".repeat(64) });
+    useBitcoinBroadcastStore.getState().refreshStatus("btc-1", { state: "pending", confirmations: 0, blockHeight: null, blockHash: null });
+    expect(useBitcoinBroadcastStore.getState().records["btc-1"]).toMatchObject({ accountingState: "awaiting_finalization", reconciliationRequired: false, finalizedEvidence: null });
+    useBitcoinBroadcastStore.getState().refreshStatus("btc-1", { state: "confirmed", confirmations: 6, blockHeight: 95, blockHash: "1".repeat(64) });
+    useBitcoinBroadcastStore.getState().acceptFinalizedEvidence("btc-1", evidence());
+    expect(useBitcoinBroadcastStore.getState().records["btc-1"]).toMatchObject({ accountingState: "ready", reconciliationRequired: false });
+  });
+
+  it("recovers a persisted pre-evidence reconciliation flag only after fresh canonical finality", async () => {
+    const { useBitcoinBroadcastStore } = await import("./bitcoin-broadcast");
+    const store = useBitcoinBroadcastStore.getState();
+    store.beginReview("btc-1", "btc:testnet", "00"); store.acceptReview("btc-1", reviewV2);
+    store.acceptReceipt("btc-1", { txid: reviewV2.txid, reviewDigest: reviewV2.digest, state: "submitted", submittedAt: "2026-08-06T00:00:00.000Z" });
+    const current = useBitcoinBroadcastStore.getState().records["btc-1"]!;
+    useBitcoinBroadcastStore.setState({ records: { "btc-1": { ...current, status: { state: "pending", confirmations: 0, blockHeight: null, blockHash: null }, reorged: true, reconciliationRequired: true, accountingState: "reconciliation_required", accountingError: "Bitcoin confirmation regressed; accounting reconciliation is required" } } });
+    useBitcoinBroadcastStore.getState().refreshStatus("btc-1", { state: "confirming", confirmations: 5, blockHeight: 95, blockHash: "1".repeat(64) });
+    expect(useBitcoinBroadcastStore.getState().records["btc-1"]).toMatchObject({ accountingState: "reconciliation_required", reconciliationRequired: true });
+    useBitcoinBroadcastStore.getState().refreshStatus("btc-1", { state: "confirmed", confirmations: 6, blockHeight: 95, blockHash: "1".repeat(64) });
+    expect(useBitcoinBroadcastStore.getState().records["btc-1"]).toMatchObject({ accountingState: "awaiting_finalization", reconciliationRequired: false, accountingError: null });
+  });
+
   it("recovers interrupted posting as retryable without changing immutable transaction data", async () => {
     const first = await import("./bitcoin-broadcast");
     const store = first.useBitcoinBroadcastStore.getState();

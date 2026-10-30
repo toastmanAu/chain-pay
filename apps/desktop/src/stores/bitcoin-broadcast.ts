@@ -137,12 +137,20 @@ export const useBitcoinBroadcastStore = create<BitcoinBroadcastStore>()(
         const previous = existing.status;
         const wasConfirmed = previous?.state === "confirming" || previous?.state === "confirmed";
         const regression = wasConfirmed && (status.state === "pending" || status.state === "unknown" || (previous?.state === "confirmed" && status.state !== "confirmed") || (previous.blockHash !== null && status.blockHash !== null && previous.blockHash !== status.blockHash));
-        const reorged = existing.reorged || regression;
-        const reconciliationRequired = existing.reconciliationRequired || (reorged && existing.review?.reviewVersion === 2);
+        const beforeEvidence = existing.review?.reviewVersion === 2 && existing.finalizedEvidence === null &&
+          !existing.accountingRecordName && !existing.journalEntryName &&
+          (existing.accountingState === "awaiting_finalization" || existing.accountingState === "reconciliation_required");
+        const freshFinality = beforeEvidence && status.state === "confirmed" && status.confirmations >= 6 &&
+          status.blockHeight !== null && status.blockHash !== null;
+        const accountingAtRisk = existing.finalizedEvidence !== null || Boolean(existing.accountingRecordName || existing.journalEntryName) ||
+          ["ready", "posting", "post_failed", "posted"].includes(existing.accountingState);
+        const reconciliationRequired = (existing.reconciliationRequired && !freshFinality) ||
+          (regression && accountingAtRisk && existing.review?.reviewVersion === 2);
+        const reorged = (existing.reorged || regression) && !freshFinality;
         setRecord(set, treasuryId, {
           ...existing, status, reorged, reconciliationRequired,
-          accountingState: reconciliationRequired ? "reconciliation_required" : existing.accountingState,
-          accountingError: reconciliationRequired ? "Bitcoin confirmation regressed; accounting reconciliation is required" : existing.accountingError,
+          accountingState: reconciliationRequired ? "reconciliation_required" : freshFinality && existing.accountingState === "reconciliation_required" ? "awaiting_finalization" : existing.accountingState,
+          accountingError: reconciliationRequired ? "Bitcoin confirmation regressed; accounting reconciliation is required" : freshFinality ? null : existing.accountingError,
           error: null,
         });
       },

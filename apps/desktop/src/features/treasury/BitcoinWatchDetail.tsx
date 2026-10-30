@@ -373,7 +373,9 @@ export function BitcoinWatchDetail({ treasury }: { treasury: BitcoinWatchTreasur
             <div className="mt-1 break-all font-mono">{broadcast.receipt.txid}</div>
             <div className="mt-1 text-fg-muted">{broadcast.status ? broadcastStatusLabel(broadcast.status) : "Checking network status…"}</div>
             {broadcast.accountingError ? <div className="mt-2 text-warn">{broadcast.accountingError}</div> : null}
-            {broadcast.reorged ? <div role="alert" className="mt-2 text-warn">A prior confirmation was reorged; accounting requires manual reconciliation and ChainPay will never auto-reverse or rebroadcast.</div> : null}
+            {broadcast.reorged ? <div role="alert" className="mt-2 text-warn">{broadcast.reconciliationRequired
+              ? "A prior confirmation was reorged; accounting requires manual reconciliation and ChainPay will never auto-reverse or rebroadcast."
+              : "A prior confirmation regressed; ChainPay is waiting for fresh canonical finality before accounting."}</div> : null}
             {broadcast.review?.reviewVersion === 2 ? (
               <div className="mt-3 border-t border-accent/20 pt-3">
                 <div>Accounting: {bitcoinAccountingStateLabel(broadcast.accountingState)}</div>

@@ -48,6 +48,17 @@ describe("Bitcoin finalization recovery", () => {
     expect(postFinalized).toHaveBeenCalledWith("btc-1");
   });
 
+  it("recovers a pre-evidence hold after six fresh confirmations and queues accounting", async () => {
+    const value = record(); const final = evidence(value);
+    useBitcoinBroadcastStore.setState({ records: { "btc-1": { ...value, status: { state: "pending", confirmations: 0, blockHeight: null, blockHash: null }, reorged: true, reconciliationRequired: true, accountingState: "reconciliation_required", accountingError: "Bitcoin confirmation regressed; accounting reconciliation is required" } } });
+    transactionStatus.mockResolvedValue({ state: "confirmed", confirmations: 6, blockHeight: 95, blockHash: final.blockHash });
+    finalizedEvidence.mockResolvedValue({ evidence: final });
+    await checkBitcoinPaymentFinalization("btc-1");
+    expect(finalizedEvidence).toHaveBeenCalledOnce();
+    expect(postFinalized).toHaveBeenCalledWith("btc-1");
+    expect(useBitcoinBroadcastStore.getState().records["btc-1"]).toMatchObject({ accountingState: "ready", reconciliationRequired: false, finalizedEvidence: { confirmations: 6 } });
+  });
+
   it("turns a later finalized regression into reconciliation without reposting", async () => {
     const value = record();
     useBitcoinBroadcastStore.setState({ records: { "btc-1": { ...value, status: { state: "confirmed", confirmations: 6, blockHeight: 95, blockHash: "1".repeat(64) }, finalizedEvidence: evidence(value), accountingState: "posted", accountingRecordName: "BATCH-1", journalEntryName: "JE-1" } } });
