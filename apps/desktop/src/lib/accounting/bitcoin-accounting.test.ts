@@ -72,4 +72,19 @@ describe("finalized Bitcoin accounting", () => {
     await postFinalizedBitcoinPayment("btc-1");
     expect(postJournal).toHaveBeenCalledTimes(2);
   });
+
+  it("retries the exact finalized payload after an accounting outage", async () => {
+    postJournal.mockRejectedValueOnce(new Error("ERPNext unavailable"));
+    await postFinalizedBitcoinPayment("btc-1");
+    const failed = useBitcoinBroadcastStore.getState().records["btc-1"]!;
+    expect(failed).toMatchObject({ accountingState: "post_failed", accountingError: "ERPNext unavailable", finalizedEvidence: { confirmations: 6 } });
+    expect(failed.accountingRecordName).toBeNull();
+    expect(failed.journalEntryName).toBeNull();
+
+    postJournal.mockResolvedValueOnce({ jeName: "JE-BTC-1", recordName: "BATCH-BTC-1", idempotent: true, recordIdempotent: true });
+    await postFinalizedBitcoinPayment("btc-1");
+    expect(postJournal).toHaveBeenCalledTimes(2);
+    expect(postJournal.mock.calls[1]?.[0]).toEqual(postJournal.mock.calls[0]?.[0]);
+    expect(useBitcoinBroadcastStore.getState().records["btc-1"]).toMatchObject({ accountingState: "posted", journalEntryName: "JE-BTC-1", accountingRecordName: "BATCH-BTC-1", accountingError: null });
+  });
 });

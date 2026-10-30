@@ -278,6 +278,25 @@ describe("Esplora Bitcoin provider", () => {
     expect(postedBody).toBe(BIP143_SIGNED);
   });
 
+  it("warns when the signed fee is below the provider's current minimum suggestion", async () => {
+    const request = { chain: "btc:mainnet" as const, treasuryId: "btc-treasury", watchedAddresses: [BIP143_ADDRESS], rawTxHex: BIP143_SIGNED };
+    const config = { baseUrl: "https://example.com/api" };
+    const advised = await reviewBitcoinBroadcast({ request, config, fetchImpl: bitcoinBroadcastFetch({ minimumFee: 21 }) });
+    expect(advised.warnings).toContain("Fee rate is below the provider's current minimum suggestion of 21 sat/vB; relay or confirmation may be delayed");
+    const unsupported = await reviewBitcoinBroadcast({ request, config, fetchImpl: bitcoinBroadcastFetch({}) });
+    expect(unsupported.warnings).toEqual([]);
+    expect(advised.digest).not.toBe(unsupported.digest);
+    const adequate = await reviewBitcoinBroadcast({ request, config, fetchImpl: bitcoinBroadcastFetch({ minimumFee: 20 }) });
+    expect(adequate.warnings).toEqual([]);
+    let posted = false;
+    const changed = await confirmBitcoinBroadcast({
+      request: { ...request, reviewDigest: advised.digest }, config,
+      fetchImpl: bitcoinBroadcastFetch({ minimumFee: 22, onPost: () => { posted = true; } }),
+    });
+    expect(changed).toMatchObject({ ok: false, error: { code: "review_changed" } });
+    expect(posted).toBe(false);
+  });
+
   it("does not submit when the immutable review digest is stale or tampered", async () => {
     let postCount = 0;
     const fetchImpl = bitcoinBroadcastFetch({ onPost() { postCount++; } });
@@ -452,12 +471,14 @@ function bitcoinBroadcastFetch(options: {
   missingPrevout?: boolean;
   postStatus?: number;
   onPost?: (body: string) => void;
+  minimumFee?: number;
 }): typeof fetch {
   return vi.fn<typeof fetch>(async (input, init) => {
     const url = String(input);
     expect(url).not.toContain("top-secret");
     if (url.endsWith("/blocks/tip/height")) return new Response("2000");
     if (url.endsWith("/blocks/tip/hash")) return new Response(TIP_HASH);
+    if (url.endsWith("/v1/fees/recommended") && options.minimumFee !== undefined) return json({ minimumFee: options.minimumFee });
     if (url.endsWith(`/block/${TIP_HASH}`)) return json({ id: TIP_HASH, height: 2_000, mediantime: 1_700_000_000 });
     if (url.endsWith(`/tx/${BIP143_TXID}/status`)) {
       return options.known || options.falseStatusForUnknown ? json({ confirmed: false }) : new Response("not found", { status: 404 });

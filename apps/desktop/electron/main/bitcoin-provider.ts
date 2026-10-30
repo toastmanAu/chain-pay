@@ -17,6 +17,7 @@ import type {
 import {
   BitcoinBroadcastValidationError,
   buildBitcoinBroadcastReview,
+  computeBitcoinBroadcastReviewDigest,
   parseFinalBitcoinTransaction,
   validateBitcoinBroadcastReview,
   validateFinalizedBitcoinTransaction,
@@ -86,6 +87,7 @@ const addressStatsSchema = z.object({
   chain_stats: z.object({ tx_count: z.number().int().nonnegative().safe() }).passthrough(),
   mempool_stats: z.object({ tx_count: z.number().int().nonnegative().safe() }).passthrough(),
 }).passthrough();
+const feeAdviceSchema = z.object({ minimumFee: z.number().finite().positive().max(1_000) }).passthrough();
 
 type EsploraTx = z.infer<typeof txSchema>;
 type EsploraUtxo = z.infer<typeof utxoSchema>;
@@ -194,7 +196,7 @@ async function prepareBitcoinBroadcast(args: {
   if (block.id !== tipHash || block.height !== tipHeight) throw invalidResponse();
 
   const prevouts = await resolveBitcoinPrevouts(client, parsed, request.chain);
-  const review = buildBitcoinBroadcastReview({
+  const baseReview = buildBitcoinBroadcastReview({
     chain: request.chain,
     treasuryId: request.treasuryId,
     watchedAddresses: request.watchedAddresses,
@@ -203,6 +205,7 @@ async function prepareBitcoinBroadcast(args: {
     tip: { height: tipHeight, hash: tipHash, medianTimePast: block.mediantime },
     ...(request.accounting === undefined ? {} : { accounting: request.accounting }),
   });
+  const review = await withFeeAdvisory(baseReview, client);
   const [finalTipHeight, finalTipHash] = await Promise.all([
     client.text("/blocks/tip/height"),
     client.text("/blocks/tip/hash"),
@@ -211,6 +214,20 @@ async function prepareBitcoinBroadcast(args: {
     throw new BitcoinProviderError("unavailable", "Bitcoin chain tip changed during review; retry");
   }
   return { review, alreadyKnown: existing !== null, parsed, client };
+}
+
+async function withFeeAdvisory(review: BitcoinBroadcastReview, client: EsploraClient): Promise<BitcoinBroadcastReview> {
+  // Fee advice is an optional Mempool API extension, not a consensus or relay rule.
+  const advice = await client.optionalJson("/v1/fees/recommended", feeAdviceSchema).catch(() => null);
+  if (!advice) return review;
+  const minimumMillisats = BigInt(Math.ceil(advice.minimumFee * 1_000));
+  if (BigInt(review.feeSats) * 1_000n >= minimumMillisats * BigInt(review.vsize)) return review;
+  const { digest: _digest, ...withoutDigest } = review;
+  const warned = {
+    ...withoutDigest,
+    warnings: [...review.warnings, `Fee rate is below the provider's current minimum suggestion of ${advice.minimumFee} sat/vB; relay or confirmation may be delayed`],
+  };
+  return { ...warned, digest: computeBitcoinBroadcastReviewDigest(warned) } as BitcoinBroadcastReview;
 }
 
 async function resolveBitcoinPrevouts(
