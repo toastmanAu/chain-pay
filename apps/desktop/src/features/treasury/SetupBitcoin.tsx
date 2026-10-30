@@ -17,7 +17,7 @@ type SourceKind = BitcoinWatchImport["kind"];
 
 export function SetupBitcoin() {
   const [label, setLabel] = useState("");
-  const [chain, setChain] = useState<BitcoinChain>("btc:testnet");
+  const [chain, setChain] = useState<BitcoinChain>("btc:testnet4");
   const [kind, setKind] = useState<SourceKind>("address");
   const [value, setValue] = useState("");
   const [scriptType, setScriptType] = useState<BitcoinAddressScriptType | BitcoinDerivedScriptType>("p2wpkh");
@@ -117,7 +117,8 @@ export function SetupBitcoin() {
         </Field>
         <Field label="Network">
           <select aria-label="Network" value={chain} onChange={(event) => setChain(event.target.value as BitcoinChain)} className={inputCls}>
-            <option value="btc:testnet">Bitcoin testnet</option>
+            <option value="btc:testnet4">Bitcoin Testnet4</option>
+            <option value="btc:testnet">Bitcoin Testnet3 (legacy)</option>
             <option value="btc:mainnet">Bitcoin mainnet</option>
           </select>
         </Field>

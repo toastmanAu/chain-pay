@@ -17,6 +17,7 @@ import type {
 import {
   BitcoinBroadcastValidationError,
   buildBitcoinBroadcastReview,
+  computeBitcoinBroadcastReviewDigest,
   parseFinalBitcoinTransaction,
   validateBitcoinBroadcastReview,
   validateFinalizedBitcoinTransaction,
@@ -27,6 +28,7 @@ import {
 } from "./bitcoin-broadcast";
 
 const HASH = /^[0-9a-f]{64}$/;
+const TESTNET4_GENESIS_HASH = "00000000da84f2bafbbc53dee25a72ae507ff4914b867c565be350b0da8bf043";
 const MAX_ADDRESSES_PER_SCAN = 10_000;
 const MAX_HISTORY_PAGES = 10_000;
 const MAX_RESPONSE_BYTES = 16 * 1024 * 1024;
@@ -85,6 +87,7 @@ const addressStatsSchema = z.object({
   chain_stats: z.object({ tx_count: z.number().int().nonnegative().safe() }).passthrough(),
   mempool_stats: z.object({ tx_count: z.number().int().nonnegative().safe() }).passthrough(),
 }).passthrough();
+const feeAdviceSchema = z.object({ minimumFee: z.number().finite().positive().max(1_000) }).passthrough();
 
 type EsploraTx = z.infer<typeof txSchema>;
 type EsploraUtxo = z.infer<typeof utxoSchema>;
@@ -151,7 +154,7 @@ export async function confirmBitcoinBroadcast(args: {
     };
   } catch (error) {
     if (error instanceof BitcoinProviderError && error.code === "txid_mismatch") throw error;
-    const knownAfterConflict = await prepared.client.optionalJson(`/tx/${prepared.review.txid}/status`, statusSchema);
+    const knownAfterConflict = await getKnownTransaction(prepared.client, prepared.review.txid);
     if (knownAfterConflict) {
       return {
         ok: true,
@@ -178,10 +181,11 @@ async function prepareBitcoinBroadcast(args: {
   validateBitcoinAddresses(request.chain, request.watchedAddresses);
   const parsed = parseFinalBitcoinTransaction(request.rawTxHex);
   const client = new EsploraClient(args.config, args.fetchImpl ?? fetch);
+  await verifyProviderNetwork(request.chain, client);
   const [tipHeightText, tipHashText, existing] = await Promise.all([
     client.text("/blocks/tip/height"),
     client.text("/blocks/tip/hash"),
-    client.optionalJson(`/tx/${parsed.transaction.id}/status`, statusSchema),
+    getKnownTransaction(client, parsed.transaction.id),
   ]);
   if (existing && !args.allowKnown) {
     throw new BitcoinBroadcastValidationError("already_known", "Transaction is already known to the selected Bitcoin provider");
@@ -192,7 +196,7 @@ async function prepareBitcoinBroadcast(args: {
   if (block.id !== tipHash || block.height !== tipHeight) throw invalidResponse();
 
   const prevouts = await resolveBitcoinPrevouts(client, parsed, request.chain);
-  const review = buildBitcoinBroadcastReview({
+  const baseReview = buildBitcoinBroadcastReview({
     chain: request.chain,
     treasuryId: request.treasuryId,
     watchedAddresses: request.watchedAddresses,
@@ -201,6 +205,7 @@ async function prepareBitcoinBroadcast(args: {
     tip: { height: tipHeight, hash: tipHash, medianTimePast: block.mediantime },
     ...(request.accounting === undefined ? {} : { accounting: request.accounting }),
   });
+  const review = await withFeeAdvisory(baseReview, client);
   const [finalTipHeight, finalTipHash] = await Promise.all([
     client.text("/blocks/tip/height"),
     client.text("/blocks/tip/hash"),
@@ -209,6 +214,20 @@ async function prepareBitcoinBroadcast(args: {
     throw new BitcoinProviderError("unavailable", "Bitcoin chain tip changed during review; retry");
   }
   return { review, alreadyKnown: existing !== null, parsed, client };
+}
+
+async function withFeeAdvisory(review: BitcoinBroadcastReview, client: EsploraClient): Promise<BitcoinBroadcastReview> {
+  // Fee advice is an optional Mempool API extension, not a consensus or relay rule.
+  const advice = await client.optionalJson("/v1/fees/recommended", feeAdviceSchema).catch(() => null);
+  if (!advice) return review;
+  const minimumMillisats = BigInt(Math.ceil(advice.minimumFee * 1_000));
+  if (BigInt(review.feeSats) * 1_000n >= minimumMillisats * BigInt(review.vsize)) return review;
+  const { digest: _digest, ...withoutDigest } = review;
+  const warned = {
+    ...withoutDigest,
+    warnings: [...review.warnings, `Fee rate is below the provider's current minimum suggestion of ${advice.minimumFee} sat/vB; relay or confirmation may be delayed`],
+  };
+  return { ...warned, digest: computeBitcoinBroadcastReviewDigest(warned) } as BitcoinBroadcastReview;
 }
 
 async function resolveBitcoinPrevouts(
@@ -267,6 +286,7 @@ export async function getFinalizedBitcoinPaymentEvidence(args: {
     throw new BitcoinProviderError("invalid_request", "Bitcoin finalized-evidence request does not match the reviewed payment");
   }
   const client = new EsploraClient(args.config, args.fetchImpl ?? fetch);
+  await verifyProviderNetwork(request.chain, client);
   const [tipText, status, rawHex] = await Promise.all([
     client.text("/blocks/tip/height"),
     client.optionalJson(`/tx/${review.txid}/status`, statusSchema),
@@ -317,7 +337,7 @@ export function providerConfigFromEnvironment(
   chain: BitcoinChain,
   env: NodeJS.ProcessEnv = process.env,
 ): BitcoinProviderConfig | null {
-  const suffix = chain === "btc:mainnet" ? "MAINNET" : "TESTNET";
+  const suffix = chain === "btc:mainnet" ? "MAINNET" : chain === "btc:testnet4" ? "TESTNET4" : "TESTNET";
   const rawUrl = env[`BITCOIN_${suffix}_ESPLORA_URL`]?.trim();
   if (!rawUrl) return null;
   let parsed: URL;
@@ -346,6 +366,7 @@ export async function scanBitcoinAddresses(args: {
   validateAddresses(args.chain, args.addresses);
   const fetchImpl = args.fetchImpl ?? fetch;
   const client = new EsploraClient(args.config, fetchImpl);
+  await verifyProviderNetwork(args.chain, client);
   const [tipHeightText, tipHashText] = await Promise.all([
     client.text("/blocks/tip/height"),
     client.text("/blocks/tip/hash"),
@@ -422,6 +443,7 @@ export async function scanBitcoinAddresses(args: {
 }
 
 export async function getBitcoinTransactionStatus(args: {
+  chain: BitcoinChain;
   txid: string;
   config: BitcoinProviderConfig;
   fetchImpl?: typeof fetch;
@@ -430,12 +452,14 @@ export async function getBitcoinTransactionStatus(args: {
     throw new BitcoinProviderError("invalid_request", "Bitcoin transaction id is invalid");
   }
   const client = new EsploraClient(args.config, args.fetchImpl ?? fetch);
-  const [tipHeightText, status] = await Promise.all([
+  await verifyProviderNetwork(args.chain, client);
+  const [tipHeightText, transaction] = await Promise.all([
     client.text("/blocks/tip/height"),
-    client.optionalJson(`/tx/${args.txid}/status`, statusSchema),
+    getKnownTransaction(client, args.txid),
   ]);
   const tipHeight = parseHeight(tipHeightText);
-  if (!status) return { state: "unknown", confirmations: 0, blockHeight: null, blockHash: null };
+  if (!transaction) return { state: "unknown", confirmations: 0, blockHeight: null, blockHash: null };
+  const status = transaction.status;
   if (!status.confirmed) {
     return { state: "pending", confirmations: 0, blockHeight: null, blockHash: null };
   }
@@ -453,6 +477,20 @@ export async function getBitcoinTransactionStatus(args: {
     blockHeight: status.block_height,
     blockHash: status.block_hash,
   };
+}
+
+async function verifyProviderNetwork(chain: BitcoinChain, client: EsploraClient): Promise<void> {
+  if (chain !== "btc:testnet4") return;
+  const genesisHash = parseHash(await client.text("/block-height/0"));
+  if (genesisHash !== TESTNET4_GENESIS_HASH) {
+    throw new BitcoinProviderError("invalid_response", "Bitcoin provider does not serve Testnet4");
+  }
+}
+
+async function getKnownTransaction(client: EsploraClient, txid: string): Promise<z.infer<typeof txSchema> | null> {
+  const transaction = await client.optionalJson(`/tx/${txid}`, txSchema);
+  if (transaction && transaction.txid !== txid) throw invalidResponse();
+  return transaction;
 }
 
 class EsploraClient {

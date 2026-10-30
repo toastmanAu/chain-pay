@@ -188,7 +188,7 @@ export function buildBitcoinBroadcastReview(args: {
     treasuryId: args.treasuryId,
     chain: args.chain,
     txid: transaction.id,
-    wtxid: transaction.hash,
+    wtxid: witnessTransactionId(args.parsed.rawBytes),
     version: raw.version,
     lockTime: raw.lockTime,
     sizeBytes: args.parsed.rawBytes.length,
@@ -247,7 +247,7 @@ export function validateFinalizedBitcoinTransaction(review: BitcoinBroadcastRevi
   if (review.reviewVersion !== 2) throw validation("unsupported", "Legacy Bitcoin reviews have no committed accounting intent");
   const parsed = parseFinalBitcoinTransaction(rawTxHex);
   const hash = createHash("sha256").update(parsed.rawBytes).digest("hex");
-  if (parsed.transaction.id !== review.txid || parsed.transaction.hash !== review.wtxid || hash !== review.rawTransactionHash ||
+  if (parsed.transaction.id !== review.txid || witnessTransactionId(parsed.rawBytes) !== review.wtxid || hash !== review.rawTransactionHash ||
       parsed.raw.version !== review.version || parsed.raw.lockTime !== review.lockTime || parsed.rawBytes.length !== review.sizeBytes ||
       parsed.transaction.weight !== review.weight || parsed.transaction.vsize !== review.vsize ||
       parsed.raw.inputs.length !== review.inputs.length || parsed.raw.outputs.length !== review.outputs.length) {
@@ -521,6 +521,11 @@ function equalBytes(a: Uint8Array, b: Uint8Array): boolean {
 
 export function toHex(bytes: Uint8Array): string {
   return Buffer.from(bytes).toString("hex");
+}
+
+function witnessTransactionId(rawBytes: Uint8Array): string {
+  const digest = sha256x2(rawBytes);
+  return toHex(Uint8Array.from(digest, (_, index) => digest[digest.length - index - 1]!));
 }
 
 export function fromHex(hex: string): Uint8Array {

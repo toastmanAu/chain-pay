@@ -144,6 +144,9 @@ describe("Bitcoin treasury detail", () => {
     fireEvent.change(screen.getByRole("textbox", { name: /payee reference for output 0/i }), { target: { value: "vendor-42" } });
     fireEvent.change(screen.getByRole("textbox", { name: /usd obligation for output 0/i }), { target: { value: "2599" } });
     const prepare = screen.getByRole("button", { name: /prepare accounting-bound review/i });
+    expect(screen.getByText(/a non-watched address may still belong to your wallet/i)).toBeInTheDocument();
+    expect(prepare).toBeDisabled();
+    fireEvent.click(screen.getByRole("checkbox", { name: /each mapped output pays a different wallet/i }));
     expect(prepare).toBeEnabled();
     fireEvent.click(prepare);
     expect(await screen.findByText(approvedReview.digest)).toBeInTheDocument();

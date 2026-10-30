@@ -1,4 +1,4 @@
-# Phase 5 Slice A2 — Bitcoin testnet manual-broadcast smoke playbook
+# Phase 5 Slice A2 — Bitcoin Testnet4 manual-broadcast smoke playbook
 
 This playbook verifies the deliberately narrow, watch-only broadcast workflow. ChainPay reviews and relays a transaction that was fully constructed and signed elsewhere. It never requests or accepts a seed phrase, private key, signing request, construction parameters, or PSBT.
 
@@ -8,8 +8,8 @@ This playbook verifies the deliberately narrow, watch-only broadcast workflow. C
 - An HTTPS Esplora-compatible testnet provider configured in the Electron main-process environment:
 
   ```text
-  BITCOIN_TESTNET_ESPLORA_URL=https://provider.example/api
-  BITCOIN_TESTNET_ESPLORA_BEARER_TOKEN=optional-token
+  BITCOIN_TESTNET4_ESPLORA_URL=https://mempool.space/testnet4/api
+  BITCOIN_TESTNET4_ESPLORA_BEARER_TOKEN=optional-token
   ```
 
 - A small confirmed testnet UTXO belonging to the selected treasury.
@@ -20,8 +20,8 @@ Never place provider credentials in renderer settings, the raw-transaction field
 ## Happy path
 
 1. In the external wallet, construct a testnet spend from a watched UTXO. Choose the destination and fee there, sign every input, finalize it, and export only the raw transaction hex. Do not export a PSBT.
-2. Open the matching **Bitcoin testnet** treasury in ChainPay and refresh it so the watched address set and tip are current.
-3. Paste the final raw hex into **Manual signed transaction broadcast** and select **Review signed transaction**.
+2. Open the matching **Bitcoin Testnet4** treasury in ChainPay and refresh it so the watched address set and tip are current.
+3. Paste the final raw hex into **Manual signed transaction broadcast** and select **Inspect signed transaction**.
 4. Verify all of the following before confirming:
    - the network and selected treasury;
    - transaction ID and immutable review digest;
@@ -54,4 +54,4 @@ On a controlled test provider, first return a canonical confirmed status for the
 
 ## Scope audit
 
-Confirm there is still no Bitcoin coin selection, transaction builder, construction fee estimator, signing/key-custody path, PSBT import/export, automatic rebroadcast, accounting posting, arbitrary provider proxy, regtest/signet option, or additional Bitcoin network in the UI or generic `ChainAdapter` spending methods.
+Confirm there is still no Bitcoin coin selection, transaction builder, construction fee estimator, signing/key-custody path, PSBT import/export, automatic rebroadcast, accounting posting, arbitrary provider proxy, regtest/signet option, or Bitcoin spending method on the generic `ChainAdapter`.

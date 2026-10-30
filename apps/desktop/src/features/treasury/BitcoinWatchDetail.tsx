@@ -28,6 +28,7 @@ export function BitcoinWatchDetail({ treasury }: { treasury: BitcoinWatchTreasur
   const [inspection, setInspection] = useState<BitcoinBroadcastReview | null>(null);
   const [inspectionBusy, setInspectionBusy] = useState(false);
   const [accountingInputs, setAccountingInputs] = useState<Record<number, { payeeId: string; fiatMinor: string }>>({});
+  const [verifiedExternalOwnership, setVerifiedExternalOwnership] = useState(false);
   useEffect(() => {
     useBitcoinWatchStore.getState().ensure(treasury.id, treasury.watch);
   }, [treasury.id, treasury.watch]);
@@ -62,7 +63,7 @@ export function BitcoinWatchDetail({ treasury }: { treasury: BitcoinWatchTreasur
   const accountingOutputs = inspection?.outputs.filter(
     (output) => !output.watched && output.scriptType !== "op_return" && BigInt(output.valueSats) > 0n,
   ) ?? [];
-  const accountingMappingComplete = accountingOutputs.length > 0 && accountingOutputs.every((output) => {
+  const accountingMappingComplete = verifiedExternalOwnership && accountingOutputs.length > 0 && accountingOutputs.every((output) => {
     const value = accountingInputs[output.vout];
     return Boolean(output.address && value?.payeeId.trim() && /^[1-9]\d*$/.test(value?.fiatMinor.trim() ?? ""));
   });
@@ -71,6 +72,7 @@ export function BitcoinWatchDetail({ treasury }: { treasury: BitcoinWatchTreasur
     const raw = rawTxHex.trim();
     setInspectionBusy(true);
     setConfirmedReview(false);
+    setVerifiedExternalOwnership(false);
     try {
       const response = await bitcoinBridge().reviewBroadcast({
         chain: treasury.watch.chain,
@@ -96,7 +98,7 @@ export function BitcoinWatchDetail({ treasury }: { treasury: BitcoinWatchTreasur
   }
 
   async function prepareAccountingReview(): Promise<void> {
-    if (!inspection || accountingOutputs.length === 0) return;
+    if (!inspection || !accountingMappingComplete) return;
     const accounting = accountingOutputs.map((output) => ({
       vout: output.vout,
       destination: output.address ?? "",
@@ -180,7 +182,7 @@ export function BitcoinWatchDetail({ treasury }: { treasury: BitcoinWatchTreasur
 
       {!providerQuery.isLoading && !providerQuery.data?.configured ? (
         <p role="alert" className="rounded-md border border-warn/40 bg-warn/5 p-3 text-sm text-warn">
-          Configure {treasury.watch.chain === "btc:mainnet" ? "BITCOIN_MAINNET_ESPLORA_URL" : "BITCOIN_TESTNET_ESPLORA_URL"} in the desktop main-process environment, then restart ChainPay.
+          Configure {treasury.watch.chain === "btc:mainnet" ? "BITCOIN_MAINNET_ESPLORA_URL" : treasury.watch.chain === "btc:testnet4" ? "BITCOIN_TESTNET4_ESPLORA_URL" : "BITCOIN_TESTNET_ESPLORA_URL"} in the desktop main-process environment, then restart ChainPay.
         </p>
       ) : null}
       {record?.error ? (
@@ -218,7 +220,7 @@ export function BitcoinWatchDetail({ treasury }: { treasury: BitcoinWatchTreasur
           aria-label="Fully signed raw transaction"
           value={rawTxHex}
           onChange={(event) => {
-            setRawTxHex(event.target.value); setConfirmedReview(false); setInspection(null); setAccountingInputs({});
+            setRawTxHex(event.target.value); setConfirmedReview(false); setInspection(null); setAccountingInputs({}); setVerifiedExternalOwnership(false);
           }}
           rows={5}
           spellCheck={false}
@@ -248,7 +250,7 @@ export function BitcoinWatchDetail({ treasury }: { treasury: BitcoinWatchTreasur
             <div>
               <h3 className="text-sm font-medium">Accounting output mapping</h3>
               <p className="mt-1 text-xs text-fg-muted">
-                Map every positive external output. This mapping is approved by this operator at broadcast time; it is not cryptographically signed by the external Bitcoin signers.
+                Map every positive non-watched output. A non-watched address may still belong to your wallet. This mapping is approved by this operator at broadcast time; it is not cryptographically signed by the Bitcoin signers.
               </p>
             </div>
             {accountingOutputs.map((output) => (
@@ -279,6 +281,15 @@ export function BitcoinWatchDetail({ treasury }: { treasury: BitcoinWatchTreasur
                 </label>
               </div>
             ))}
+            <label className="flex items-start gap-2 text-xs text-fg-muted">
+              <input
+                type="checkbox"
+                checked={verifiedExternalOwnership}
+                onChange={(event) => setVerifiedExternalOwnership(event.target.checked)}
+                className="mt-0.5"
+              />
+              Each mapped output pays a different wallet from the source wallet; none is my own receiving address or change.
+            </label>
             <button
               type="button"
               onClick={() => void prepareAccountingReview()}
@@ -315,7 +326,7 @@ export function BitcoinWatchDetail({ treasury }: { treasury: BitcoinWatchTreasur
                   ))}
                   {broadcast.review.outputs.map((output) => (
                     <tr key={`out:${output.vout}`} className="border-t border-surface-hi">
-                      <td className="py-2">Output {output.vout}</td><td className="max-w-72 truncate py-2 font-mono">{output.address ?? output.scriptType}</td><td className="py-2">{formatBtc(output.valueSats)} BTC</td><td className="py-2">{output.changeCandidate ? "Change candidate" : output.watched ? "Watched" : "External"}</td>
+                      <td className="py-2">Output {output.vout}</td><td className="max-w-72 truncate py-2 font-mono">{output.address ?? output.scriptType}</td><td className="py-2">{formatBtc(output.valueSats)} BTC</td><td className="py-2">{output.changeCandidate ? "Change candidate" : output.watched ? "Watched" : "Not watched"}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -362,7 +373,9 @@ export function BitcoinWatchDetail({ treasury }: { treasury: BitcoinWatchTreasur
             <div className="mt-1 break-all font-mono">{broadcast.receipt.txid}</div>
             <div className="mt-1 text-fg-muted">{broadcast.status ? broadcastStatusLabel(broadcast.status) : "Checking network status…"}</div>
             {broadcast.accountingError ? <div className="mt-2 text-warn">{broadcast.accountingError}</div> : null}
-            {broadcast.reorged ? <div role="alert" className="mt-2 text-warn">A prior confirmation was reorged; accounting requires manual reconciliation and ChainPay will never auto-reverse or rebroadcast.</div> : null}
+            {broadcast.reorged ? <div role="alert" className="mt-2 text-warn">{broadcast.reconciliationRequired
+              ? "A prior confirmation was reorged; accounting requires manual reconciliation and ChainPay will never auto-reverse or rebroadcast."
+              : "A prior confirmation regressed; ChainPay is waiting for fresh canonical finality before accounting."}</div> : null}
             {broadcast.review?.reviewVersion === 2 ? (
               <div className="mt-3 border-t border-accent/20 pt-3">
                 <div>Accounting: {bitcoinAccountingStateLabel(broadcast.accountingState)}</div>

@@ -3,6 +3,7 @@ import { RawTx } from "@scure/btc-signer";
 import {
   BitcoinBroadcastValidationError,
   buildBitcoinBroadcastReview,
+  computeBitcoinBroadcastReviewDigest,
   parseFinalBitcoinTransaction,
   validateBitcoinBroadcastReview,
   validateFinalizedBitcoinTransaction,
@@ -38,7 +39,7 @@ describe("manual Bitcoin broadcast validation", () => {
     const result = review();
     expect(result).toMatchObject({
       txid: "ef48d9d0f595052e0f8cdcf825f7a5e50b6a388a81f206f3f4846e5ecd7a0c23",
-      wtxid: "230c7acd5e6e84f4f306f2818a386a0be5a5f725f8dc8c0f2e0595f5d0d948ef",
+      wtxid: "680f483b2bf6c5dcbf111e69e885ba248a41a5e92070cfb0afec3cfc49a9fabb",
       sizeBytes: 251,
       weight: 677,
       vsize: 170,
@@ -144,6 +145,9 @@ describe("manual Bitcoin broadcast validation", () => {
     expect(result.digest).not.toBe(inspected.digest);
     expect(() => validateBitcoinBroadcastReview({ ...result, accounting: [{ ...result.accounting[0]!, payeeId: "tampered" }, ...result.accounting.slice(1)] })).toThrow(/digest/i);
     expect(validateFinalizedBitcoinTransaction(result, BIP143_SIGNED).transaction.id).toBe(result.txid);
+    const { digest: _digest, ...reviewWithCorrectWitnessId } = result;
+    const reviewWithOldWitnessId = { ...reviewWithCorrectWitnessId, wtxid: "230c7acd5e6e84f4f306f2818a386a0be5a5f725f8dc8c0f2e0595f5d0d948ef" };
+    expect(() => validateFinalizedBitcoinTransaction({ ...reviewWithOldWitnessId, digest: computeBitcoinBroadcastReviewDigest(reviewWithOldWitnessId) }, BIP143_SIGNED)).toThrow(/bytes do not match/i);
     expect(() => validateFinalizedBitcoinTransaction(result, `${BIP143_SIGNED.slice(0, -2)}01`)).toThrow();
   });
 

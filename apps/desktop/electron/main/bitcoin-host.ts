@@ -1,4 +1,4 @@
-import { ipcMain } from "electron";
+import { ipcMain, net } from "electron";
 import {
   BITCOIN_CHANNELS,
   type BitcoinChain,
@@ -24,6 +24,13 @@ import {
 } from "./bitcoin-provider";
 import { BitcoinBroadcastValidationError, validateBitcoinBroadcastReview } from "./bitcoin-broadcast";
 
+// Chromium's network stack handles system proxy and address fallback in the
+// packaged app; Node fetch can time out against the same configured provider.
+const providerFetch: typeof fetch = (input, init) => {
+  if (typeof input !== "string") throw new TypeError("Bitcoin provider URL must be a string");
+  return net.fetch(input, init);
+};
+
 export function registerBitcoinIpc(): void {
   ipcMain.handle(
     BITCOIN_CHANNELS.status,
@@ -41,7 +48,7 @@ export function registerBitcoinIpc(): void {
       if (!config) {
         throw new BitcoinProviderError("not_configured", "Bitcoin provider is not configured");
       }
-      return scanBitcoinAddresses({ chain: request.chain, addresses: request.addresses, config });
+      return scanBitcoinAddresses({ chain: request.chain, addresses: request.addresses, config, fetchImpl: providerFetch });
     },
   );
   ipcMain.handle(
@@ -52,7 +59,7 @@ export function registerBitcoinIpc(): void {
       }
       const config = providerConfigFromEnvironment(request.chain);
       if (!config) throw new BitcoinProviderError("not_configured", "Bitcoin provider is not configured");
-      return getBitcoinTransactionStatus({ txid: request.txid, config });
+      return getBitcoinTransactionStatus({ chain: request.chain, txid: request.txid, config, fetchImpl: providerFetch });
     },
   );
   ipcMain.handle(
@@ -64,7 +71,7 @@ export function registerBitcoinIpc(): void {
       const config = providerConfigFromEnvironment(request.chain);
       if (!config) return { ok: false, error: { code: "provider_unavailable", message: "Bitcoin provider is not configured" } };
       try {
-        return { ok: true, review: await reviewBitcoinBroadcast({ request, config }) };
+        return { ok: true, review: await reviewBitcoinBroadcast({ request, config, fetchImpl: providerFetch }) };
       } catch (error) {
         return { ok: false, error: sanitizeBroadcastError(error) };
       }
@@ -79,7 +86,7 @@ export function registerBitcoinIpc(): void {
       const config = providerConfigFromEnvironment(request.chain);
       if (!config) return { ok: false, error: { code: "provider_unavailable", message: "Bitcoin provider is not configured" } };
       try {
-        return await confirmBitcoinBroadcast({ request, config });
+        return await confirmBitcoinBroadcast({ request, config, fetchImpl: providerFetch });
       } catch (error) {
         return { ok: false, error: sanitizeBroadcastError(error) };
       }
@@ -93,13 +100,13 @@ export function registerBitcoinIpc(): void {
       }
       const config = providerConfigFromEnvironment(request.chain);
       if (!config) throw new BitcoinProviderError("not_configured", "Bitcoin provider is not configured");
-      return getFinalizedBitcoinPaymentEvidence({ request: request as unknown as import("@chain-pay/shared").BitcoinFinalizedEvidenceRequest, config });
+      return getFinalizedBitcoinPaymentEvidence({ request: request as unknown as import("@chain-pay/shared").BitcoinFinalizedEvidenceRequest, config, fetchImpl: providerFetch });
     },
   );
 }
 
 function validChain(value: unknown): value is BitcoinChain {
-  return value === "btc:mainnet" || value === "btc:testnet";
+  return value === "btc:mainnet" || value === "btc:testnet" || value === "btc:testnet4";
 }
 
 function validBroadcastRequest(value: unknown, confirmation: false): value is BitcoinBroadcastReviewRequest;

@@ -21,6 +21,17 @@ function renderSetup(): void {
 }
 
 describe("SetupBitcoin", () => {
+  it("defaults new watch treasuries to Testnet4 while keeping Testnet3 selectable", async () => {
+    renderSetup();
+    expect(screen.getByLabelText("Network")).toHaveValue("btc:testnet4");
+    fireEvent.change(screen.getByLabelText("Label"), { target: { value: "Sparrow Testnet4" } });
+    fireEvent.change(screen.getByLabelText("Bitcoin address"), { target: { value: "tb1q720mtzgzd6tztx9kl9855l7xcmnd35rc6j70cz" } });
+    fireEvent.click(screen.getByRole("button", { name: "Validate and add" }));
+    await waitFor(() => expect(useTreasuryStore.getState().treasuries[0]).toMatchObject({
+      watch: { chain: "btc:testnet4" },
+    }));
+  });
+
   it("validates and persists a network- and script-bound watch address", async () => {
     renderSetup();
     fireEvent.change(screen.getByLabelText("Label"), { target: { value: "Bitcoin reserve" } });

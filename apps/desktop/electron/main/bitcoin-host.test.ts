@@ -7,9 +7,11 @@ const mocks = vi.hoisted(() => ({
   confirm: vi.fn(),
   evidence: vi.fn(),
   validate: vi.fn(),
+  netFetch: vi.fn(),
 }));
 
 vi.mock("electron", () => ({
+  net: { fetch: mocks.netFetch },
   ipcMain: {
     handle: vi.fn((channel: string, handler: (...args: unknown[]) => unknown) => mocks.handlers.set(channel, handler)),
   },
@@ -74,7 +76,10 @@ describe("Bitcoin broadcast IPC boundary", () => {
       reviewDigest: "b".repeat(64),
     };
     await expect(handler({}, request)).resolves.toMatchObject({ ok: true, receipt: { state: "submitted" } });
-    expect(mocks.confirm).toHaveBeenCalledWith(expect.objectContaining({ request }));
+    expect(mocks.confirm).toHaveBeenCalledWith(expect.objectContaining({ request, fetchImpl: expect.any(Function) }));
+    const providerFetch = mocks.confirm.mock.calls[0]?.[0].fetchImpl as typeof fetch;
+    await providerFetch("https://private.example/api/blocks/tip/height");
+    expect(mocks.netFetch).toHaveBeenCalledWith("https://private.example/api/blocks/tip/height", undefined);
   });
 
   it("allows only exact accounting-bound reviews through the finalized-evidence boundary", async () => {

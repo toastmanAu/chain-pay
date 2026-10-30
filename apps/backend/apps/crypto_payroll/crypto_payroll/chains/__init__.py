@@ -16,6 +16,7 @@ CHAIN_RULES: dict[str, ChainRules] = {
     "sol:devnet": SolRules(chain="sol:devnet"),
     "sol:mainnet": SolRules(chain="sol:mainnet"),
     "btc:testnet": BtcRules(chain="btc:testnet"),
+    "btc:testnet4": BtcRules(chain="btc:testnet4"),
     "btc:mainnet": BtcRules(chain="btc:mainnet"),
 }
 

@@ -281,7 +281,9 @@ function parseExtendedPublicKey(
   const prefix = value.slice(0, 4);
   const metadata = EXTENDED_PUBLIC_VERSIONS[prefix];
   if (!metadata) throw new Error("Unsupported extended public key version");
-  if (metadata.chain !== chain) throw new Error(`Extended public key belongs to ${networkLabel(metadata.chain)}`);
+  if (metadata.chain !== chain && !(chain === "btc:testnet4" && metadata.chain === "btc:testnet")) {
+    throw new Error(`Extended public key belongs to ${networkLabel(metadata.chain)}`);
+  }
   if (metadata.impliedScript && metadata.impliedScript !== scriptType) {
     throw new Error(`${prefix} implies ${metadata.impliedScript}, not ${scriptType}`);
   }
@@ -346,8 +348,8 @@ function networkFor(chain: BitcoinChain) {
   return chain === "btc:mainnet" ? NETWORK : TEST_NETWORK;
 }
 
-function networkLabel(chain: BitcoinChain): "mainnet" | "testnet" {
-  return chain === "btc:mainnet" ? "mainnet" : "testnet";
+function networkLabel(chain: BitcoinChain): "mainnet" | "testnet" | "testnet4" {
+  return chain === "btc:mainnet" ? "mainnet" : chain === "btc:testnet4" ? "testnet4" : "testnet";
 }
 
 function descriptorPolyMod(checksum: bigint, value: number): bigint {

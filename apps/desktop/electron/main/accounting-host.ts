@@ -15,7 +15,7 @@ export type ComplianceFormat = "csv" | "pdf";
 export interface ComplianceFilters {
   fromDate?: string;
   toDate?: string;
-  chain?: "ckb:mainnet" | "ckb:testnet" | "evm:11155111" | "sol:devnet" | "sol:mainnet" | "btc:testnet" | "btc:mainnet";
+  chain?: "ckb:mainnet" | "ckb:testnet" | "evm:11155111" | "sol:devnet" | "sol:mainnet" | "btc:testnet" | "btc:testnet4" | "btc:mainnet";
 }
 
 export interface ComplianceSaveResult {
@@ -65,7 +65,7 @@ const bitcoinSchema = z.object({
 }).strict();
 const confirmedRecordSchema = z.object({
   batchId: z.string().min(1).max(140), sourceType: z.enum(["send", "payroll"]), label: z.string().min(1).max(140),
-  chain: z.enum(["ckb:mainnet", "ckb:testnet", "evm:11155111", "sol:devnet", "sol:mainnet", "btc:testnet", "btc:mainnet"]),
+  chain: z.enum(["ckb:mainnet", "ckb:testnet", "evm:11155111", "sol:devnet", "sol:mainnet", "btc:testnet", "btc:testnet4", "btc:mainnet"]),
   txHash: z.string().min(1).max(128), confirmedAt: z.string().datetime({ offset: true }),
   lines: z.array(paymentLineSchema).min(1).max(500), evm: evmSchema.optional(), solana: solanaSchema.optional(), bitcoin: bitcoinSchema.optional(),
 }).strict().superRefine((value, context) => {
@@ -250,7 +250,7 @@ function normaliseComplianceRequest(filters: ComplianceFilters, format: Complian
   const from = date(filters.fromDate, "fromDate");
   const to = date(filters.toDate, "toDate");
   if (from && to && from > to) throw new Error("fromDate cannot be after toDate");
-  if (filters.chain && !["ckb:mainnet", "ckb:testnet", "evm:11155111", "sol:devnet", "sol:mainnet", "btc:testnet", "btc:mainnet"].includes(filters.chain)) {
+  if (filters.chain && !["ckb:mainnet", "ckb:testnet", "evm:11155111", "sol:devnet", "sol:mainnet", "btc:testnet", "btc:testnet4", "btc:mainnet"].includes(filters.chain)) {
     throw new Error("Unsupported compliance chain");
   }
   return {
