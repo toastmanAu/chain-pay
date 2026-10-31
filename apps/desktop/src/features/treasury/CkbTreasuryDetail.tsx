@@ -16,14 +16,14 @@ export function CkbTreasuryDetail({ treasury }: { treasury: MultisigTreasury }) 
   const multisig = treasury.multisig as CkbMultisig;
   const cfg = useMemo<CkbMultisigConfig>(
     () => ({
-      s: 0,
-      r: 0,
+      s: multisig.s,
+      r: multisig.r,
       m: multisig.m,
       n: multisig.n,
       pubkeyHashes: multisig.pubkeyHashes,
       ...(multisig.since !== undefined ? { since: multisig.since } : {}),
     }),
-    [multisig.m, multisig.n, multisig.pubkeyHashes, multisig.since],
+    [multisig.s, multisig.r, multisig.m, multisig.n, multisig.pubkeyHashes, multisig.since],
   );
   const script = useMemo(() => treasuryLockScript(cfg), [cfg]);
 
