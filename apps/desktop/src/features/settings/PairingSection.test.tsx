@@ -54,6 +54,22 @@ describe("PairingSection", () => {
     expect(await screen.findByText("phone-1")).toBeInTheDocument();
   });
 
+  it("hides revoked and expired devices from the list and rotation count", async () => {
+    const now = Date.now();
+    listMock.mockResolvedValue([
+      { tokenId: "old", deviceLabel: "old-phone", expiresAt: now + 86400000, revokedAt: now },
+      { tokenId: "expired", deviceLabel: "expired-phone", expiresAt: now - 1 },
+      { tokenId: "active", deviceLabel: "active-phone", expiresAt: now + 86400000 },
+    ]);
+    render(<PairingSection rpcHost="127.0.0.1" rpcPort={8233} certFingerprint="AB:CD" />);
+
+    expect(await screen.findByText("active-phone")).toBeInTheDocument();
+    expect(screen.queryByText("old-phone")).not.toBeInTheDocument();
+    expect(screen.queryByText("expired-phone")).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: /rotate tls cert/i }));
+    expect(screen.getByText(/all currently paired phones \(1\)/i)).toBeInTheDocument();
+  });
+
   it("issues a token and shows the QR after submit", async () => {
     listMock.mockResolvedValue([]);
     issueMock.mockResolvedValue({ token: "EsQCBb...", tokenId: "tok-new" });
