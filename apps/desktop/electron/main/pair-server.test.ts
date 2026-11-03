@@ -10,6 +10,8 @@ const { resetSafeStorageForTests } = await import("./safe-storage");
 const { initBiscuit, generateRootKeypair, issueCaptureV1Token } = await import("./pair-server-biscuit");
 const { _setPairStoreFileForTests, addDevice } = await import("./pair-store");
 const { startPairServer, stopPairServer } = await import("./pair-server");
+const { __resetMobileInboxForTest, listMobileInbox } = await import("./mobile-inbox-host");
+const { __resetForTest: resetInvoiceFilesForTest } = await import("./invoice-files-host");
 const { _setTlsCertFileForTests, _resetTlsCertCacheForTests, loadOrCreateTlsCert } = await import("./tls-cert-store");
 
 const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "pair-server-test-"));
@@ -26,6 +28,8 @@ const rendererSend = vi.fn();
 beforeAll(async () => {
   await initBiscuit();
   resetSafeStorageForTests();
+  __resetMobileInboxForTest(tmpDir);
+  resetInvoiceFilesForTest(tmpDir);
   _setPairStoreFileForTests(storeFile);
   rootKeypair = generateRootKeypair();
   const issued = issueCaptureV1Token({
@@ -111,9 +115,10 @@ describe("pair-server routes", () => {
       body: JSON.stringify(payload),
     });
     expect(r.status).toBe(201);
+    expect((await listMobileInbox()).find((entry) => entry.mobileId === payload.id)?.sourceLabel).toBe("phone-1");
     expect(rendererSend).toHaveBeenCalledWith(
       "mobile-invoice:received",
-      expect.objectContaining({ sourceLabel: "phone-1" }),
+      expect.objectContaining({ invoiceId: `inv_${payload.id.toLowerCase()}` }),
     );
   });
 

@@ -37,6 +37,7 @@ import { useIncomingPacketsStore } from "./stores/incoming-packets";
 import { usePayrollBatchesStore } from "./stores/payroll-batches";
 import { useCommSendRetry } from "./features/payments/useCommSendRetry";
 import { useBatchConfirmationSync } from "./lib/invoices/use-batch-confirmation-to-invoice";
+import { useMobileInvoiceIntake } from "./lib/invoices/use-mobile-inbox";
 import { useBatchConfirmationToAccounting } from "./lib/accounting/use-batch-confirmation-to-accounting";
 import { useSafeConfirmationToAccounting } from "./lib/accounting/use-safe-confirmation-to-accounting";
 import { useSolanaFinalizationToAccounting } from "./lib/accounting/use-solana-finalization-to-accounting";
@@ -249,6 +250,7 @@ export function App() {
 
   useCommSendRetry({ packetForBatch, multisigForBatch });
 
+  useMobileInvoiceIntake();
   useBatchConfirmationSync();
   useBatchConfirmationToAccounting();
   useSendConfirmationToAccounting();

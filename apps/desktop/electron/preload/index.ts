@@ -117,6 +117,8 @@ const chainpayApi = {
   },
   pair: {
     list: (): Promise<PairedDevice[]> => ipcRenderer.invoke("pair:list"),
+    listMobileInbox: (): Promise<import("../main/mobile-inbox-host").MobileInboxEntry[]> =>
+      ipcRenderer.invoke("pair:listMobileInbox"),
     revoke: (tokenId: string): Promise<void> =>
       ipcRenderer.invoke("pair:revoke", tokenId),
     issue: (deviceLabel: string): Promise<{ token: string; tokenId: string }> =>

@@ -19,6 +19,7 @@ import {
 } from "./comm-transport-service";
 import { registerAccountingIpc } from "./accounting-host";
 import { registerInvoiceFilesIpc } from "./invoice-files-host";
+import { listMobileInbox } from "./mobile-inbox-host";
 import { loadNetworkState, saveNetworkState } from "./network-state-store";
 import {
   initBiscuit,
@@ -276,6 +277,7 @@ if (ownsProfile) app.whenReady().then(async () => {
 
   // pair-server handlers
   ipcMain.handle("pair:list", async () => listDevices());
+  ipcMain.handle("pair:listMobileInbox", async () => listMobileInbox());
   ipcMain.handle("pair:revoke", async (_e, tokenId: string) => revokeDevice(tokenId));
   ipcMain.handle("pair:issue", async (_e, deviceLabel: string) => {
     const root = await loadOrCreateRootKeypair();
