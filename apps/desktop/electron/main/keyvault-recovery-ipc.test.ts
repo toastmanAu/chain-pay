@@ -3,11 +3,13 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-const { handlers, showMessageBox, readText, clear } = vi.hoisted(() => ({
+const { handlers, showMessageBox, readText, clear, writeText, clearRendererClipboard } = vi.hoisted(() => ({
   handlers: new Map<string, (_event: unknown, request?: unknown) => unknown>(),
   showMessageBox: vi.fn(async (_options: { message: string }) => ({ response: 0, checkboxChecked: false })),
   readText: vi.fn(async () => ""),
   clear: vi.fn(),
+  writeText: vi.fn(async (_text: string) => undefined),
+  clearRendererClipboard: vi.fn(async (_script: string, _gesture: boolean) => undefined),
 }));
 
 vi.mock("electron", () => ({
@@ -15,7 +17,7 @@ vi.mock("electron", () => ({
     handlers.set(channel, handler);
   } },
   dialog: { showMessageBox },
-  clipboard: { readText, clear },
+  clipboard: { readText, clear, writeText },
 }));
 
 import * as wasm from "../../../../packages/ckb-keyvault-wasm/pkg/ckb_keyvault_wasm.js";
@@ -28,6 +30,9 @@ beforeEach(() => {
   showMessageBox.mockClear();
   readText.mockReset();
   clear.mockClear();
+  writeText.mockClear();
+  clearRendererClipboard.mockReset();
+  clearRendererClipboard.mockResolvedValue(undefined);
 });
 
 it("shows new recovery words in a native dialog and returns only public vault data", async () => {
@@ -65,17 +70,22 @@ it("imports recovery words from the main-process clipboard and clears it before 
   readText.mockResolvedValue("abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about");
   registerKeyvaultHost({ store, wasm });
   const importWords = handlers.get(KEYVAULT_CHANNELS.import)!;
+  const event = { sender: { executeJavaScript: clearRendererClipboard } };
 
-  await expect(importWords({}, {
+  await expect(importWords(event, {
     password: "DisposableSmoke!2026",
     mnemonic: "renderer must not send words",
   })).rejects.toThrow();
   expect(readText).not.toHaveBeenCalled();
 
-  const result = await importWords({}, { password: "DisposableSmoke!2026" }) as Record<string, unknown>;
+  const result = await importWords(event, { password: "DisposableSmoke!2026" }) as Record<string, unknown>;
 
   expect(Object.keys(result).sort()).toEqual(["id", "lockArgs"]);
   expect(clear).toHaveBeenCalledOnce();
+  expect(writeText).toHaveBeenCalledWith("");
+  expect(clearRendererClipboard).toHaveBeenCalledWith(
+    'navigator.clipboard.writeText("")', true,
+  );
   expect(store.has("main")).toBe(true);
 });
 
@@ -84,11 +94,15 @@ it("clears invalid recovery words before rejecting the import", async () => {
   readText.mockResolvedValue("invalid recovery words");
   registerKeyvaultHost({ store, wasm });
 
-  await expect(handlers.get(KEYVAULT_CHANNELS.import)!({}, {
+  await expect(handlers.get(KEYVAULT_CHANNELS.import)!({ sender: { executeJavaScript: clearRendererClipboard } }, {
     password: "DisposableSmoke!2026",
   })).rejects.toThrow(/invalid BIP39 mnemonic/i);
 
   expect(clear).toHaveBeenCalledOnce();
+  expect(writeText).toHaveBeenCalledWith("");
+  expect(clearRendererClipboard).toHaveBeenCalledWith(
+    'navigator.clipboard.writeText("")', true,
+  );
   expect(store.has("main")).toBe(false);
 });
 
@@ -97,11 +111,30 @@ it("clears the clipboard when reading it fails", async () => {
   readText.mockRejectedValue(new Error("clipboard unavailable"));
   registerKeyvaultHost({ store, wasm });
 
-  await expect(handlers.get(KEYVAULT_CHANNELS.import)!({}, {
+  await expect(handlers.get(KEYVAULT_CHANNELS.import)!({ sender: { executeJavaScript: clearRendererClipboard } }, {
     password: "DisposableSmoke!2026",
   })).rejects.toThrow("clipboard unavailable");
 
   expect(clear).toHaveBeenCalledOnce();
+  expect(writeText).toHaveBeenCalledWith("");
+  expect(clearRendererClipboard).toHaveBeenCalledWith(
+    'navigator.clipboard.writeText("")', true,
+  );
+  expect(store.has("main")).toBe(false);
+});
+
+it("refuses import if the app window cannot clear the external clipboard", async () => {
+  const store = new KeyvaultStore(mkdtempSync(join(tmpdir(), "kv-recovery-")));
+  readText.mockResolvedValue("abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about");
+  clearRendererClipboard.mockRejectedValueOnce(new Error("browser clipboard unavailable"));
+  registerKeyvaultHost({ store, wasm });
+
+  await expect(handlers.get(KEYVAULT_CHANNELS.import)!({ sender: { executeJavaScript: clearRendererClipboard } }, {
+    password: "DisposableSmoke!2026",
+  })).rejects.toThrow(/Could not clear recovery words from the clipboard/);
+
+  expect(clear).toHaveBeenCalledOnce();
+  expect(writeText).toHaveBeenCalledWith("");
   expect(store.has("main")).toBe(false);
 });
 
@@ -110,10 +143,11 @@ it("refuses to replace an existing encrypted vault through create or import", as
   registerKeyvaultHost({ store, wasm });
   const create = handlers.get(KEYVAULT_CHANNELS.create)!;
   const importWords = handlers.get(KEYVAULT_CHANNELS.import)!;
+  const event = { sender: { executeJavaScript: clearRendererClipboard } };
   const original = await create({}, { password: "DisposableSmoke!2026" }) as { lockArgs: string };
 
   await expect(create({}, { password: "DisposableSmoke!2027" })).rejects.toThrow(/already exists/i);
-  await expect(importWords({}, { password: "DisposableSmoke!2027" })).rejects.toThrow(/already exists/i);
+  await expect(importWords(event, { password: "DisposableSmoke!2027" })).rejects.toThrow(/already exists/i);
   expect(showMessageBox).toHaveBeenCalledOnce();
   expect(readText).not.toHaveBeenCalled();
   expect(store.has("main")).toBe(true);
