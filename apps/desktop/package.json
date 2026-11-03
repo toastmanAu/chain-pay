@@ -2,8 +2,10 @@
   "name": "@chain-pay/desktop",
   "version": "0.1.0-phase0",
   "private": true,
+  "license": "GPL-3.0-or-later",
   "type": "module",
   "description": "ChainPay desktop application (Electron + React)",
+  "author": { "name": "toastmanAu", "email": "81925564+toastmanAu@users.noreply.github.com" },
   "homepage": "https://github.com/toastmanAu/chain-pay",
   "main": "./out/main/index.js",
   "scripts": {
@@ -122,6 +124,9 @@
         "deb"
       ],
       "category": "Office"
+    },
+    "deb": {
+      "artifactName": "chainpay-${version}-${arch}.${ext}"
     }
   }
 }

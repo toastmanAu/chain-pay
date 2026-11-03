@@ -37,6 +37,7 @@ import { registerSolanaIpc } from "./solana-host";
 import type { CkbNetwork } from "@/lib/light-client/network-configs";
 import { rendererPortForProfile, startRendererServer } from "./renderer-protocol";
 import { migrateLegacyFileStorage } from "./legacy-storage";
+import { keepSingleInstance } from "./single-instance";
 
 const isDev = !app.isPackaged;
 
@@ -196,7 +197,9 @@ async function createWindow(): Promise<void> {
   }
 }
 
-app.whenReady().then(async () => {
+const ownsProfile = keepSingleInstance(app, () => mainWindow);
+
+if (ownsProfile) app.whenReady().then(async () => {
   applyResponseHeaders();
 
   // Load persisted network selection BEFORE creating the window or any
