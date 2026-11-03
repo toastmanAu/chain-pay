@@ -54,6 +54,7 @@ function cacheBytes(): number {
 export function useDrainQueue(): void {
   const items = useSyncQueue((s) => s.items);
   const pairing = usePairingStore((s) => s.pairing);
+  const hasFreshPending = items.some((item) => item.status === "pending" && item.attempts === 0);
   const queue = useSyncQueue;
   const pairingStore = usePairingStore;
   const running = useRef(false);
@@ -74,7 +75,7 @@ export function useDrainQueue(): void {
   useEffect(() => {
     void tick();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [items.length, pairing?.auth_token]);
+  }, [items.length, hasFreshPending, pairing?.auth_token]);
 
   // Periodic + capacity-driven cache purge.
   useEffect(() => {

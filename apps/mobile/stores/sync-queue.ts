@@ -11,7 +11,7 @@ const storage = createMMKV();
 const KEY = "chainpay.queue.v1";
 
 // Note: "pending-cellular" reserved for v2 CEMP-PQ fallback; v1 never transitions into it.
-export type QueueStatus = "pending" | "syncing" | "synced" | "rejected" | "pending-cellular";
+export type QueueStatus = "review" | "pending" | "syncing" | "synced" | "rejected" | "pending-cellular";
 
 export interface QueueItem {
   id: string;
@@ -36,7 +36,8 @@ interface QueueState {
   nextDrainCandidate: () => QueueItem | undefined;
   removeSynced: (olderThanMs: number) => string[];
   clearRejected: () => string[];
-  applyEdits: (id: string, edits: Record<string, unknown>) => void;
+  queueForSync: (id: string, edits: Record<string, unknown>) => void;
+  discardReview: (id: string) => string | null;
 }
 
 function load(): QueueItem[] {
@@ -53,7 +54,7 @@ export const useSyncQueue = create<QueueState>((set, get) => ({
 
   enqueue: (data) => {
     const id = ulid();
-    const item: QueueItem = { ...data, id, status: "pending", attempts: 0 };
+    const item: QueueItem = { ...data, id, status: "review", attempts: 0 };
     const items = [...get().items, item];
     save(items);
     set({ items });
@@ -119,18 +120,28 @@ export const useSyncQueue = create<QueueState>((set, get) => ({
     return toRemove.map((i) => i.imageRef);
   },
 
-  applyEdits: (id, edits) => {
-    const items = get().items.map((i) =>
-      i.id !== id ? i : {
-        ...i,
+  queueForSync: (id, edits) => {
+    const items = get().items.map((item) =>
+      item.id === id && item.status === "review" ? {
+        ...item,
+        status: "pending" as const,
         extraction: {
-          ...i.extraction,
-          body: { ...i.extraction.body, ...edits },
+          ...item.extraction,
+          body: { ...item.extraction.body, ...edits },
         },
-      },
+      } : item,
     );
     save(items);
     set({ items });
+  },
+
+  discardReview: (id) => {
+    const item = get().items.find((entry) => entry.id === id && entry.status === "review");
+    if (!item) return null;
+    const items = get().items.filter((entry) => entry.id !== id);
+    save(items);
+    set({ items });
+    return item.imageRef;
   },
 }));
 

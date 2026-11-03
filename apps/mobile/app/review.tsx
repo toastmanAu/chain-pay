@@ -3,11 +3,13 @@ import { useLocalSearchParams, router } from "expo-router";
 import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useSyncQueue } from "@/stores/sync-queue";
+import { deleteImagesFromCache } from "@/lib/useDrainQueue";
 
 export default function ReviewScreen() {
   const params = useLocalSearchParams<{ id: string }>();
   const item = useSyncQueue((s) => (params.id ? s.findById(params.id) : undefined));
-  const applyEdits = useSyncQueue((s) => s.applyEdits);
+  const queueForSync = useSyncQueue((s) => s.queueForSync);
+  const discardReview = useSyncQueue((s) => s.discardReview);
 
   const body = item?.extraction.body as { invoice_number?: string; total?: number; currency?: string } | undefined;
   const [invoiceNumber, setInvoiceNumber] = useState(body?.invoice_number ?? "");
@@ -27,11 +29,17 @@ export default function ReviewScreen() {
 
   const onQueue = (): void => {
     const parsedTotal = Number.parseFloat(totalStr);
-    applyEdits(item.id, {
+    queueForSync(item.id, {
       invoice_number: invoiceNumber || undefined,
       total: Number.isFinite(parsedTotal) ? parsedTotal : undefined,
       currency: currency || undefined,
     });
+    router.replace("/");
+  };
+
+  const onDiscard = (): void => {
+    const imageRef = discardReview(item.id);
+    if (imageRef) deleteImagesFromCache([imageRef]);
     router.replace("/");
   };
 
@@ -57,7 +65,7 @@ export default function ReviewScreen() {
         </View>
 
         <View style={styles.actions}>
-          <Pressable onPress={() => router.replace("/")} style={({ pressed }) => [styles.secondary, pressed && styles.pressed]}>
+          <Pressable onPress={onDiscard} style={({ pressed }) => [styles.secondary, pressed && styles.pressed]}>
             <Text style={styles.secondaryLabel}>Discard</Text>
           </Pressable>
           <Pressable onPress={onQueue} style={({ pressed }) => [styles.primary, pressed && styles.pressed]}>
