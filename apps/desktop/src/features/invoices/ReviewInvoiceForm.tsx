@@ -139,7 +139,7 @@ export function ReviewInvoiceForm() {
 
   async function onRetry() {
     if (!invoice) return;
-    const file = await fileFromStorage(invoice.intake.raw_file.storage_uri);
+    const file = await fileFromStorage(invoice.intake.raw_file.storage_uri, invoice.intake.raw_file.mime_type);
     if (!file) return;
     extractionService().enqueue(id ?? "", file);
   }

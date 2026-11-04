@@ -26,15 +26,18 @@ import { useSendConfirmationToAccounting } from "./lib/send/use-send-confirmatio
 import { useSyncStore } from "./stores/sync";
 import { useNetworkConfigStore } from "./stores/network-config";
 import { lightClient } from "./lib/light-client/client";
+import { restorePersistedWatches } from "./lib/light-client/restore-watches";
 import { createCommTransport } from "./lib/comm";
 import { useCommIdentityStore } from "./stores/comm-identity";
 import { usePeerBookStore } from "./stores/peer-book";
 import { useTreasuryStore } from "./stores/treasury";
+import { useSourcesStore } from "./stores/sources";
 import { useIncomingSigsStore } from "./stores/incoming-sigs";
 import { useIncomingPacketsStore } from "./stores/incoming-packets";
 import { usePayrollBatchesStore } from "./stores/payroll-batches";
 import { useCommSendRetry } from "./features/payments/useCommSendRetry";
 import { useBatchConfirmationSync } from "./lib/invoices/use-batch-confirmation-to-invoice";
+import { useMobileInvoiceIntake } from "./lib/invoices/use-mobile-inbox";
 import { useBatchConfirmationToAccounting } from "./lib/accounting/use-batch-confirmation-to-accounting";
 import { useSafeConfirmationToAccounting } from "./lib/accounting/use-safe-confirmation-to-accounting";
 import { useSolanaFinalizationToAccounting } from "./lib/accounting/use-solana-finalization-to-accounting";
@@ -197,6 +200,16 @@ export function App() {
         /* preload may not be loaded in tests */
       }
       await startCkb(network);
+      try {
+        await restorePersistedWatches(
+          lightClient(),
+          network,
+          useSourcesStore.getState().sources,
+          useTreasuryStore.getState().treasuries,
+        );
+      } catch (error) {
+        console.error("Failed to restore CKB watches:", error);
+      }
     })();
   }, [startCkb]);
 
@@ -237,6 +250,7 @@ export function App() {
 
   useCommSendRetry({ packetForBatch, multisigForBatch });
 
+  useMobileInvoiceIntake();
   useBatchConfirmationSync();
   useBatchConfirmationToAccounting();
   useSendConfirmationToAccounting();

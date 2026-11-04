@@ -2,8 +2,11 @@
   "name": "@chain-pay/desktop",
   "version": "0.1.0-phase0",
   "private": true,
+  "license": "GPL-3.0-or-later",
   "type": "module",
   "description": "ChainPay desktop application (Electron + React)",
+  "author": { "name": "toastmanAu", "email": "81925564+toastmanAu@users.noreply.github.com" },
+  "homepage": "https://github.com/toastmanAu/chain-pay",
   "main": "./out/main/index.js",
   "scripts": {
     "dev": "electron-vite dev --watch",
@@ -70,7 +73,7 @@
     "@types/react-dom": "^19.0.0",
     "@vitejs/plugin-react": "^4.3.0",
     "@vitest/coverage-v8": "^4.1.6",
-    "electron": "44.4.5",
+    "electron": "44.10.0",
     "electron-builder": "^25.1.0",
     "electron-vite": "^2.3.0",
     "eslint": "10.8.0",
@@ -121,6 +124,9 @@
         "deb"
       ],
       "category": "Office"
+    },
+    "deb": {
+      "artifactName": "chainpay-${version}-${arch}.${ext}"
     }
   }
 }

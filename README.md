@@ -232,10 +232,11 @@ chain-pay/
 ## Quick start
 
 ```bash
-# clone, install
+# clone, install, then audit the source-build environment
 git clone https://github.com/toastmanAu/chain-pay.git
 cd chain-pay
 npm install
+./scripts/check-deps.sh --with-dev
 
 # launch the desktop app with HMR
 npm run dev:desktop

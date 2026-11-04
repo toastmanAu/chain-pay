@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { mkdtempSync, rmSync, existsSync } from "node:fs";
+import { mkdtempSync, rmSync, existsSync, readdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -34,6 +34,15 @@ describe("invoice-files-host", () => {
     const uri1 = await storeInvoiceFile(bytes, sha256);
     const uri2 = await storeInvoiceFile(bytes, sha256);
     expect(uri1).toBe(uri2);
+  });
+
+  it("publishes one complete file under concurrent writes without temporary leftovers", async () => {
+    const bytes = new Uint8Array([7, 8, 9]);
+    const sha256 = "aabbccdd".repeat(8);
+    const uris = await Promise.all(Array.from({ length: 5 }, () => storeInvoiceFile(bytes, sha256)));
+    expect(new Set(uris).size).toBe(1);
+    expect(Array.from(await readInvoiceFile(uris[0]!))).toEqual([7, 8, 9]);
+    expect(readdirSync(join(tmpRoot, "invoice-pdfs", "aa"))).toEqual([`${sha256}.pdf`]);
   });
 
   it("readInvoiceFile reads back the bytes", async () => {

@@ -290,14 +290,30 @@ export function registerKeyvaultHost(depsIn: Deps): void {
     }
   }
 
-  ipcMain.handle(KEYVAULT_CHANNELS.import, (_e, r: unknown) => withEmptyVault(async () => {
+  ipcMain.handle(KEYVAULT_CHANNELS.import, (event, r: unknown) => withEmptyVault(async () => {
     const { password } = ImportRequest.parse(r);
-    let mnemonic: string;
+    let mnemonic: string | undefined;
+    let readError: unknown;
     try {
       mnemonic = (await clipboard.readText()).trim();
-    } finally {
-      clipboard.clear();
+    } catch (error) {
+      readError = error;
     }
+    clipboard.clear();
+    // On Linux/Wayland, clear() can leave the previous external clipboard
+    // owner active. An empty write takes ownership before import proceeds.
+    await clipboard.writeText("");
+    // Chromium's window clipboard can still expose the previous Wayland
+    // owner after Electron main reports a successful clear. Send only an
+    // empty string to the trusted app window; recovery words stay in main.
+    try {
+      await event.sender.executeJavaScript('navigator.clipboard.writeText("")', true);
+    } catch {
+      throw new Error(
+        "Could not clear recovery words from the clipboard. Focus ChainPay and retry, or clear the clipboard manually.",
+      );
+    }
+    if (readError) throw readError;
     if (!mnemonic) throw new Error("Clipboard has no recovery words");
     if (mnemonic.length > 1_024) throw new Error("Recovery words are too long");
     return importVault({ mnemonic, password }, deps);

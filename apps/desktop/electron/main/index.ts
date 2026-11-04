@@ -19,6 +19,7 @@ import {
 } from "./comm-transport-service";
 import { registerAccountingIpc } from "./accounting-host";
 import { registerInvoiceFilesIpc } from "./invoice-files-host";
+import { listMobileInbox } from "./mobile-inbox-host";
 import { loadNetworkState, saveNetworkState } from "./network-state-store";
 import {
   initBiscuit,
@@ -37,6 +38,7 @@ import { registerSolanaIpc } from "./solana-host";
 import type { CkbNetwork } from "@/lib/light-client/network-configs";
 import { rendererPortForProfile, startRendererServer } from "./renderer-protocol";
 import { migrateLegacyFileStorage } from "./legacy-storage";
+import { keepSingleInstance } from "./single-instance";
 
 const isDev = !app.isPackaged;
 
@@ -196,7 +198,9 @@ async function createWindow(): Promise<void> {
   }
 }
 
-app.whenReady().then(async () => {
+const ownsProfile = keepSingleInstance(app, () => mainWindow);
+
+if (ownsProfile) app.whenReady().then(async () => {
   applyResponseHeaders();
 
   // Load persisted network selection BEFORE creating the window or any
@@ -273,6 +277,7 @@ app.whenReady().then(async () => {
 
   // pair-server handlers
   ipcMain.handle("pair:list", async () => listDevices());
+  ipcMain.handle("pair:listMobileInbox", async () => listMobileInbox());
   ipcMain.handle("pair:revoke", async (_e, tokenId: string) => revokeDevice(tokenId));
   ipcMain.handle("pair:issue", async (_e, deviceLabel: string) => {
     const root = await loadOrCreateRootKeypair();

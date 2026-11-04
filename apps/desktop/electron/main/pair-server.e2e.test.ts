@@ -17,6 +17,8 @@ const { initBiscuit, generateRootKeypair, issueCaptureV1Token } = await import(
 );
 const { _setPairStoreFileForTests, addDevice } = await import("./pair-store");
 const { startPairServer, stopPairServer } = await import("./pair-server");
+const { __resetMobileInboxForTest, listMobileInbox } = await import("./mobile-inbox-host");
+const { __resetForTest: resetInvoiceFilesForTest } = await import("./invoice-files-host");
 const { _setTlsCertFileForTests, _resetTlsCertCacheForTests, loadOrCreateTlsCert } = await import(
   "./tls-cert-store"
 );
@@ -29,6 +31,8 @@ let dispatcher: Agent;
 beforeAll(async () => {
   await initBiscuit();
   resetSafeStorageForTests();
+  __resetMobileInboxForTest(tmpDir);
+  resetInvoiceFilesForTest(tmpDir);
   _setPairStoreFileForTests(path.join(tmpDir, "paired.enc"));
 
   const root = generateRootKeypair();
@@ -111,6 +115,7 @@ describe("pair-server end-to-end", () => {
       expect(res.status).toBe(201);
     }
     expect(rendererSend).toHaveBeenCalledTimes(3);
+    expect(await listMobileInbox()).toHaveLength(3);
   });
 
   it("rotates cert + verifies old dispatcher rejected + new dispatcher works", async () => {

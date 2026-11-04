@@ -24,7 +24,7 @@ export interface StoredInvoiceRecord extends InvoiceRecord {
 
 interface InvoicesStore {
   invoices: StoredInvoiceRecord[];
-  addInvoice: (i: InvoiceRecord) => void;
+  addInvoice: (i: InvoiceRecord, extractionStatus?: ExtractionStatus) => void;
   updateInvoice: (
     id: string,
     patch: Partial<Omit<StoredInvoiceRecord, "id" | "createdAt" | "schema_version">>,
@@ -88,11 +88,11 @@ export const useInvoicesStore = create<InvoicesStore>()(
   persist(
     (set, get) => ({
       invoices: [],
-      addInvoice: (i) =>
+      addInvoice: (i, extractionStatus = "pending") =>
         set((s) =>
           s.invoices.some((x) => x.id === i.id)
             ? s
-            : { invoices: [...s.invoices, { ...i, extractionStatus: "pending" as const }] },
+            : { invoices: [...s.invoices, { ...i, extractionStatus }] },
         ),
       updateInvoice: (id, patch) =>
         set((s) => ({

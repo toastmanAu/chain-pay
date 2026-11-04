@@ -10,16 +10,17 @@ const sample = {
 beforeEach(() => _resetQueueForTests());
 
 describe("sync-queue", () => {
-  it("enqueue adds a pending item", () => {
+  it("enqueue adds an item held for review", () => {
     const id = useSyncQueue.getState().enqueue(sample);
     const items = useSyncQueue.getState().items;
     expect(items).toHaveLength(1);
     expect(items[0]!.id).toBe(id);
-    expect(items[0]!.status).toBe("pending");
+    expect(items[0]!.status).toBe("review");
   });
 
   it("markSyncing then markSynced transitions correctly", () => {
     const id = useSyncQueue.getState().enqueue(sample);
+    useSyncQueue.getState().queueForSync(id, {});
     useSyncQueue.getState().markSyncing(id);
     expect(useSyncQueue.getState().findById(id)?.status).toBe("syncing");
     useSyncQueue.getState().markSynced(id, "inv_xyz");
@@ -29,6 +30,7 @@ describe("sync-queue", () => {
 
   it("markFailed bumps attempts and returns to pending", () => {
     const id = useSyncQueue.getState().enqueue(sample);
+    useSyncQueue.getState().queueForSync(id, {});
     useSyncQueue.getState().markFailed(id, "timeout");
     const item = useSyncQueue.getState().findById(id)!;
     expect(item.attempts).toBe(1);
@@ -38,6 +40,7 @@ describe("sync-queue", () => {
 
   it("v1 stays 'pending' through repeated failures (no cellular escalation)", () => {
     const id = useSyncQueue.getState().enqueue(sample);
+    useSyncQueue.getState().queueForSync(id, {});
     for (let i = 0; i < 10; i++) useSyncQueue.getState().markFailed(id, "5xx");
     expect(useSyncQueue.getState().findById(id)?.status).toBe("pending");
     expect(useSyncQueue.getState().findById(id)?.attempts).toBe(10);
@@ -55,7 +58,10 @@ describe("sync-queue", () => {
 
   it("nextDrainCandidate returns oldest pending", () => {
     const a = useSyncQueue.getState().enqueue(sample);
-    useSyncQueue.getState().enqueue({ ...sample, capturedAt: 1717286400001 });
+    const b = useSyncQueue.getState().enqueue({ ...sample, capturedAt: 1717286400001 });
+    useSyncQueue.getState().queueForSync(b, {});
+    expect(useSyncQueue.getState().nextDrainCandidate()?.id).toBe(b);
+    useSyncQueue.getState().queueForSync(a, {});
     expect(useSyncQueue.getState().nextDrainCandidate()?.id).toBe(a);
   });
 
@@ -90,16 +96,34 @@ describe("sync-queue", () => {
     expect(useSyncQueue.getState().items).toHaveLength(1);
   });
 
-  it("applyEdits merges fields into extraction.body", () => {
+  it("queueForSync merges edits into extraction.body", () => {
     const id = useSyncQueue.getState().enqueue(sample);
-    useSyncQueue.getState().applyEdits(id, { invoice_number: "EDITED-001", total: 99 });
+    useSyncQueue.getState().queueForSync(id, { invoice_number: "EDITED-001", total: 99 });
     const item = useSyncQueue.getState().findById(id)!;
     expect(item.extraction.body.invoice_number).toBe("EDITED-001");
     expect(item.extraction.body.total).toBe(99);
   });
 
+  it("holds a capture for review until edited and explicitly queued", () => {
+    const id = useSyncQueue.getState().enqueue(sample);
+    expect(useSyncQueue.getState().findById(id)?.status).toBe("review");
+    expect(useSyncQueue.getState().nextDrainCandidate()).toBeUndefined();
+    useSyncQueue.getState().queueForSync(id, { invoice_number: "TEST-001" });
+    expect(useSyncQueue.getState().findById(id)?.status).toBe("pending");
+    expect(useSyncQueue.getState().findById(id)?.extraction.body.invoice_number).toBe("TEST-001");
+    expect(useSyncQueue.getState().nextDrainCandidate()?.id).toBe(id);
+  });
+
+  it("discards an unqueued review capture", () => {
+    const id = useSyncQueue.getState().enqueue(sample);
+    expect(useSyncQueue.getState().discardReview(id)).toBe("img-1.jpg");
+    expect(useSyncQueue.getState().findById(id)).toBeUndefined();
+    expect(useSyncQueue.getState().nextDrainCandidate()).toBeUndefined();
+  });
+
   it("markSynced clears stale lastError but keeps attempts", () => {
     const id = useSyncQueue.getState().enqueue(sample);
+    useSyncQueue.getState().queueForSync(id, {});
     useSyncQueue.getState().markFailed(id, "Failed to connect");
     useSyncQueue.getState().markSynced(id, "inv_ok");
     const item = useSyncQueue.getState().findById(id)!;

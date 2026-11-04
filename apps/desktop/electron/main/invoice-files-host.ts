@@ -1,4 +1,5 @@
-import { mkdir, readFile, unlink, writeFile, access } from "node:fs/promises";
+import { mkdir, readFile, unlink, writeFile, access, link } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
 import { join, resolve, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { ipcMain, app } from "electron";
@@ -34,7 +35,19 @@ export async function storeInvoiceFile(bytes: Uint8Array, sha256: string): Promi
   const target = pathFor(sha256);
   if (!(await exists(target))) {
     await mkdir(join(root(), sha256.slice(0, 2)), { recursive: true });
-    await writeFile(target, bytes);
+    const temporary = `${target}.${randomUUID()}.tmp`;
+    try {
+      await writeFile(temporary, bytes, { mode: 0o600, flag: "wx" });
+      try {
+        await link(temporary, target);
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+      }
+    } finally {
+      await unlink(temporary).catch((error: unknown) => {
+        if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+      });
+    }
   }
   return pathToFileURL(target).toString();
 }

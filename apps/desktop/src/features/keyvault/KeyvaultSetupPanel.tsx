@@ -301,7 +301,7 @@ export function KeyvaultSetupPanel() {
       <div className="space-y-4">
         <p className="text-sm text-fg-muted">
           Copy your 12- or 24-word recovery phrase, then choose a password. ChainPay reads
-          and clears the current clipboard in the Electron main process when you import.
+          and clears the current clipboard before importing the wallet.
           Clipboard history maintained by your operating system may retain an earlier copy.
         </p>
         <PasswordField

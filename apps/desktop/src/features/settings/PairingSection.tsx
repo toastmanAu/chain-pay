@@ -27,7 +27,11 @@ export function PairingSection({
 
   const refresh = useCallback(async () => {
     try {
-      setDevices(await window.chainpay.pair.list());
+      const records = await window.chainpay.pair.list();
+      const now = Date.now();
+      setDevices(records.filter(
+        (device) => device.revokedAt === undefined && device.expiresAt > now,
+      ));
     } catch (e) {
       setErrorMsg(e instanceof Error ? e.message : "Failed to load paired devices");
     }
