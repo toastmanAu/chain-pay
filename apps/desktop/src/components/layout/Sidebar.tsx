@@ -24,7 +24,7 @@ export function Sidebar() {
     <aside className="flex w-60 shrink-0 flex-col border-r border-surface-hi bg-surface">
       <div className="border-b border-surface-hi px-5 py-4">
         <div className="text-lg font-semibold tracking-tight">ChainPay</div>
-        <div className="text-xs text-fg-muted">v0.1.0 · Phase 1</div>
+        <div className="text-xs text-fg-muted">v0.1.0 · preview</div>
       </div>
       <nav className="flex-1 space-y-0.5 px-3 py-4">
         {items.map(({ to, icon: Icon, label }) => (
