@@ -3,7 +3,7 @@ import { Tile } from "@/components/ui/Tile";
 import { formatBlockNumber } from "@/lib/format/block";
 import { secondsAgo } from "@/lib/format/time";
 
-type PhaseStatus = "done" | "in-progress" | "next" | "blocked";
+type PhaseStatus = "verified" | "live-check-open";
 
 interface PhaseEntry {
   id: string;
@@ -18,46 +18,76 @@ const PHASES: ReadonlyArray<PhaseEntry> = [
     id: "0",
     title: "Phase 0 — Scaffold",
     summary: "Monorepo, ChainAdapter / SignerTransport interfaces, DocType schemas",
-    status: "done",
+    status: "verified",
   },
   {
     id: "1",
     title: "Phase 1 — Light client",
-    summary: "Embedded CKB light client, WASM in renderer, mainnet-verified",
-    status: "done",
+    summary: "Embedded CKB light client, WASM in renderer, verified on mainnet",
+    status: "verified",
   },
   {
     id: "2",
     title: "Phase 2 — Multisig treasury",
     summary: "2-of-3 secp256k1 multisig: encode, derive, build, sign, merge, broadcast",
-    status: "done",
+    status: "verified",
     note: "first tx 0x4e66d1…0e92, block 21,161,590",
   },
   {
     id: "2.5",
     title: "Phase 2.5 — Payroll batches",
     summary: "Payees CRUD, CoinGecko FX snapshot, batch state machine, draft persistence",
-    status: "done",
+    status: "verified",
     note: "first batch tx 0x69ebf7…3b4e1, block 21,176,012 · 3 payees + change",
   },
   {
     id: "2.7",
     title: "Phase 2.7 — CEMP-PQ",
-    summary: "Post-quantum encrypted signature relay via ML-DSA + ML-KEM + Profile Cells",
-    status: "in-progress",
-    note: "upstream ready (profile 0xf316f3…, message 0x8ce77e35…) · ChainPay integration next",
+    summary: "Encrypted signature relay via ML-DSA, ML-KEM, Profile Cells, and acknowledgments",
+    status: "verified",
+    note: "CKB testnet A↔B roundtrip confirmed",
+  },
+  {
+    id: "invoices",
+    title: "Invoice intake",
+    summary: "Manual entry, OCR extraction, bundling, and approval workflow implemented",
+    status: "live-check-open",
+    note: "OCR on real documents and mobile invoice arrival still need physical checks",
   },
   {
     id: "3",
     title: "Phase 3 — EVM treasury",
-    summary: "Safe (Gnosis) multisig + MetaMask / WalletConnect signer transports",
-    status: "next",
+    summary: "Safe monitoring, approvals, execution, and WalletConnect interchange implemented",
+    status: "live-check-open",
+    note: "Funded Sepolia execution with two Safe owners remains to be verified",
   },
   {
     id: "4",
     title: "Phase 4 — Accounting bridge",
-    summary: "Frappe / ERPNext journal entries, compliance export",
-    status: "next",
+    summary: "ERPNext journal posting and compliance export implemented across four chains",
+    status: "live-check-open",
+    note: "CKB and Bitcoin posting verified live; Safe and Solana gates remain",
+  },
+  {
+    id: "5-btc",
+    title: "Phase 5 — Bitcoin",
+    summary: "Testnet4 watch, external signing review, broadcast, and accounting",
+    status: "verified",
+    note: "Confirmed payment and idempotent ERPNext journal verified live",
+  },
+  {
+    id: "5-sol",
+    title: "Phase 5 — Solana",
+    summary: "Watch, durable-nonce payment, and finalized accounting implemented",
+    status: "live-check-open",
+    note: "Funded devnet signer and nonce setup remain to be tested",
+  },
+  {
+    id: "mobile",
+    title: "Mobile companion",
+    summary: "Android pairing, invoice capture, OCR, and queued sync implemented",
+    status: "live-check-open",
+    note: "A53 pairing tested; arrival in desktop Invoices remains open",
   },
 ];
 
@@ -92,7 +122,8 @@ export function Dashboard() {
         <div className="flex items-baseline justify-between">
           <h2 className="text-sm font-medium text-fg-muted">Build status</h2>
           <span className="text-xs text-fg-muted">
-            {PHASES.filter((p) => p.status === "done").length} of {PHASES.length} phases shipped
+            {PHASES.filter((p) => p.status === "verified").length} verified ·{" "}
+            {PHASES.filter((p) => p.status === "live-check-open").length} live checks open
           </span>
         </div>
         <ol className="mt-4 space-y-3">
@@ -123,7 +154,7 @@ function PhaseRow({ phase }: PhaseRowProps) {
       <div className="min-w-0 flex-1">
         <div className="flex items-baseline justify-between gap-2">
           <span className={`text-sm font-medium ${styles.title}`}>{phase.title}</span>
-          <span className={`text-xs uppercase tracking-wide ${styles.badge}`}>{styles.label}</span>
+          <span className={`shrink-0 whitespace-nowrap text-xs uppercase tracking-wide ${styles.badge}`}>{styles.label}</span>
         </div>
         <p className="mt-0.5 text-xs text-fg-muted">{phase.summary}</p>
         {phase.note ? <p className={`mt-1 text-xs ${styles.note}`}>{phase.note}</p> : null}
@@ -144,41 +175,23 @@ const PHASE_STATUS_STYLES: Record<
     note: string;
   }
 > = {
-  done: {
+  verified: {
     glyph: "✓",
-    label: "shipped",
+    label: "verified",
     row: "border-surface-hi/60 bg-surface/40",
     pip: "bg-accent/15 text-accent",
     title: "text-fg",
     badge: "text-accent",
     note: "text-fg-muted",
   },
-  "in-progress": {
+  "live-check-open": {
     glyph: "→",
-    label: "in progress",
+    label: "live check open",
     row: "border-warn/50 bg-warn/5",
     pip: "bg-warn/20 text-warn",
     title: "text-fg",
     badge: "text-warn",
     note: "text-warn",
-  },
-  next: {
-    glyph: "○",
-    label: "next up",
-    row: "border-surface-hi/60 bg-surface/20",
-    pip: "bg-surface-hi/40 text-fg-muted",
-    title: "text-fg",
-    badge: "text-fg-muted",
-    note: "text-fg-muted",
-  },
-  blocked: {
-    glyph: "!",
-    label: "blocked",
-    row: "border-danger/40 bg-danger/5",
-    pip: "bg-danger/20 text-danger",
-    title: "text-fg",
-    badge: "text-danger",
-    note: "text-danger",
   },
 };
 
